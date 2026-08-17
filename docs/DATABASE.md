@@ -1,4 +1,4 @@
-# Database — Milestone 04
+# Database — Milestone 05
 
 Covers every model group that exists so far: the Milestone 02 auth/audit
 core, the Milestone 03 menu data layer, and this milestone's cart/order
@@ -28,7 +28,7 @@ Category ──1:N── MenuItem ──M:N── Ingredient
 | Table | Purpose | Added |
 | --- | --- | --- |
 | `users` | Accounts, roles | M02 |
-| `audit_logs` | Security audit trail | M02 (extended M03, M04) |
+| `audit_logs` | Security audit trail | M02 (extended M03, M04, M05) |
 | `categories` | Menu categories | M03 |
 | `menu_items` | Menu items | M03 |
 | `ingredients` | Ingredient names | M03 |
@@ -232,10 +232,16 @@ invariant rather than one exercised by a test today.
 `enum_column()` helper as every other enumerated column (see "Allow-listed
 enum columns" above), holding `OrderStatus`'s full six-value restaurant
 lifecycle (`pending`, `confirmed`, `preparing`, `ready`, `completed`,
-`cancelled`) even though this milestone's checkout only ever writes
-`pending` and no route lets a customer change it. This is deliberate: the
-column is correct today so Milestone 05's staff status-management feature
-is a new endpoint, not a schema change.
+`cancelled`). Checkout writes only `pending`; M05's staff endpoint moves it
+along the workflow. That forward planning paid off exactly as intended --
+M05 added staff status management with **no change to `orders` at all**,
+only a widening of the unrelated `audit_logs` event allow-list.
+
+Which transitions are legal is enforced in `app/services/orders.py`
+(`ALLOWED_STATUS_TRANSITIONS`), not by the database. The `CHECK` constraint
+guarantees the column only ever holds a *known* status; it deliberately
+does not encode the workflow, since a `CHECK` cannot compare against the
+row's previous value. The application is the only writer of this column.
 
 **`subtotal`/`total`**: both `Numeric(10, 2)` -> `Decimal`, same
 never-`float` rule as `menu_items.price`. `total` equals `subtotal` in this
@@ -330,6 +336,35 @@ is real and the other three are not -- autogenerate's output alone cannot
 tell the two apart, only knowing which enums actually changed can. Verified
 with the same empty → upgrade → downgrade → re-upgrade round-trip against a
 scratch SQLite database; MySQL verification is still pending (see below).
+
+**M05**: `migrations/versions/38297b707b89_widen_audit_event_allow_list_for_order_.py`
+(`down_revision = d8f3bfd0e2a9`) widens `ck_audit_logs_event_type` once more,
+for `order_status_changed` / `order_status_change_rejected`. **No table
+changed** — staff order management needed no schema change beyond the audit
+vocabulary, because `orders.status` already carried the full lifecycle.
+
+Written with `flask db revision` (no `--autogenerate`) deliberately: as
+recorded above, autogenerate reports this constraint as "changed" on every
+run whether or not it has, so its output cannot distinguish a real widening
+from a false positive. Its `downgrade()` deletes any `order_status_*` audit
+rows before narrowing the constraint — those rows cannot be represented
+under the older allow-list, and failing the downgrade silently would be
+worse than dropping audit history the schema no longer models.
+
+Verified: empty → all four revisions → downgrade one → re-upgrade →
+downgrade to base → re-upgrade, all clean against scratch SQLite, plus the
+automated checks below.
+
+**Migrations are now covered by the test suite** (`tests/test_migrations.py`,
+added in M05 to close the gap that produced the M04 bug). Four tests run the
+real Alembic chain against a temporary on-disk SQLite database and assert
+that (1) it runs from empty, (2) the resulting schema — columns, foreign
+keys, indexes and CHECK constraints — matches what `db.create_all()` builds
+from the models, (3) every `AuditEvent` member satisfies the migrated
+`ck_audit_logs_event_type`, and (4) downgrade-to-base then re-upgrade
+reproduces the identical schema. Test (3) was confirmed to actually fail
+when an un-migrated enum member is introduced, rather than passing
+vacuously.
 
 ---
 

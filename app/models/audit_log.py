@@ -46,6 +46,12 @@ class AuditEvent(str, enum.Enum):
     ORDER_CREATED = "order_created"
     ORDER_CREATION_FAILED = "order_creation_failed"
 
+    # Staff order management. user_id is the acting staff/admin member, not
+    # the customer who owns the order; the order id and the from/to statuses
+    # live in metadata_json (see app/services/orders.py).
+    ORDER_STATUS_CHANGED = "order_status_changed"
+    ORDER_STATUS_CHANGE_REJECTED = "order_status_change_rejected"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

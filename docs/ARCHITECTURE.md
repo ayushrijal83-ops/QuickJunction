@@ -1,9 +1,10 @@
-# Architecture — Milestone 04
+# Architecture — Milestone 05
 
 Status: foundation (M01), auth/authorization/CSRF/audit core (M02), the
-menu data layer and menu-management surface (M03), plus cart, checkout,
-order placement, and order history (M04). No payment gateway,
-recommendation engine, or AI feature exists yet.
+menu data layer and menu-management surface (M03), cart, checkout, order
+placement, and order history (M04), plus staff order management and the
+status workflow (M05). No payment gateway, recommendation engine, or AI
+feature exists yet.
 
 ## Shape
 
@@ -217,10 +218,62 @@ before anything is written, or rolls back a partially-flushed transaction --
 see docs/SECURITY.md for the full trust-boundary writeup.
 
 `OrderStatus` already includes the full restaurant lifecycle (`pending`,
-`confirmed`, `preparing`, `ready`, `completed`, `cancelled`) even though
-this milestone only ever writes `pending` and exposes no status-change
-route -- Milestone 05's staff status management is a new endpoint on an
-already-correct column, not a schema change.
+`confirmed`, `preparing`, `ready`, `completed`, `cancelled`). M04 only ever
+wrote `pending`; M05 added the status-change endpoint on top of that
+already-correct column, with no schema change to `orders` -- see below.
+
+## Staff order management (M05)
+
+```
+app/routes/staff_orders.py   GET  /staff/orders            queue
+                             GET  /staff/orders/<id>       detail
+                             POST /staff/orders/<id>/status  transition
+                              -- every route @require_role(STAFF, ADMIN),
+                                 the same decorator the admin menu routes
+                                 use. ADMIN shares this interface rather
+                                 than getting a second one.
+                              │
+app/services/orders.py       ALLOWED_STATUS_TRANSITIONS / is_valid_transition
+                              / allowed_next_statuses / list_orders_for_staff
+                              / get_order_for_staff / update_order_status
+                              / coerce_status
+```
+
+The status workflow is one dict, an explicit allow-list:
+
+```
+PENDING   -> CONFIRMED | CANCELLED
+CONFIRMED -> PREPARING | CANCELLED
+PREPARING -> READY     | CANCELLED
+READY     -> COMPLETED
+COMPLETED -> (terminal)
+CANCELLED -> (terminal)
+```
+
+Anything absent from that table is rejected, which covers every backwards
+step (`COMPLETED -> PREPARING`), every skip (`PENDING -> COMPLETED`), and a
+same-status no-op. Cancellation is deliberately minimal: it is reachable
+from the three pre-`READY` states and does nothing beyond setting the
+status -- no refund, restock, or notification logic exists, and none was
+built.
+
+`allowed_next_statuses()` drives which buttons the detail template renders,
+but that is presentation only: `update_order_status()` re-validates the
+transition against the order's *real* current status on every POST, so a
+stale page, a hand-crafted form, or a replayed request cannot produce a
+transition the table forbids.
+
+**Two distinct authorization models now coexist, on purpose.** Customer
+order routes filter by `user_id` inside the query
+(`get_order_for_user`) because ownership *is* the authorization. Staff
+routes deliberately do not filter -- `get_order_for_staff` fetches any
+order by primary key, because seeing every order is the job. The role
+check in the decorator is what separates them, and it reads the role from
+the freshly-loaded `User` row, never from the request.
+
+A status change never touches money: it writes one column. Historical
+prices stay in the `OrderItem` snapshots written at checkout and are never
+recalculated from the current menu.
 
 ## HTTP surface
 
@@ -256,6 +309,10 @@ GET  /checkout                        ->  200, login required
 POST /checkout                        ->  302 → /orders/<id> on success, CSRF-protected, login required
 GET  /orders                          ->  200  current user's own orders only, login required
 GET  /orders/<id>                     ->  200 or 404 (ownership-checked, IDOR-safe), login required
+
+GET  /staff/orders                    ->  200, STAFF or ADMIN (401 anonymous, 403 customer)
+GET  /staff/orders/<id>               ->  200 or 404, STAFF or ADMIN
+POST /staff/orders/<id>/status        ->  302, STAFF or ADMIN, CSRF-protected, transition-validated
 ```
 
 `/health` still reports process liveness only — no version, no environment,
@@ -288,9 +345,8 @@ would have to be deleted later:
 - Payment gateway / online card processing -- explicitly out of scope for
   M04. `Order.status` starts and stays `pending`; no route accepts a
   payment method or a card detail anywhere in this codebase.
-- Staff order-status management UI -- `OrderStatus` already has the full
-  lifecycle (see the cart/checkout section above); only the staff-facing
-  update route is deferred to M05.
+- Order cancellation beyond the minimal status transition -- no refund,
+  restock, or customer-initiated cancellation exists.
 
 Because services never import `flask.request`, all of the above stay
 callable from a script, a scheduled job, or a test.

@@ -126,3 +126,12 @@ class ClearCartForm(FlaskForm):
 
 class CheckoutForm(FlaskForm):
     submit = SubmitField("Place order")
+
+
+class OrderStatusForm(FlaskForm):
+    """Carries only the target status. The *current* status is read from the
+    database row, never from the form -- so a stale or forged page cannot
+    talk the server into a transition the real row does not permit."""
+
+    status = StringField(validators=[DataRequired(), Length(max=16)])
+    submit = SubmitField("Update status")

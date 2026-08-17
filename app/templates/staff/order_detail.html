@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Order #{{ order.id }} - Quick Junction Staff</title>
+</head>
+<body>
+  <p><a href="{{ url_for('staff_orders.order_list') }}">&larr; Order queue</a></p>
+  <h1>Order #{{ order.id }}</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  <p>Customer: {{ order.customer.username }}</p>
+  <p>Placed: {{ order.created_at }}</p>
+  <p>Status: <strong>{{ order.status.value }}</strong></p>
+
+  {# Snapshot values written at checkout -- never recalculated from the
+     current menu price. #}
+  <table border="1" cellpadding="4">
+    <tr><th>Item</th><th>Unit price</th><th>Qty</th><th>Line total</th></tr>
+    {% for item in order.items %}
+      <tr>
+        <td>{{ item.item_name_snapshot }}</td>
+        <td>{{ item.unit_price_snapshot }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>{{ item.line_total }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+
+  <p>Subtotal: {{ order.subtotal }}</p>
+  <p>Total: {{ order.total }}</p>
+
+  {% if next_statuses %}
+    <h2>Update status</h2>
+    {# One button per currently-legal transition. This is UI convenience
+       only: app/services/orders.py re-validates the transition against the
+       order's real status on every POST. #}
+    {% for status in next_statuses %}
+      <form method="post" action="{{ url_for('staff_orders.order_status_update', order_id=order.id) }}" style="display:inline">
+        {{ form.csrf_token }}
+        <input type="hidden" name="status" value="{{ status.value }}">
+        <button type="submit">Mark {{ status.value }}</button>
+      </form>
+    {% endfor %}
+  {% else %}
+    <p>This order is {{ order.status.value }} and can no longer change.</p>
+  {% endif %}
+</body>
+</html>

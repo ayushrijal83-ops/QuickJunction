@@ -1,10 +1,11 @@
-# Security — Milestone 04 baseline
+# Security — Milestone 05 baseline
 
 Scope: foundation (M01), auth/authorization/CSRF/audit core (M02), the menu
-data layer and menu-management surface (M03), plus cart, checkout, order
-placement, and order history (M04). No payment gateway exists yet. This
-document records what is in place, **why**, and what must be added before
-Quick Junction handles real payments.
+data layer and menu-management surface (M03), cart, checkout, order
+placement, and order history (M04), plus staff order management and the
+status workflow (M05). No payment gateway exists yet. This document records
+what is in place, **why**, and what must be added before Quick Junction
+handles real payments.
 
 ---
 
@@ -394,6 +395,84 @@ cancellation, and no staff-facing status change. See
 
 ---
 
+## 10a. Staff order management and the status workflow (M05)
+
+**Authorization is one decorator, applied to every route.** All three staff
+endpoints (`GET /staff/orders`, `GET /staff/orders/<id>`,
+`POST /staff/orders/<id>/status`) carry
+`@require_role(Role.STAFF, Role.ADMIN)` — the same mechanism the admin menu
+routes have used since M03, reading the role from the `User` row re-loaded
+from the database on every request. An anonymous request gets 401, a
+CUSTOMER gets 403, and neither reaches the view body. ADMIN reuses the
+staff interface and service functions rather than getting a second
+implementation to keep in sync.
+
+Nothing in this feature consults a client-supplied role. There is no header,
+hidden field, cookie value, or template flag that influences the decision —
+`tests/test_staff_orders.py::test_12` sends `X-Role: staff`,
+`X-User-Role: admin`, `Role: admin` plus `role`/`is_staff`/`user_role` form
+fields as a CUSTOMER and confirms a 403 with the order unchanged, and the
+same forgery was re-run against the live server during browser testing. The
+"Order queue (staff)" link on `/account/` is hidden from customers for
+tidiness only; hiding it is not the control.
+
+**Two authorization models, deliberately different.** Customer order routes
+enforce ownership *inside the query* (`get_order_for_user`, §10) because
+ownership is the authorization. Staff routes deliberately do **not** filter
+by user — `get_order_for_staff` fetches any order by primary key, since
+seeing every order is the job — and the role check is what gates them.
+Mixing these up in either direction is the obvious way to introduce a bug
+here, so they are separate functions with separate names rather than one
+function with a flag. Customer-side IDOR protection is unaffected by M05:
+`test_13` re-confirms a customer still gets 404 for another customer's
+order and 403 for the staff route to it.
+
+**The status workflow is a server-side allow-list**
+(`ALLOWED_STATUS_TRANSITIONS` in `app/services/orders.py`):
+
+```
+PENDING -> CONFIRMED|CANCELLED   CONFIRMED -> PREPARING|CANCELLED
+PREPARING -> READY|CANCELLED     READY -> COMPLETED
+COMPLETED -> (none)              CANCELLED -> (none)
+```
+
+Anything not in the table is refused: backwards moves
+(`COMPLETED -> PREPARING`), skips (`PENDING -> COMPLETED`), same-status
+no-ops, and any string outside the enum (`coerce_status` rejects it before
+the transition check ever runs). Both terminal states map to an empty set,
+so a finished or cancelled order can never move again.
+
+**The UI is not the control.** The detail template renders only the
+currently-legal buttons, but `update_order_status()` re-validates against
+the order's real current status on every POST — a stale page, a
+hand-crafted form, or a replayed request cannot produce a forbidden
+transition. Verified live: a forged `COMPLETED -> PREPARING` POST carrying a
+valid CSRF token was rejected and the order stayed `completed`.
+
+**A status change never touches money.** It writes one column. The
+`OrderItem` price snapshots from checkout are never recalculated from the
+current menu — `test_15` repriced the live menu item to 999.00, walked the
+order through all four transitions, and confirmed every snapshot, line
+total, subtotal and total was unchanged.
+
+**Customers can see their own status and change nothing.** `/orders` and
+`/orders/<id>` show the current status (both re-verified in the browser
+after a staff-driven change). The staff endpoint is the only status-change
+route in the application and it is role-gated; no customer-facing status
+route exists at all (`test_8` confirms 403 on the staff route and 404/405
+on the plausible customer-side URLs).
+
+**CSRF** protects the status endpoint like every other state-changing form
+(`OrderStatusForm`, checked by `CSRFProtect` before the view runs).
+Verified live with an authenticated ADMIN session: both a missing token and
+a forged token returned 400 with the order unchanged.
+
+**Errors disclose nothing.** `test_17` forces the queue to raise and
+asserts the response is the generic JSON 500 with no exception name,
+message, or traceback; a missing order id is a plain 404 (`test_18`).
+
+---
+
 ## 11. Audit logging
 
 `app/models/audit_log.py` (`AuditLog`, `AuditEvent`) +
@@ -403,7 +482,8 @@ cancellation, and no staff-facing status change. See
 `login_rate_limited`, `logout` (M02); `category_created`,
 `category_updated`, `category_deactivated`, `menu_item_created`,
 `menu_item_updated`, `menu_item_availability_changed`,
-`ingredient_changed` (M03); `order_created`, `order_creation_failed` (M04).
+`ingredient_changed` (M03); `order_created`, `order_creation_failed` (M04);
+`order_status_changed`, `order_status_change_rejected` (M05).
 
 **`user_id` means "actor" for the M03/M04 events**, not "subject" — it is
 the id of the admin who performed a menu-management action, or the
@@ -425,6 +505,23 @@ don't need duplicating into the audit trail. `tests/test_orders.py` test
 `metadata_json`; test 25 asserts a checkout failure (item deactivated
 after being added to the cart) produces exactly one `order_creation_failed`
 row.
+
+**Staff status events (M05):** `order_status_changed` records
+`{"order_id", "from", "to"}` with `success=True`; `order_status_change_rejected`
+records `{"order_id", "from", "attempted"}` with `success=False`.
+**`user_id` is the acting staff/admin member, not the customer who owns the
+order** — the audit trail answers "who moved this order", which is the
+question that matters for a status change. Rejected attempts are logged
+deliberately: a repeated attempt to force an order backwards is exactly the
+pattern worth being able to see. The `attempted` value is client-supplied
+and is truncated to 32 characters before storage.
+`tests/test_staff_orders.py` tests 14 and 14b assert both row types, their
+actor, their success flag, and that no credential material appears in
+either; test 16 confirms a *denied* (403) attempt creates no
+`order_status_changed` row at all. Confirmed independently by reading
+`logs/security.log` and the `audit_logs` table after the browser
+walkthrough: four changes and one rejection, with correct actor and
+from/to values.
 
 **Columns, deliberately narrow:** `event_type`, `user_id` (nullable — a
 failed login for a username that doesn't exist names no account),
@@ -547,10 +644,10 @@ repository. See the project `README.md` for the current rule set.
 
 ## 17. Not yet implemented — required before production
 
-Ranked by how much damage the absence causes. Items completed this
-milestone (authentication, authorization, CSRF, session fixation
-protection, an initial rate limiter, and — as of M04 — order audit
-logging) are removed from this list.
+Ranked by how much damage the absence causes. Items completed in earlier
+milestones (authentication, authorization, CSRF, session fixation
+protection, an initial rate limiter, order audit logging in M04, and staff
+order-status management in M05) are removed from this list.
 
 | # | Item | Needed by |
 | --- | --- | --- |
@@ -568,11 +665,11 @@ logging) are removed from this list.
 | 12 | Encrypted, tested database backups | first real data |
 | 13 | Dependency scanning (`pip-audit`) in CI | first CI run |
 | 14 | Content negotiation on error responses (HTML vs JSON) | first real HTML page beyond auth forms |
-| 15 | **MySQL verification of the M02+M03+M04 migrations** (`CHECK` constraints, `Numeric` price/subtotal/total types, foreign keys, indexes) — no local MySQL server was reachable in this environment; see `docs/DATABASE.md` | before any real (non-SQLite) deployment |
+| 15 | **MySQL verification of the M02–M05 migrations** (`CHECK` constraints, `Numeric` price/subtotal/total types, foreign keys, indexes) — no local MySQL server was reachable in this environment; see `docs/DATABASE.md` | before any real (non-SQLite) deployment |
 | 16 | Ingredient administration beyond the menu-item form's comma-separated field (rename/merge/delete an ingredient independently of any one menu item) | first time a typo'd ingredient name needs correcting across many items |
 | 17 | Per-field price-change audit history (currently a price change is folded into the generic `menu_item_updated` event, not its own event) | if price-change history becomes a compliance or dispute-resolution need |
-| 18 | Order cancellation (customer- or staff-initiated) | first customer who needs to cancel |
-| 19 | Staff order-status management (`OrderStatus` already supports the full lifecycle — see `docs/ARCHITECTURE.md`) | Milestone 05 |
+| 18 | Order cancellation *handling* — M05 added the `CANCELLED` status transition, but nothing downstream of it: no refund, no restock, no customer notification, and no customer-initiated cancellation | first customer who needs to cancel a real order |
+| 19 | Per-order staff assignment / "who is working this order" beyond the audit trail | if the kitchen needs accountability finer than "who last moved it" |
 | 20 | Cart persistence across login (an anonymous cart is discarded on login/logout since `login_user()` clears the session — see `docs/SECURITY.md` §3) | first user who builds a cart before signing in |
 | 21 | Multi-worker-safe checkout idempotency (a double-submitted checkout under concurrent requests relies on the cart being cleared client-side and server-side after the first success, not on a dedicated idempotency key) | first multi-worker/multi-instance deployment |
 

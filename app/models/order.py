@@ -75,6 +75,10 @@ class Order(db.Model):
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan", order_by="OrderItem.id"
     )
+    # Read-only convenience for the staff queue, which shows *whose* order
+    # each row is. Deliberately exposes the account, not a copy of any
+    # personal detail -- the template renders username only.
+    customer: Mapped["User"] = relationship()  # noqa: F821
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
         return f"<Order id={self.id} user_id={self.user_id} status={self.status.value} total={self.total}>"
