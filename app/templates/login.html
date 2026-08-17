@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Log in - Quick Junction</title>
+</head>
+<body>
+  <h1>Log in</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('auth.login') }}" novalidate>
+    {{ form.hidden_tag() }}
+
+    <p>
+      {{ form.username.label }}<br>
+      {{ form.username(size=32) }}
+    </p>
+
+    <p>
+      {{ form.password.label }}<br>
+      {{ form.password(size=32) }}
+    </p>
+
+    {% if form.errors.get("_general") %}
+      {% for error in form.errors["_general"] %}<p class="error">{{ error }}</p>{% endfor %}
+    {% endif %}
+
+    {{ form.submit() }}
+  </form>
+
+  <p><a href="{{ url_for('auth.register') }}">Need an account? Register.</a></p>
+</body>
+</html>

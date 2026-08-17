@@ -1,0 +1,14 @@
+# Quick Junction -- local AI stack (already installed in .venv).
+#
+# Recorded so the environment is reproducible. NOT installed by
+# requirements.txt: the web application must run without it.
+#
+# The Qwen3-0.6B-Base weights live in models/ and are git-ignored.
+
+torch==2.13.0
+transformers==5.15.0
+accelerate==1.14.0
+safetensors==0.8.0
+tokenizers==0.22.2
+huggingface_hub==1.27.0
+numpy==2.2.6

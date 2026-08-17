@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout - Quick Junction</title>
+</head>
+<body>
+  <p><a href="{{ url_for('cart.index') }}">&larr; Back to cart</a></p>
+  <h1>Checkout</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  {% if cart.lines %}
+    <ul>
+      {% for line in cart.lines %}
+        <li>
+          {% if line.menu_item %}
+            {{ line.menu_item.name }} -- {{ line.quantity }} x {{ line.unit_price }} = {{ line.line_total }}
+          {% else %}
+            Item #{{ line.menu_item_id }} is no longer available -- remove it before checking out.
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+
+    <p>Subtotal: {{ cart.subtotal }}</p>
+    <p>Total: {{ cart.subtotal }}</p>
+
+    {% if cart.has_unavailable %}
+      <p class="flash flash-error">Remove the unavailable item(s) above before placing your order.</p>
+    {% else %}
+      <form method="post" action="{{ url_for('orders.checkout_submit') }}">
+        {{ form.csrf_token }}
+        <button type="submit">Place order</button>
+      </form>
+    {% endif %}
+  {% else %}
+    <p>Your cart is empty.</p>
+  {% endif %}
+</body>
+</html>

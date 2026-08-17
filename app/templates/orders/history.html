@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Order history - Quick Junction</title>
+</head>
+<body>
+  <p><a href="{{ url_for('menu.index') }}">&larr; Back to menu</a></p>
+  <h1>Your orders</h1>
+
+  {% if orders %}
+    <ul>
+      {% for order in orders %}
+        <li>
+          <a href="{{ url_for('orders.detail', order_id=order.id) }}">Order #{{ order.id }}</a>
+          -- {{ order.status.value }} -- {{ order.total }} -- {{ order.created_at }}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>You have no orders yet.</p>
+  {% endif %}
+</body>
+</html>

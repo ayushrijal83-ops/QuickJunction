@@ -1,0 +1,25 @@
+# Quick Junction -- Milestone 02 (database + security core + authentication)
+#
+#   pip install -r requirements.txt
+#
+# Pinned deliberately: an unpinned dependency is an unreviewed dependency.
+# The AI / fine-tuning stack lives in requirements-ai.txt.
+
+Flask==3.1.3
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.1.0
+Flask-WTF==1.3.0
+SQLAlchemy==2.0.52
+alembic==1.19.1
+
+# MySQL driver. Pure Python, so no C toolchain is needed on Windows.
+PyMySQL==1.2.0
+
+python-dotenv==1.2.2
+
+# Password hashing (Argon2id) and email validation for WTForms' Email().
+argon2-cffi==25.1.0
+email-validator==2.3.0
+
+# --- development / test ------------------------------------------------
+pytest==9.1.1

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ "Edit" if category else "New" }} category - Quick Junction Admin</title>
+</head>
+<body>
+  <p><a href="{{ url_for('admin_menu.category_list') }}">&larr; Categories</a></p>
+  <h1>{{ "Edit" if category else "New" }} category</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, message in messages %}
+      <p class="flash flash-{{ cat }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="post" novalidate>
+    {{ form.hidden_tag() }}
+
+    <p>
+      {{ form.name.label }}<br>
+      {{ form.name(size=40) }}
+      {% for error in form.name.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.description.label }}<br>
+      {{ form.description(rows=3, cols=40) }}
+      {% for error in form.description.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.is_active() }} {{ form.is_active.label }}
+    </p>
+
+    {{ form.submit() }}
+  </form>
+</body>
+</html>

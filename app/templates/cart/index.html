@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cart - Quick Junction</title>
+</head>
+<body>
+  <p><a href="{{ url_for('menu.index') }}">&larr; Back to menu</a></p>
+  <h1>Your cart</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  {% if cart.has_unavailable %}
+    <p class="flash flash-error">Some items in your cart are no longer available and are excluded from your total.</p>
+  {% endif %}
+
+  {% if cart.lines %}
+    <ul>
+      {% for line in cart.lines %}
+        <li>
+          {% if line.menu_item %}
+            {{ line.menu_item.name }} -- {{ line.quantity }} x {{ line.unit_price }} = {{ line.line_total }}
+          {% else %}
+            Item #{{ line.menu_item_id }} is no longer available ({{ line.quantity }} in cart, excluded from total)
+          {% endif %}
+
+          <form method="post" action="{{ url_for('cart.update') }}" style="display:inline">
+            {{ update_form.csrf_token }}
+            <input type="hidden" name="menu_item_id" value="{{ line.menu_item_id }}">
+            <input type="number" name="quantity" value="{{ line.quantity }}" min="1" max="20">
+            <button type="submit">Update</button>
+          </form>
+
+          <form method="post" action="{{ url_for('cart.remove') }}" style="display:inline">
+            {{ remove_form.csrf_token }}
+            <input type="hidden" name="menu_item_id" value="{{ line.menu_item_id }}">
+            <button type="submit">Remove</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <p>Subtotal: {{ cart.subtotal }}</p>
+
+    <form method="post" action="{{ url_for('cart.clear') }}">
+      {{ clear_form.csrf_token }}
+      <button type="submit">Clear cart</button>
+    </form>
+
+    <p><a href="{{ url_for('orders.checkout_page') }}">Checkout</a></p>
+  {% else %}
+    <p>Your cart is empty.</p>
+  {% endif %}
+</body>
+</html>

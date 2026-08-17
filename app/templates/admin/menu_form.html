@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ "Edit" if item else "New" }} menu item - Quick Junction Admin</title>
+</head>
+<body>
+  <p><a href="{{ url_for('admin_menu.menu_list') }}">&larr; Menu items</a></p>
+  <h1>{{ "Edit" if item else "New" }} menu item</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="post" novalidate>
+    {{ form.hidden_tag() }}
+
+    <p>
+      {{ form.category_id.label }}<br>
+      {{ form.category_id() }}
+      {% for error in form.category_id.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.name.label }}<br>
+      {{ form.name(size=40) }}
+      {% for error in form.name.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.description.label }}<br>
+      {{ form.description(rows=3, cols=40) }}
+      {% for error in form.description.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.price.label }}<br>
+      {{ form.price() }}
+      {% for error in form.price.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.cuisine.label }}<br>
+      {{ form.cuisine() }}
+      {% for error in form.cuisine.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.spice_level.label }}<br>
+      {{ form.spice_level() }}
+      {% for error in form.spice_level.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.dietary_type.label }}<br>
+      {{ form.dietary_type() }}
+      {% for error in form.dietary_type.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    <p>
+      {{ form.is_available() }} {{ form.is_available.label }}
+    </p>
+
+    <p>
+      {{ form.ingredients.label }}<br>
+      {{ form.ingredients(size=60) }}
+      {% for error in form.ingredients.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+    </p>
+
+    {{ form.submit() }}
+  </form>
+</body>
+</html>

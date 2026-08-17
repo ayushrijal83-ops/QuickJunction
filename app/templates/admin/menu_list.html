@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Menu items - Quick Junction Admin</title>
+</head>
+<body>
+  <p><a href="{{ url_for('account.index') }}">&larr; Account</a></p>
+  <h1>Menu items</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  {% if current_user and current_user.role.value == "admin" %}
+    <p><a href="{{ url_for('admin_menu.menu_create') }}">+ New menu item</a></p>
+  {% endif %}
+
+  <table border="1" cellpadding="4">
+    <tr><th>Name</th><th>Category</th><th>Price</th><th>Available</th><th></th></tr>
+    {% for item in items %}
+      <tr>
+        <td>{{ item.name }}</td>
+        <td>{{ item.category.name }}</td>
+        <td>{{ item.price }}</td>
+        <td>{{ "yes" if item.is_available else "no" }}</td>
+        <td>
+          {% if current_user and current_user.role.value == "admin" %}
+            <a href="{{ url_for('admin_menu.menu_edit', item_id=item.id) }}">Edit</a>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
