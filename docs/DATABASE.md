@@ -1,8 +1,10 @@
-# Database — Milestone 03
+# Database — Milestone 04
 
-Covers the two model groups that exist so far: the Milestone 02 auth/audit
-core, and this milestone's menu data layer. No business table beyond menu
-data exists yet (no cart, order, or payment table).
+Covers every model group that exists so far: the Milestone 02 auth/audit
+core, the Milestone 03 menu data layer, and this milestone's cart/order
+tables. No cart table exists -- the cart is session-only (see
+`app/utils/cart.py` and `docs/ARCHITECTURE.md`); `orders`/`order_items` are
+the only new tables.
 
 ---
 
@@ -11,7 +13,11 @@ data exists yet (no cart, order, or payment table).
 ```
 User ──1:1── CustomerPreference
   │
-  └──1:N── AuditLog (nullable FK; actor or subject, see below)
+  ├──1:N── AuditLog (nullable FK; actor or subject, see below)
+  │
+  └──1:N── Order ──1:N── OrderItem ──N:1── MenuItem
+                            (RESTRICT: a menu item referenced by an
+                             order line can never be deleted)
 
 Category ──1:N── MenuItem ──M:N── Ingredient
                      │              (through MenuItemIngredient)
@@ -22,12 +28,14 @@ Category ──1:N── MenuItem ──M:N── Ingredient
 | Table | Purpose | Added |
 | --- | --- | --- |
 | `users` | Accounts, roles | M02 |
-| `audit_logs` | Security audit trail | M02 (extended M03) |
+| `audit_logs` | Security audit trail | M02 (extended M03, M04) |
 | `categories` | Menu categories | M03 |
 | `menu_items` | Menu items | M03 |
 | `ingredients` | Ingredient names | M03 |
 | `menu_item_ingredients` | MenuItem ↔ Ingredient join | M03 |
 | `customer_preferences` | One row per customer's stated preferences | M03 |
+| `orders` | One row per placed order | M04 |
+| `order_items` | Order line items, with price snapshots | M04 |
 
 ---
 

@@ -1,8 +1,9 @@
-# Architecture — Milestone 03
+# Architecture — Milestone 04
 
-Status: foundation (M01), auth/authorization/CSRF/audit core (M02), plus
-the menu data layer and menu-management surface (M03). No cart, checkout,
-order, payment, recommendation, or AI feature exists yet.
+Status: foundation (M01), auth/authorization/CSRF/audit core (M02), the
+menu data layer and menu-management surface (M03), plus cart, checkout,
+order placement, and order history (M04). No payment gateway,
+recommendation engine, or AI feature exists yet.
 
 ## Shape
 
@@ -160,6 +161,67 @@ comma-separated ingredient list, and `sync_menu_item_ingredients()`
 normalizes, find-or-creates, and links each name. This was a scope
 decision, not an oversight — see the final Milestone 03 report.
 
+## Cart, checkout, and order history (M04)
+
+```
+app/utils/cart.py          get_cart() / save_cart() / clear_cart() -- the
+                            ONLY module that touches flask.session for the
+                            cart. Stores a plain {menu_item_id: quantity}
+                            dict in the signed session cookie -- no price,
+                            no name, no total ever lives there.
+                            │
+app/routes/cart.py         GET /cart, POST /cart/add|update|remove|clear --
+                            CSRF-protected (FlaskForm), reads/writes the
+                            session via app/utils/cart.py, delegates all
+                            validation to the service below.
+                            │
+app/services/cart.py       add_item / update_item / remove_item /
+                            build_cart_view -- quantity bounds (1-20 per
+                            item, 30 distinct items) and item availability,
+                            re-checked against MenuItem on every call. Pure
+                            functions: cart in, cart out, no flask import.
+```
+
+```
+app/routes/orders.py       GET/POST /checkout, GET /orders, GET /orders/<id>
+                            -- @login_required on every route. checkout_submit
+                            calls the service, clears the session cart on
+                            success, records the audit event, redirects to
+                            the new order's detail page.
+                            │
+app/services/orders.py     checkout(user_id, cart) -- the financial trust
+                            boundary (see docs/SECURITY.md). Re-resolves
+                            every cart line against MenuItem, recomputes
+                            every price server-side, and writes Order +
+                            OrderItem in one transaction: commit or full
+                            rollback, never a partial order.
+                            list_orders_for_user / get_order_for_user --
+                            both filter by user_id in the query itself, the
+                            IDOR-safe way to answer "is this the caller's
+                            order."
+app/models/order.py        Order, OrderItem, OrderStatus
+```
+
+The cart never holds a price. `app/services/cart.py::build_cart_view`
+resolves every line against the live `MenuItem` table (same
+"active-category + available-item" filter as the public menu) on every
+`GET /cart`, so a price change or a deactivation between "add to cart" and
+"view cart" shows up immediately -- not just at checkout.
+
+Checkout order of operations (`app/services/orders.py::checkout`): parse
+the session cart -> reload every menu item from the database -> verify each
+is still available -> verify each quantity is in bounds -> recompute every
+unit price and line total -> sum subtotal/total -> write `Order` and its
+`OrderItem` rows -> commit. Any failure at any step raises `CheckoutError`
+before anything is written, or rolls back a partially-flushed transaction --
+see docs/SECURITY.md for the full trust-boundary writeup.
+
+`OrderStatus` already includes the full restaurant lifecycle (`pending`,
+`confirmed`, `preparing`, `ready`, `completed`, `cancelled`) even though
+this milestone only ever writes `pending` and exposes no status-change
+route -- Milestone 05's staff status management is a new endpoint on an
+already-correct column, not a schema change.
+
 ## HTTP surface
 
 ```
@@ -183,6 +245,17 @@ GET/POST /admin/categories/<id>/edit  ->  ADMIN only
 GET  /admin/menu                      ->  200, STAFF or ADMIN
 GET/POST /admin/menu/create           ->  ADMIN only
 GET/POST /admin/menu/<id>/edit        ->  ADMIN only
+
+GET  /cart                            ->  200  cart contents + live prices (HTML), public (anonymous cart allowed)
+POST /cart/add                        ->  302 → /cart, CSRF-protected
+POST /cart/update                     ->  302 → /cart, CSRF-protected
+POST /cart/remove                     ->  302 → /cart, CSRF-protected
+POST /cart/clear                      ->  302 → /cart, CSRF-protected
+
+GET  /checkout                        ->  200, login required
+POST /checkout                        ->  302 → /orders/<id> on success, CSRF-protected, login required
+GET  /orders                          ->  200  current user's own orders only, login required
+GET  /orders/<id>                     ->  200 or 404 (ownership-checked, IDOR-safe), login required
 ```
 
 `/health` still reports process liveness only — no version, no environment,
@@ -212,9 +285,12 @@ would have to be deleted later:
   per request. `MenuItem` and `CustomerPreference` already share the exact
   same `Cuisine`/`SpiceLevel`/`DietaryType` vocabulary (`app/models/enums.py`)
   specifically so this join needs no translation layer when it's built.
-- Cart, checkout, order, and payment models/routes -- explicitly out of
-  scope for M03; `MenuItem.price` is the only price that exists anywhere,
-  and it is never accepted from a client request (see `docs/DATABASE.md`).
+- Payment gateway / online card processing -- explicitly out of scope for
+  M04. `Order.status` starts and stays `pending`; no route accepts a
+  payment method or a card detail anywhere in this codebase.
+- Staff order-status management UI -- `OrderStatus` already has the full
+  lifecycle (see the cart/checkout section above); only the staff-facing
+  update route is deferred to M05.
 
 Because services never import `flask.request`, all of the above stay
 callable from a script, a scheduled job, or a test.
