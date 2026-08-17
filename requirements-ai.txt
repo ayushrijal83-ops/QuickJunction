@@ -1,14 +1,49 @@
-# Quick Junction -- local AI stack (already installed in .venv).
+# Quick Junction -- local AI stack (Milestone 07).
 #
-# Recorded so the environment is reproducible. NOT installed by
-# requirements.txt: the web application must run without it.
+#   pip install -r requirements-ai.txt
+#
+# Needed for: local Qwen inference (app/services/local_llm.py) and LoRA
+# fine-tuning (training/train_lora.py).
+#
+# The web application still runs without this file. If these packages are
+# absent, app/services/local_llm.py logs a warning and returns None, and
+# /recommendations/explain shows "AI explanation temporarily unavailable"
+# while every deterministic feature keeps working.
 #
 # The Qwen3-0.6B-Base weights live in models/ and are git-ignored.
+#
+# ---------------------------------------------------------------------
+# Corrected in M07. The previous version of this file did not describe the
+# installed environment: it claimed torch==2.13.0 and transformers==5.15.0
+# (neither version exists), and transformers/accelerate/safetensors were in
+# fact not installed at all, so the "verified to load on CPU" claim could
+# not be reproduced. Every pin below was verified against the actually
+# installed, working environment -- see docs/AI.md.
+# ---------------------------------------------------------------------
 
-torch==2.13.0
-transformers==5.15.0
+# CPU build. No GPU is required or assumed anywhere in this project.
+torch==2.10.0
+
+# >=4.51 is REQUIRED: that is the release that added the `qwen3`
+# architecture, which models/Qwen3-0.6B-Base/config.json declares.
+transformers==4.57.1
+
+# LoRA / parameter-efficient fine-tuning, and its Trainer backend.
+peft==0.17.1
 accelerate==1.14.0
+
+# Weight loading. safetensors only -- never pickle (docs/SECURITY.md).
 safetensors==0.8.0
 tokenizers==0.22.2
-huggingface_hub==1.27.0
-numpy==2.2.6
+huggingface_hub==0.36.2
+
+# NOTE ON NUMPY -- resolved conflict.
+# This file previously pinned numpy==2.2.6 while requirements.txt pinned
+# 1.24.3, so installing both together was impossible. Both now agree on
+# 1.24.3: it is the version already installed and verified working with
+# scikit-learn 1.7.2 / scipy 1.15.3 (the recommendation engine) *and* with
+# torch 2.10 / transformers 4.57.1 (this stack). Standardising on the
+# verified-working version rather than upgrading either side avoids
+# revalidating the binary compatibility of four compiled packages under
+# deadline. numpy is pinned in requirements.txt; it is intentionally not
+# re-pinned here so the two files cannot drift apart again.

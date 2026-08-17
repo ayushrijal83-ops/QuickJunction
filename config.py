@@ -70,6 +70,27 @@ class BaseConfig:
     WTF_CSRF_ENABLED: bool = True
     WTF_CSRF_TIME_LIMIT: int | None = None
 
+    # --- local LLM (M07) --------------------------------------------------
+    # Explanation-only; the deterministic recommendation engine stays
+    # authoritative (docs/AI.md). Paths are configuration, never request
+    # input -- nothing in app/services/local_llm.py accepts a path from a
+    # caller. Inference is local and offline; there is no API key here
+    # because there is no external service.
+    LLM_ENABLED: bool = _env_bool("LLM_ENABLED", True)
+    LLM_MODEL_PATH: str = os.environ.get("LLM_MODEL_PATH", str(BASE_DIR / "models" / "Qwen3-0.6B-Base"))
+    # LoRA adapter produced by training/train_lora.py.
+    #
+    # Defaults to the M07.1 (v2) adapter, promoted after evaluation showed it
+    # fixing the M07 sycophancy defect (v1 5/8 -> v2 8/8 on held-out
+    # scenarios; see docs/AI.md). The M07 v1 adapter is retained on disk at
+    # models/qwen3-0.6b-quickjunction-lora and can be selected by setting this
+    # variable. If the configured directory is absent, local_llm falls back to
+    # the base model rather than failing.
+    LLM_ADAPTER_PATH: str | None = os.environ.get(
+        "LLM_ADAPTER_PATH", str(BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v2")
+    )
+    LLM_MAX_NEW_TOKENS: int = int(os.environ.get("LLM_MAX_NEW_TOKENS", "48"))
+
     # --- errors / logging -------------------------------------------------
     # Never re-raise handled exceptions to the client.
     PROPAGATE_EXCEPTIONS: bool = False
@@ -114,6 +135,9 @@ class TestingConfig(BaseConfig):
     WTF_CSRF_ENABLED = False
     LOG_TO_FILE = False
     LOG_LEVEL = "WARNING"
+    # The 1.2 GB model must never be loaded by the ordinary test suite --
+    # tests that exercise inference opt in explicitly by flipping this.
+    LLM_ENABLED = False
 
 
 class ProductionConfig(BaseConfig):

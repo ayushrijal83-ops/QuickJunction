@@ -128,6 +128,32 @@ class CheckoutForm(FlaskForm):
     submit = SubmitField("Place order")
 
 
+def _optional_enum_choices(enum_cls) -> list[tuple[str, str]]:
+    """Enum choices plus an explicit "no preference" option. Empty string,
+    not a sentinel member -- "not stated" is stored as NULL."""
+    return [("", "No preference")] + _enum_choices(enum_cls)
+
+
+class PreferenceForm(FlaskForm):
+    """All three fields optional: a customer may state some, all, or none.
+    The service layer (app/services/preferences.py) re-validates every value
+    against its enum independently, since a raw POST can skip the <select>."""
+
+    dietary_preference = SelectField(
+        "Dietary preference", choices=_optional_enum_choices(DietaryType),
+        coerce=_enum_coerce, validators=[Optional()],
+    )
+    cuisine_preference = SelectField(
+        "Preferred cuisine", choices=_optional_enum_choices(Cuisine),
+        coerce=_enum_coerce, validators=[Optional()],
+    )
+    spice_preference = SelectField(
+        "Spice preference", choices=_optional_enum_choices(SpiceLevel),
+        coerce=_enum_coerce, validators=[Optional()],
+    )
+    submit = SubmitField("Save preferences")
+
+
 class OrderStatusForm(FlaskForm):
     """Carries only the target status. The *current* status is read from the
     database row, never from the form -- so a stale or forged page cannot

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Why we picked this - Quick Junction</title>
+</head>
+<body>
+  <p><a href="{{ url_for('preferences.recommendations') }}">&larr; All recommendations</a></p>
+  <h1>Why we picked this</h1>
+
+  {% if top %}
+    <h2>{{ top.menu_item.name }}</h2>
+
+    {# Deterministic half: produced entirely by app/services/recommendations.py.
+       This is complete on its own and is what the customer should rely on.
+       The price below is read off the MenuItem row, never from the model. #}
+    <table border="1" cellpadding="4">
+      <tr><th>Fact</th><th>Value</th></tr>
+      <tr><td>Category</td><td>{{ top.menu_item.category.name }}</td></tr>
+      <tr><td>Price</td><td>{{ top.menu_item.price }}</td></tr>
+      <tr><td>Cuisine</td><td>{{ top.menu_item.cuisine.value }}</td></tr>
+      <tr><td>Dietary type</td><td>{{ top.menu_item.dietary_type.value }}</td></tr>
+      <tr><td>Spice level</td><td>{{ top.menu_item.spice_level.value }}</td></tr>
+      <tr><td>Match</td><td>{{ top.match_label }}{% if top.score > 0 %} ({{ top.score_percent }}%){% endif %}</td></tr>
+    </table>
+
+    <p>
+      Your preferences:
+      {{ (preference.cuisine_preference.value if preference and preference.cuisine_preference else "no cuisine set") }} &middot;
+      {{ (preference.dietary_preference.value if preference and preference.dietary_preference else "no dietary preference set") }} &middot;
+      {{ (preference.spice_preference.value if preference and preference.spice_preference else "no spice preference set") }}
+    </p>
+
+    <h3>AI explanation</h3>
+    {% if explanation %}
+      <p class="ai-explanation">{{ explanation }}</p>
+      <p><small>Generated locally. The match above is calculated by Quick Junction, not by the AI.</small></p>
+    {% else %}
+      <p class="ai-unavailable">AI explanation temporarily unavailable.</p>
+      <p><small>The recommendation above is unaffected.</small></p>
+    {% endif %}
+  {% else %}
+    <p>There is nothing to recommend right now, so there is nothing to explain.</p>
+  {% endif %}
+
+  <p><a href="{{ url_for('preferences.preferences') }}">Update my preferences</a></p>
+</body>
+</html>

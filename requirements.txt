@@ -21,5 +21,26 @@ python-dotenv==1.2.2
 argon2-cffi==25.1.0
 email-validator==2.3.0
 
+# Recommendation engine (M06): TF-IDF + cosine similarity, computed
+# in-process. This is a *runtime web* dependency, not part of the AI stack
+# in requirements-ai.txt -- /recommendations is a normal customer-facing
+# page and must work in an environment where the AI stack is absent.
+#
+# Cost, stated honestly: scikit-learn pulls scipy + numpy, roughly 100 MB
+# installed, to do work that is arithmetically small at this menu's scale.
+# It is here because the milestone specified TF-IDF + cosine similarity and
+# this is the maintained, correct implementation of both (smoothing,
+# sublinear scaling and L2 normalisation are easy to get subtly wrong by
+# hand). If deployment image size becomes a constraint, this is the first
+# dependency to reconsider -- the engine touches only TfidfVectorizer and
+# cosine_similarity, so the swap is contained to app/services/recommendations.py.
+scikit-learn==1.7.2
+scipy==1.15.3
+# Single source of truth for the numpy pin. requirements-ai.txt previously
+# pinned 2.2.6 here, which made the two files mutually uninstallable; it now
+# defers to this line. 1.24.3 is the version verified working with both
+# scikit-learn/scipy above and torch/transformers in requirements-ai.txt.
+numpy==1.24.3
+
 # --- development / test ------------------------------------------------
 pytest==9.1.1

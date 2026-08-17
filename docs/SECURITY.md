@@ -1,11 +1,13 @@
-# Security — Milestone 05 baseline
+# Security — Milestone 07 baseline
 
 Scope: foundation (M01), auth/authorization/CSRF/audit core (M02), the menu
 data layer and menu-management surface (M03), cart, checkout, order
-placement, and order history (M04), plus staff order management and the
-status workflow (M05). No payment gateway exists yet. This document records
-what is in place, **why**, and what must be added before Quick Junction
-handles real payments.
+placement, and order history (M04), staff order management and the status
+workflow (M05), customer preferences and the deterministic recommendation
+engine (M06), plus local Qwen inference for recommendation explanations
+(M07). No payment gateway exists yet. This document records what is in
+place, **why**, and what must be added before Quick Junction handles real
+payments.
 
 ---
 
@@ -473,6 +475,180 @@ message, or traceback; a missing order id is a plain 404 (`test_18`).
 
 ---
 
+## 10b. Preferences and the recommendation engine (M06)
+
+> **The recommendation engine is deterministic and does not use the Local
+> Qwen model yet.** No LLM, no external API, no network call, no GPU. That
+> matters to this document because it removes an entire threat class for
+> now: there is no prompt to inject, no model output to sanitise, and no
+> customer data leaving the process.
+
+**Identity comes from the session, never from the request.** Both routes
+are `@login_required` and read the customer id from `get_current_user()`.
+`app/routes/preferences.py` has no `user_id` parameter of any kind, and
+`update_preferences(user_id, ...)` locates the row *by* that authenticated
+id — there is no code path by which one customer reaches another's
+preferences. `tests/test_recommendations.py` tests 4 and 18 submit a victim's
+id as a form field, a query-string parameter **and** an `X-User-Id` header
+while authenticated as someone else, and confirm the victim's row is
+untouched and the change landed on the attacker's own row. Re-verified in
+the browser: after a forged-id POST, the database held exactly one
+preference row, belonging to the authenticated user.
+
+**Dietary restriction is a hard filter, not a ranking hint.** It is applied
+to the candidate set *before* any scoring
+(`candidate_items` → `_DIETARY_COMPATIBILITY`), so neither TF-IDF
+similarity nor order history can reintroduce a restricted item. Order
+history is filtered by the same rule a second time before it is allowed to
+influence the ranking, so a customer who has since gone vegetarian is not
+nudged back toward meat by their own past orders. `vegetarian` excludes
+`eggetarian` deliberately — the stricter reading is the safe one to be
+wrong about. Tests 9, 21 and 21b cover this; **disabling the filter was
+confirmed to fail five tests**, so the protection is genuinely asserted
+rather than incidentally true.
+
+**Only real, orderable items are ever returned.** Candidates come from one
+query filtered to available items in active categories — the same filter
+the public menu uses. The engine returns `MenuItem` rows, so it *cannot*
+fabricate an item or an id (tests 13 and 15). Verified in the browser with
+a deliberately adversarial fixture: "Sold Out Curry" matched the stated
+preferences perfectly on every attribute but was correctly absent because
+it is unavailable.
+
+**The engine is advisory and never an authority on price.** It computes no
+monetary value; `Recommendation` carries a similarity score and a menu item,
+nothing else. The template reads `rec.menu_item.price` straight off the
+database row. A customer has no input that can influence a price — there is
+no price field anywhere in the preference form — and the engine never
+creates or modifies an order. Test 14 asserts every rendered price equals
+the stored `Decimal`; the browser walkthrough compared the three displayed
+prices against the database directly. (The one `float()` in the engine is
+on a cosine score, never on money.)
+
+**Invalid preference values are rejected server-side.** Each value is
+re-validated against its enum in `app/services/preferences.py` — the
+`<select>` is one layer, not the only one, because a raw POST can skip it —
+and the column's `CHECK` constraint is the database-level backstop. An
+invalid value re-renders the form with errors and writes nothing (test 3,
+3b; confirmed live with `carnivore`/`klingon`/`volcanic`). An empty string
+is valid and means "no preference", stored as `NULL`.
+
+**CSRF** protects preference changes like every other state-changing form
+(test 17; confirmed live — a tokenless POST returned 400 and wrote
+nothing).
+
+**No sensitive customer data is logged.** The engine logs nothing at all,
+and preference changes are deliberately **not** audit-logged: a taste
+preference is not a security event, and adding one would have meant another
+`ck_audit_logs_event_type` migration for no security benefit. Preferences
+themselves are minimal by design — three enum values, no free text, no PII
+(`docs/DATABASE.md`). Verified after the browser walkthrough:
+`logs/security.log` and `logs/app.log` contained zero occurrences of
+`password`, `argon2`, `csrf_token`, or `session`.
+
+**Dependency note.** M06 promotes `scikit-learn` (+ `scipy`, `numpy`) from
+the AI stack into `requirements.txt`, because `/recommendations` is a normal
+customer-facing page that must work where the AI stack is absent. This is
+~100 MB of new runtime dependency and therefore new supply-chain surface;
+all three are pinned, and the rationale plus the swap-out path is recorded
+in `requirements.txt` itself.
+
+---
+
+## 10c. Local LLM boundary (M07)
+
+**The model has no authority.** `app/services/recommendations.py` decides
+what a customer may be shown; `app/services/local_llm.py` only turns that
+decision into prose. This is the control that makes every other item in this
+section defence in depth rather than the primary protection: even a fully
+compromised or hallucinating model cannot surface an item, change a price,
+or alter an order, because it is never consulted about any of those things.
+
+**It is given no price and no id.** `ExplanationRequest` is a frozen
+dataclass carrying only item name, cuisine, dietary type, spice level and a
+match label. There is no price field, so the model cannot restate a price
+correctly *or* incorrectly. The page renders the price from the `MenuItem`
+row (`tests/test_llm.py::test_8` feeds a hostile output claiming a different
+price and name, then asserts the database row and the displayed price are
+unchanged, and that no such item exists).
+
+**Filtered items never reach it.** Unavailable and dietary-excluded items are
+removed by the engine before the explanation route sees anything, so they
+cannot appear in the prompt or the output (tests 10 and 11 assert the
+`ExplanationRequest` names the surviving item, and that the excluded name
+appears nowhere on the page).
+
+**Prompt injection — re-verified in M07.1.** Two surfaces, both handled.
+`tests/test_llm.py::test_12d` now parametrises **ten hostile shapes** against
+the sanitiser: bare colons, newlines, CRLF, instruction-like text ("Ignore
+previous instructions…"), quotes, HTML (`<script>`), template syntax
+(`{{ 7*7 }}` / `{% raw %}`), markdown section markers (`###`), tab-separated
+field forgery, and bracket/pipe markers. Each asserts that exactly one of
+each real section header survives, that the item name occupies exactly one
+line, that the structural field count is invariant, and that no structural
+character reaches the prompt. Quotes are deliberately **not** stripped
+(`test_12e`) — apostrophes are legitimate in dish names and cannot forge
+`label: value` structure, which is what the sanitiser defends.
+
+- *Menu text* (staff-supplied item names and descriptions) is the realistic
+  one — an admin could name an item "Ignore previous instructions". Free text
+  is flattened and truncated by `_sanitise()` before entering the prompt:
+  newlines, tabs, markup characters **and colons** are stripped, and the
+  value is capped at 120 characters. The colon is included deliberately —
+  the prompt's structure is `label: value` lines, so a surviving colon is
+  exactly what would let a hostile name forge a field. Stripping newlines
+  alone was **not** sufficient; `tests/test_llm.py::test_12` caught that
+  during development and now guards it (disabling the sanitiser makes it
+  fail).
+- *Customer preferences* are not a free-text surface at all: they are enum
+  members re-validated server-side (§10b) and rendered from the enum, never
+  echoed from request input.
+
+Neither is treated as a complete defence. The real guarantee remains that
+model output is displayed as escaped text and is never parsed, executed,
+interpolated into SQL, or used to make a decision.
+
+**Model paths are configuration, never request input.** `LLM_MODEL_PATH` and
+`LLM_ADAPTER_PATH` come from `config.py` / the environment. No function in
+`local_llm.py` takes a path argument and no route accepts one; test 4b sends
+`?model_path=/etc/passwd&adapter_path=…` and asserts the configuration is
+untouched and the signature has no such parameter. There is therefore no
+arbitrary-file-read surface through the model loader.
+
+**No network, no keys.** `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE` are set
+before `transformers` is imported, and both model and adapter load with
+`local_files_only=True`. Test 13 greps the module for `openai`, `anthropic`,
+`gemini`, `ollama`, `api_key`, `bearer`, `http://`, `https://`,
+`requests.post` and `urllib.request` and fails if any appears; test 13b
+applies the same check to the training script and additionally asserts
+`report_to=[]` so no experiment-tracking service is contacted. There is no
+API key in the codebase because there is no external service.
+
+**Logging.** The module logs only that inference failed, via
+`logger.warning(..., exc_info=True)` — no prompt, no customer preference, no
+generated text. Prompts contain no PII by construction (no username, email,
+id or order history — only menu attributes and enum values).
+
+**Model quality is not a security control (M07.1).** M07's adapter asserted
+that mismatched items matched; M07.1 retrained on a rebalanced dataset and
+fixed it (5/8 → 8/8 on held-out scenarios, `docs/AI.md` §11). That is a
+*quality* improvement, and the security posture does not depend on it: the
+model still has no authority, is still given no price or id, and its output
+is still displayed as escaped text that nothing parses. A future adapter
+that regressed would produce misleading prose beside correct facts — not a
+privilege escalation. Both adapters are kept on disk and the training script
+refuses to overwrite an existing one, so a bad retrain cannot destroy the
+artefact it replaces.
+
+**Availability.** The 1.2 GB model is loaded lazily behind a lock, once per
+process, and never in the test suite (`TestingConfig.LLM_ENABLED = False`).
+CPU generation takes seconds, which is why the explanation lives on its own
+route: `/recommendations` never invokes the model, so the primary
+recommendation path cannot be slowed or broken by it. Failure returns `None`
+and the page shows "AI explanation temporarily unavailable."
+
+---
+
 ## 11. Audit logging
 
 `app/models/audit_log.py` (`AuditLog`, `AuditEvent`) +
@@ -673,7 +849,23 @@ order-status management in M05) are removed from this list.
 | 20 | Cart persistence across login (an anonymous cart is discarded on login/logout since `login_user()` clears the session — see `docs/SECURITY.md` §3) | first user who builds a cart before signing in |
 | 21 | Multi-worker-safe checkout idempotency (a double-submitted checkout under concurrent requests relies on the cart being cleared client-side and server-side after the first success, not on a dedicated idempotency key) | first multi-worker/multi-instance deployment |
 
-### AI-specific, for the milestone that adds the model
+### AI-specific — status after M07
+
+These were written before the model existed. Current state of each:
+
+- Prompt injection → **addressed** (§10c): input sanitised, output never
+  parsed or executed.
+- No customer PII to the model → **held**: the prompt contains only menu
+  attributes and enum values; no username, email, id, or order history.
+- The model advises, never authorises → **held**: it is given no price and
+  no id, and cannot write anything.
+- Local inference only → **held**: offline flags, `local_files_only=True`,
+  no HTTP client, no API key.
+- `safetensors`, never `pickle` → **held**: the weights are
+  `model.safetensors` and `safetensors==0.8.0` is pinned; the LoRA adapter
+  is likewise safetensors.
+
+Original rules, retained as the standing policy:
 
 - **Prompt injection is an input-validation problem.** Model output is
   untrusted text: it may never be executed, never be interpolated into SQL,
@@ -686,3 +878,9 @@ order-status management in M05) are removed from this list.
   and a data-residency guarantee, not a preference.
 - Model weights and LoRA adapters are treated as untrusted binaries: load
   `safetensors`, pin the source, never `pickle`.
+- **The M06 boundary, now that a recommender exists:** the LLM sits beside
+  the deterministic engine, never inside it. Model output may never select
+  the candidate set, never override the dietary hard filter, and never
+  produce a price. `app/services/recommendations.py` remains the sole
+  authority on what a customer may be shown; an LLM may only phrase or
+  explain results it has already been handed.

@@ -1,0 +1,310 @@
+{
+  "base": {
+    "passed": 8,
+    "total": 8,
+    "should_hits": 10,
+    "should_total": 32,
+    "seconds": 66.9,
+    "scenarios": [
+      {
+        "scenario": "strong_match",
+        "output": "The recommended item, Tofu Stir Fry, is a vegan-friendly dish that aligns with the customer's preference for Chinese cuisine and medium-spice flavor. It is a strong match, making it a suitable choice for those seeking a flavorful and nutritious meal.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "chinese",
+          "vegan",
+          "medium"
+        ],
+        "should_total": 3
+      },
+      {
+        "scenario": "partial_match",
+        "output": "The recommended item, Aloo Gobi, is a vegetarian dish from the Indian cuisine that is mild in spice and well-suited to the customer's preference for a vegetarian diet.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "mild"
+        ],
+        "should_total": 4
+      },
+      {
+        "scenario": "cuisine_mismatch",
+        "output": "The recommended item, Margherita Pizza, is a vegetarian option from the Italian cuisine, which aligns with the customer's preference for vegetarian dishes. It is also a fair match, as it does not contain any spicy ingredients, which is consistent with the customer's dietary preference for a non-spicy",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "italian"
+        ],
+        "should_total": 5
+      },
+      {
+        "scenario": "spice_mismatch",
+        "output": "The recommended item, Coconut Rice, is a vegetarian dish that aligns with the customer's preference for Thai cuisine and a fair match, making it a suitable choice for their dietary needs.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [],
+        "should_total": 4
+      },
+      {
+        "scenario": "dietary_mismatch",
+        "output": "The candidate item, \"Lamb Rogan Josh,\" is not recommended because it is a non-vegetarian dish, which conflicts with the customer's dietary preference of being vegetarian.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "non-vegetarian"
+        ],
+        "should_total": 5
+      },
+      {
+        "scenario": "unavailable_item",
+        "output": "The menu item \"Sold Out Biryani\" was recommended because it is a popular and highly sought-after dish, but it is currently out of stock, making it unavailable for purchase. As a result, the restaurant has provided alternative options like \"Aloo Gobi\" and \"Coconut Rice\"",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "unavailable",
+          "sold out"
+        ],
+        "should_total": 3
+      },
+      {
+        "scenario": "no_recommendation",
+        "output": "The menu item was recommended because it aligns with the customer's preference for Mexican cuisine and vegan dietary needs, and it offers an extra-hot spice option, which is a popular choice for many customers.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [],
+        "should_total": 4
+      },
+      {
+        "scenario": "preference_over_history",
+        "output": "The menu item Aloo Gobi is recommended because it is a vegetarian dish that complements the lamb Rogan Josh, which is a popular and flavorful meat dish. Aloo Gobi is a vegetarian option that provides a satisfying and nutritious meal, making it a suitable choice for customers with dietary preferences.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "vegetarian",
+          "meat"
+        ],
+        "should_total": 4
+      }
+    ]
+  },
+  "v1": {
+    "passed": 5,
+    "total": 8,
+    "should_hits": 12,
+    "should_total": 32,
+    "seconds": 60.6,
+    "scenarios": [
+      {
+        "scenario": "strong_match",
+        "output": "Tofu Stir Fry is a Chinese dish that is vegan and medium-spice, which matches all your preferences. It is not available at this time, but it is the closest match available.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "chinese",
+          "vegan",
+          "medium"
+        ],
+        "should_total": 3
+      },
+      {
+        "scenario": "partial_match",
+        "output": "Aloo Gobi is Indian and vegetarian, which matches your dietary preference. It is not hot, which is what you prefer, and it is not spicy, which is what you prefer.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "not hot"
+        ],
+        "should_total": 4
+      },
+      {
+        "scenario": "cuisine_mismatch",
+        "output": "Margherita Pizza is Italian, which is what you prefer, and it is vegetarian, which is what you prefer. It is not hot, which is what you prefer, so it is a fair match.",
+        "passed": false,
+        "must_not_violations": [
+          "which is what you prefer",
+          "italian, which is what you"
+        ],
+        "forbidden_hits": [],
+        "should_hits": [
+          "italian",
+          "not hot"
+        ],
+        "should_total": 5
+      },
+      {
+        "scenario": "spice_mismatch",
+        "output": "Coconut Rice is Thai, vegetarian, and extra hot, which matches all your preferences. It is not listed on your dietary or spice list, so it is recommended.",
+        "passed": false,
+        "must_not_violations": [
+          "matches all your"
+        ],
+        "forbidden_hits": [],
+        "should_hits": [],
+        "should_total": 4
+      },
+      {
+        "scenario": "dietary_mismatch",
+        "output": "Lamb Rogan Josh is Indian, non-vegetarian, and hot, which matches all your dietary and spice preferences. It is not vegetarian, so it is not what you are looking for.",
+        "passed": false,
+        "must_not_violations": [
+          "matches all your"
+        ],
+        "forbidden_hits": [],
+        "should_hits": [
+          "non-vegetarian",
+          "not vegetarian"
+        ],
+        "should_total": 5
+      },
+      {
+        "scenario": "unavailable_item",
+        "output": "Biryani is sold out, so it is not available at the moment. However, Aloo Gobi and Coconut Rice are available, so they are the closest alternatives.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "not available",
+          "sold out"
+        ],
+        "should_total": 3
+      },
+      {
+        "scenario": "no_recommendation",
+        "output": "There are no items available at the moment that match your dietary and spice preference. You have been filtered to exclude all items except those that match your vegan and extra_hot dietary and spice requirements.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "no "
+        ],
+        "should_total": 4
+      },
+      {
+        "scenario": "preference_over_history",
+        "output": "Lamb Rogan Josh is vegetarian, but Aloo Gobi is vegetarian as well. Since both items are vegetarian, Aloo Gobi is recommended as it is not on your dietary list.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "vegetarian"
+        ],
+        "should_total": 4
+      }
+    ]
+  },
+  "v2": {
+    "passed": 8,
+    "total": 8,
+    "should_hits": 16,
+    "should_total": 32,
+    "seconds": 51.6,
+    "scenarios": [
+      {
+        "scenario": "strong_match",
+        "output": "Tofu Stir Fry is Chinese, vegan and medium spiced, matching all three of your preferences. It is also a good choice for a vegetarian diet.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "chinese",
+          "vegan",
+          "medium"
+        ],
+        "should_total": 3
+      },
+      {
+        "scenario": "partial_match",
+        "output": "Aloo Gobi is Indian and vegetarian, matching both your vegetarian requirement and your mild spice level. It is not hot, so it is not a hot dish you are looking for.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "mild",
+          "not hot"
+        ],
+        "should_total": 4
+      },
+      {
+        "scenario": "cuisine_mismatch",
+        "output": "Margherita Pizza is vegetarian and Italian rather than Indian, so it is a better fit for your vegetarian diet. It is not hot, so it is not a match for your preference for hot food.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "italian",
+          "rather than indian",
+          "not hot"
+        ],
+        "should_total": 5
+      },
+      {
+        "scenario": "spice_mismatch",
+        "output": "Coconut Rice is Thai and vegetarian, matching two of your three preferences, but it is extra hot rather than extra hot as you asked for. It is not a good fit for you.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [],
+        "should_total": 4
+      },
+      {
+        "scenario": "dietary_mismatch",
+        "output": "Lamb Rogan Josh is Indian, non-vegetarian and hot, so it does not meet any of your preferences. It was excluded because it is not vegetarian.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "non-vegetarian",
+          "not vegetarian",
+          "excluded"
+        ],
+        "should_total": 5
+      },
+      {
+        "scenario": "unavailable_item",
+        "output": "Biryani is available only now, so it has been recommended as unavailable. Aloo Gobi and Coconut Rice are available alternatives.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "unavailable"
+        ],
+        "should_total": 3
+      },
+      {
+        "scenario": "no_recommendation",
+        "output": "There are no vegan options available at the moment, so no suggestion was made. You requested a vegan menu item, but none are available.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "no ",
+          "none"
+        ],
+        "should_total": 4
+      },
+      {
+        "scenario": "preference_over_history",
+        "output": "You have ordered Lamb Rogan Josh, which is a meat dish, so it was not suggested to you. Aloo Gobi is vegetarian, matching your dietary preference, so it was recommended.",
+        "passed": true,
+        "must_not_violations": [],
+        "forbidden_hits": [],
+        "should_hits": [
+          "vegetarian",
+          "meat"
+        ],
+        "should_total": 4
+      }
+    ]
+  }
+}

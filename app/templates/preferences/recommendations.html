@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recommended for you - Quick Junction</title>
+</head>
+<body>
+  <p><a href="{{ url_for('menu.index') }}">&larr; Back to menu</a></p>
+  <h1>Recommended for you</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
+  {% if preference and (preference.dietary_preference or preference.cuisine_preference or preference.spice_preference) %}
+    <p>
+      Based on your preferences:
+      {% if preference.dietary_preference %}{{ preference.dietary_preference.value }}{% endif %}
+      {% if preference.cuisine_preference %} &middot; {{ preference.cuisine_preference.value }}{% endif %}
+      {% if preference.spice_preference %} &middot; {{ preference.spice_preference.value }} spice{% endif %}
+    </p>
+  {% else %}
+    <p>You have not set any preferences yet, so these are simply what is
+    available today.</p>
+  {% endif %}
+
+  <p>
+    <a href="{{ url_for('preferences.preferences') }}">Update my preferences</a>
+    {% if recommendations %}
+      | <a href="{{ url_for('preferences.explain') }}">Why was the top item picked?</a>
+    {% endif %}
+  </p>
+
+  {% if recommendations %}
+    <table border="1" cellpadding="4">
+      <tr><th>Item</th><th>Description</th><th>Category</th><th>Price</th><th>Match</th></tr>
+      {# Every row is a real MenuItem row from the database; the price below
+         is read off that row, never from anything the engine computed. #}
+      {% for rec in recommendations %}
+        <tr>
+          <td><a href="{{ url_for('menu.detail', item_id=rec.menu_item.id) }}">{{ rec.menu_item.name }}</a></td>
+          <td>{{ rec.menu_item.description or "" }}</td>
+          <td>{{ rec.menu_item.category.name }}</td>
+          <td>{{ rec.menu_item.price }}</td>
+          <td>{{ rec.match_label }}{% if rec.score > 0 %} ({{ rec.score_percent }}%){% endif %}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p>No recommendations available right now.</p>
+  {% endif %}
+</body>
+</html>

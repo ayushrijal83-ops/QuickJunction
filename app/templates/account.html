@@ -8,6 +8,7 @@
   <h1>Logged in as {{ user.username }}</h1>
   <p>Role: {{ user.role.value }}</p>
   <p><a href="{{ url_for('menu.index') }}">Menu</a> | <a href="{{ url_for('cart.index') }}">Cart</a> | <a href="{{ url_for('orders.history') }}">My orders</a></p>
+  <p><a href="{{ url_for('preferences.recommendations') }}">Recommended for you</a> | <a href="{{ url_for('preferences.preferences') }}">My preferences</a></p>
 
   {# Display convenience only -- every staff route re-checks the role
      server-side via require_role, so hiding this link is not the control. #}

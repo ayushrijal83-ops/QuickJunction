@@ -4,8 +4,8 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-08-17 (end of Milestone 05)
-Current state: **Milestone 05 complete.** Next: Milestone 06.
+Last updated: 2026-08-17 (end of Milestone 07.1)
+Current state: **Milestone 07.1 complete.** Next: Milestone 08.
 
 > **Document history:** this file did not exist until the end of Milestone
 > 04. Milestones 01–03 below were reconstructed by reading the repository
@@ -25,11 +25,15 @@ Current state: **Milestone 05 complete.** Next: Milestone 06.
 | 03 | Menu data layer + menu management | ✅ Complete |
 | 04 | Cart, checkout, order placement, order history | ✅ Complete |
 | 05 | Staff order management + status workflow | ✅ Complete |
-| 06 | Not yet defined | ⬜ Not started |
-| — | Payment gateway, recommender, AI assistant, deployment | ⬜ Not started |
+| 06 | Customer preferences + deterministic recommendation engine | ✅ Complete |
+| 07 | Local Qwen inference + hand-authored dataset + LoRA fine-tune | ✅ Complete |
+| 07.1 | Dataset rebalance (60→150) + V2 retrain + 3-way evaluation | ✅ Complete |
+| 08 | Not yet defined | ⬜ Not started |
+| — | Payment gateway, frontend styling, deployment | ⬜ Not started |
 
-**Test suite: 117 passing, 0 failing** (`pytest`; in-memory SQLite for
-application tests, temporary on-disk SQLite for migration tests).
+**Test suite: 196 passing, 0 failing** (`pytest`; in-memory SQLite for
+application tests, temporary on-disk SQLite for migration tests; the LLM is
+disabled in testing and never loaded).
 **MySQL verification: PENDING** — see [MySQL verification status](#mysql-verification-status).
 
 ---
@@ -341,15 +345,415 @@ against the running dev server in Chrome:
 
 ---
 
+## Milestone 06 — Preferences + deterministic recommendation engine ✅
+
+> **The recommendation engine is deterministic and does not use the Local
+> Qwen model yet.** No LLM, no external API (OpenAI/Gemini/Anthropic/
+> Ollama), no network access, no embeddings service, no vector database, no
+> GPU. TF-IDF + cosine similarity, in-process.
+
+### Implemented
+
+**Preferences** — `app/services/preferences.py`, `app/routes/preferences.py`:
+
+| Route | Auth | Notes |
+| --- | --- | --- |
+| `GET /preferences` | login required | own preferences only |
+| `POST /preferences` | login required | CSRF-protected, enum-validated |
+| `GET /recommendations` | login required | ranked menu for the session's user |
+
+`CustomerPreference` (from M03) was reused as-is — **no schema change, no
+migration in this milestone**. The three fields reuse `MenuItem`'s existing
+`DietaryType` / `Cuisine` / `SpiceLevel` enums; no parallel enums were
+created. All three are optional; "no preference" is stored as `NULL`. One
+row per customer, located by the authenticated `user_id`.
+
+**Engine** — `app/services/recommendations.py`:
+
+1. Candidates = available items in active categories (same filter as the
+   public menu).
+2. **Dietary hard filter** applied before scoring.
+3. Each item → a text document: name, description, category, cuisine,
+   `spice_<level>`, `diet_<type>`, ingredients. **Price and database id are
+   deliberately excluded** (price magnitude is meaningless to a
+   bag-of-words model; an id carries no taste signal).
+4. Preferences → a query document in the same vocabulary.
+5. `TfidfVectorizer` + `cosine_similarity`; sorted descending, ties broken
+   on name for stable output.
+6. Score → `Strong` / `Good` / `Fair` / `Suggested` label for the UI.
+
+**Order history — implemented.** Only `COMPLETED` orders count, weighted at
+`HISTORY_WEIGHT = 0.5` (stated preference outranks past behaviour). History
+is dietary-filtered before use, so it can neither surface nor amplify a
+restricted item.
+
+**Dietary safety rule** (`_DIETARY_COMPATIBILITY`): vegan → vegan only;
+vegetarian → vegan + vegetarian; eggetarian → + eggetarian;
+non-vegetarian → everything; nothing stated → everything. `vegetarian`
+excludes `eggetarian` deliberately (stricter reading is safer).
+
+**Dependency change:** `scikit-learn==1.7.2`, `scipy==1.15.3`,
+`numpy==1.24.3` promoted from the AI stack into `requirements.txt`, since
+`/recommendations` is a normal customer-facing page that must work where the
+AI stack is absent. ~100 MB; rationale and swap-out path recorded in
+`requirements.txt`.
+
+### Tests run — 25 new, all passing
+
+`tests/test_recommendations.py` covers all 21 required scenarios: preference
+creation, update (same row reused), validation (service + HTTP), customer
+ownership, TF-IDF document generation, cosine ranking, cuisine influence,
+spice influence, dietary filtering, unavailable/inactive exclusion, empty
+preferences, no-menu-items, real database ids, DB prices as `Decimal`, no
+fabricated items, route authorization, CSRF, forged user id, completed-order
+history influence, history-only-when-completed, dietary overriding history,
+and determinism across repeated runs.
+
+**Full suite: 142 passing, 0 failing** (foundation 10, auth 29, menu 26,
+orders 28, migrations 4, staff orders 20, recommendations 25). No
+regressions.
+
+**Non-vacuity proven:** temporarily disabling the dietary hard filter made
+**five** tests fail — including both history-override tests — confirming the
+safety rule is genuinely asserted rather than incidentally true. Reverted.
+
+### Security checks actually performed
+
+Automated **and** re-verified in Chrome against the running dev server:
+
+- **Unauthenticated** → `/recommendations` and `/preferences` returned 401;
+  no preference row created.
+- **Forged user id** → victim's id submitted as form field, query parameter
+  and `X-User-Id` header while logged in as someone else: victim's row
+  untouched, change landed on the attacker's own row. Database afterwards
+  held exactly one preference row, for the authenticated user.
+- **Invalid values** → `carnivore` / `klingon` / `volcanic` re-rendered the
+  form (HTTP 200, not a redirect) and wrote nothing.
+- **CSRF** → tokenless POST returned 400, nothing written.
+- **Dietary bypass** → a vegetarian customer never saw the non-vegetarian
+  item, on screen or in tests.
+- **Unavailable items** → "Sold Out Curry", deliberately built to match the
+  stated preferences perfectly on every attribute, was correctly absent.
+- **Prices** → the three displayed prices (249.00 / 399.00 / 149.00) were
+  compared against the database directly and matched; engine produces no
+  monetary value at all.
+- **Logs** → `logs/security.log` and `logs/app.log` contained zero
+  occurrences of `password`, `argon2`, `csrf_token`, or `session`.
+- **Static review** → no float arithmetic on money (the one `float()` is a
+  cosine score), no string-built SQL, no `|safe` in the new templates, and
+  `user.id` sourced only from `get_current_user()`.
+
+### Migration status
+
+**No migration was required or created.** `customer_preferences` has
+existed since M03. The migration-consistency harness re-confirmed the
+existing 4-revision chain still produces exactly the models' schema across
+all 9 tables, and `tests/test_migrations.py` (4 tests) still passes.
+
+---
+
+## Milestone 07 — Local Qwen + hand-authored dataset + LoRA ✅
+
+> The LLM **explains**; the deterministic engine **decides**. No external
+> API, no paid service, no network at inference, no GPU, no API key.
+
+### Environment correction (found first, before building anything)
+
+`requirements-ai.txt` did not describe reality. It claimed `torch==2.13.0`
+and `transformers==5.15.0` — **neither version exists** — and
+`transformers`, `accelerate` and `safetensors` were **not installed at all**.
+The documented "already verified to load locally on CPU" claim therefore
+could not be reproduced as the repository stood. The file has been rewritten
+against the actually-installed, verified environment.
+
+`transformers >= 4.51` is a hard requirement: that release added the `qwen3`
+architecture declared in `models/Qwen3-0.6B-Base/config.json`. Pinned 4.57.1.
+
+**NumPy conflict resolved.** `requirements.txt` pinned `numpy==1.24.3` while
+`requirements-ai.txt` pinned `2.2.6`, making the two files mutually
+uninstallable. Both now agree on **1.24.3** — the already-installed version,
+verified working with scikit-learn 1.7.2 / scipy 1.15.3 (recommendation
+engine) *and* torch 2.10 / transformers 4.57.1. `requirements-ai.txt`
+deliberately does not re-pin numpy, so the files cannot drift apart again.
+Nothing was blindly upgraded: installs were run under a constraints file
+pinning numpy/torch/scikit-learn/scipy, and the 142-test suite was re-run
+after each install.
+
+**Environment quirk:** this machine has a broken TensorFlow install (its
+protobuf predates `runtime_version`) which `transformers` imports
+opportunistically. `USE_TF=0` / `USE_FLAX=0` / `USE_JAX=0` are set before the
+`transformers` import in both `local_llm.py` and `train_lora.py`. Without
+them, importing `transformers` *or* `peft` raises `ImportError`.
+
+### Dataset — hand-authored
+
+| | |
+| --- | --- |
+| Source | **written by hand for this project** — not scraped, not downloaded, not LLM-generated |
+| Raw | `data/raw/seed_examples.jsonl` — **60** examples |
+| Train / validation | **50 / 10** |
+| Categories | **10**, six each, 5 train + 1 validation per category |
+| Split | deterministic, content-addressed (SHA-256), no RNG — byte-reproducible |
+
+Documented in `data/README.md`; built by `scripts/build_dataset.py`, which
+refuses to write on duplicates or split overlap.
+
+### Training — a real run completed
+
+`python training/train_lora.py --epochs 3` — **not** a smoke test:
+
+| | |
+| --- | --- |
+| Method | LoRA (PEFT), rank 8, on q/k/v/o/gate/up/down projections |
+| Hardware | **CPU only** (`torch 2.10.0+cpu`, `cuda_available=False`) |
+| Steps | 39 (50 examples × 3 epochs, batch 1 × grad-accum 4) |
+| Wall-clock | **1278 s ≈ 21.3 min** (~32 s/step) |
+| Trainable | **5,046,272 / 601,096,192 = 0.84 %** |
+| Loss | ~3.13 → **0.63** final step (mean 1.63) |
+| Artifact | `models/qwen3-0.6b-quickjunction-lora/` — 20 MB adapter + `training_metrics.json` |
+
+Metrics are written by the script itself, not transcribed by hand.
+
+### Inference
+
+`app/services/local_llm.py`, route `GET /recommendations/explain`.
+
+Measured on CPU, no contention: base **19.5 s** first call / **8.9 s**
+subsequent; fine-tuned **12.6 s** / **6.8 s**; ~7.6 tok/s raw. Model loads
+lazily once per process (2.4 s) and **never in the test suite**.
+
+`/recommendations` never invokes the model, so the deterministic path stays
+fast regardless.
+
+### Tests — 21 new
+
+`tests/test_llm.py`: dataset schema, no duplicates across splits, split
+reproducibility (re-runs the builder and diffs bytes), no secrets in the
+dataset, model-path configuration, path cannot come from a client, prompt
+built from validated facts only, LLM-disabled path, facts passed to the LLM,
+hostile output cannot alter authoritative data, LLM failure does not break
+recommendations, unavailable items unreachable, dietary-filtered items
+unreachable, prompt-injection neutralisation, length bounding, no external
+API/secrets in the AI code, training script offline, route authorization,
+empty-menu handling.
+
+**Full suite: 163 passing, 0 failing.** No regressions.
+
+**Non-vacuity proven:** disabling `_sanitise()`'s character class made the
+prompt-injection test fail; restored and re-verified.
+
+### Security review performed
+
+- Prompt injection via **menu text** — a test caught that stripping newlines
+  alone was insufficient (a hostile item name could still emit
+  `Customer preference:` inline). The sanitiser now also strips **colons**,
+  because the prompt format is `label: value`. Free text capped at 120 chars.
+- Prompt injection via **preferences** — not a free-text surface; enum
+  values re-validated server-side and rendered from the enum.
+- **Client-controlled facts** — the browser cannot reach the prompt; every
+  field is built server-side from `MenuItem` rows.
+- **Arbitrary model path** — no route or function accepts a path; asserted
+  by signature inspection and a query-string attempt.
+- **Secrets / network** — the module is grepped for `openai`, `anthropic`,
+  `gemini`, `ollama`, `api_key`, `bearer`, `http://`, `https://`,
+  `requests.post`, `urllib.request`; the training script likewise, plus
+  `report_to=[]`.
+- **Logging** — failures log a message only; never the prompt, preferences,
+  or generated text.
+
+### Browser verification — all 10 steps
+
+Login → set preferences (indian/vegetarian/hot) → deterministic
+recommendations correct with Butter Chicken excluded by the dietary filter →
+explanation page showed the facts table (249.00, indian, vegetarian, hot,
+38 %) **and** a grounded LLM sentence → marked Paneer Tikka unavailable →
+it vanished from `/recommendations` **and** from the explanation page
+entirely, top item correctly became Margherita Pizza → with the model path
+broken, `/recommendations/explain` returned **200 in 0.02 s** showing
+"AI explanation temporarily unavailable." with all deterministic facts
+intact, and `/recommendations` was completely unaffected.
+
+### Quality defects found (documented, not hidden)
+
+The fine-tuned model produced two real errors during verification:
+
+1. **Invented facts** — claimed an item was "the only item on the menu that
+   meets all your requirements", which it was never told.
+2. **Sycophantic agreement** — for a customer preferring `indian`/`hot`
+   shown Margherita Pizza (`italian`, spice `none`), it wrote *"Margherita
+   Pizza is Italian, which is what you prefer… It is not hot, which is what
+   you prefer"*. Only the vegetarian clause was true.
+
+Root cause of (2) is dataset balance: 60 examples dominated by strong-match
+cases taught "assert everything matches" as a template. The fix is more
+partial/failed-match examples and a re-train, not more of the same data.
+
+**Contained by architecture:** the same page independently showed
+`Cuisine: italian`, `Spice level: none`, `Match: 27%` and the customer's real
+preferences — all correct, all contradicting the prose. Nothing operational
+reads the prose. See `docs/AI.md` §5.
+
+### Migration status
+
+**No migration required or created.** M07 added no database table, column or
+constraint. The 4-revision chain and `tests/test_migrations.py` are unchanged
+and still pass.
+
+---
+
+## Milestone 07.1 — Dataset rebalance + V2 retrain ✅
+
+> Fixes the one substantive quality defect shipped in M07 (known issue #20):
+> the adapter asserted that mismatched items matched.
+
+### Dataset V2 — hand-authored, rebalanced
+
+| | v1 (M07) | v2 (M07.1) |
+| --- | --- | --- |
+| Examples | 60 | **150** |
+| Categories | 10 | **15** |
+| Train / validation | 50 / 10 | **120 / 30** |
+| Mismatch-oriented share | low | **106/150 = 71%** |
+| `strong_match` share | dominant | **10/150 = 6.7%** |
+
+Written by hand for this project — not scraped, not downloaded, not
+LLM-generated. v1 is **preserved unchanged** (verified byte-identical after
+rebuild) as the record of what M07 trained on.
+
+All 15 required categories present: strong/partial/weak match, cuisine /
+spice / dietary / ingredient mismatch, multiple conflicts, unavailable items,
+no recommendations, correct explanations, contradictory candidates, history
+influence, preference-over-history, and why-not-match.
+
+`contradictory_candidate` deliberately contains both verdicts (8 rejecting a
+false claim, 2 confirming a true one) so the model does not learn to reject
+everything — the opposite failure mode.
+
+**Builder** (`scripts/build_dataset.py`) now takes `--version`, writes a
+per-version `manifest.json` (dataset version, curation method, duplicate
+policy, split method, counts, SHA-256 of every file), and still rejects
+duplicates, split overlap and malformed rows. Split remains deterministic
+and content-addressed; rebuilds are byte-identical.
+
+### Training — a real second run completed
+
+`python training/train_lora.py --dataset-version v2 --epochs 3`
+
+**Exactly one variable changed from M07: the dataset.** Base model, LoRA
+rank/alpha/dropout/targets, learning rate, batch size, grad-accum, epochs
+and seed are identical.
+
+| | M07 (v1) | M07.1 (v2) |
+| --- | --- | --- |
+| Optimizer steps | 39 | **90** |
+| Wall-clock | 1278 s (21.3 min) | **3217 s (53.6 min)** |
+| Final train loss | 1.63 | **0.984** |
+| Trainable params | 5,046,272 (0.84%) | same |
+| Hardware | CPU (`torch 2.10.0+cpu`) | same |
+| Adapter | `models/qwen3-0.6b-quickjunction-lora/` | `models/qwen3-0.6b-quickjunction-lora-v2/` (20 MB) |
+
+The training script now **refuses to overwrite an existing adapter**
+(verified by attempting a v1 retrain — it exited non-zero). The M07
+adapter's SHA-256 was recorded before M07.1 and re-verified after: unchanged.
+
+### Evaluation — base vs M07 vs V2
+
+`training/evaluate.py`, 8 held-out scenarios absent from both seed files
+(asserted at startup). Greedy decoding; reproducibility confirmed by running
+v2 twice and diffing every generation. Automated keyword/phrase scoring —
+`must_not` (false match claims), `forbidden` (invented price/dish), `should`
+(soft signal only). Full generations in `training/eval_results_m07_1.json`.
+
+| System | Passed | Keyword coverage |
+| --- | --- | --- |
+| Base Qwen3-0.6B | 8/8 | 10/32 |
+| M07 adapter (v1) | **5/8** | 12/32 |
+| M07.1 adapter (v2) | **8/8** | **16/32** |
+
+v1 failed exactly the three mismatch scenarios, reproducing the M07 defect
+(claiming Italian "is what you prefer" to an Indian-preferring customer;
+claiming an unspiced dish "matches all your preferences"; claiming a lamb
+dish "matches all your dietary preferences" to a vegetarian). v2 passed all
+eight.
+
+**The base model's 8/8 is a scoring artefact, not quality.** Reading its
+generations shows it evades the keyword checks while still being wrong — it
+invented a preference the customer never stated, and described a
+recommendation when zero items were available. Documented honestly in
+`docs/AI.md` §11.3 rather than reported as "base is competitive".
+
+### Success criteria from the brief — both met
+
+| Case | v1 | v2 |
+| --- | --- | --- |
+| Indian+hot customer, Margherita Pizza (Italian, unspiced) | "Italian, **which is what you prefer** … best match" ❌ | "Italian **rather than Indian** … **not hot**" ✅ |
+| Vegetarian customer, meat dish | "**matches all** your dietary preferences" ❌ | "**does not meet any** of your preferences … **not vegetarian**" ✅ |
+
+### Integration decision — V2 promoted
+
+V2 objectively improves the known failures (5/8 → 8/8) and regresses none,
+so `config.py`'s `LLM_ADAPTER_PATH` now defaults to the v2 adapter. The M07
+adapter remains on disk and is selectable via that variable. A missing
+adapter falls back to the base model rather than failing (verified live).
+
+### Tests — 33 new
+
+- `tests/test_dataset_v2.py` (22): V2 schema, size, duplicates, split
+  overlap, builder duplicate-rejection (guard actually fired), byte
+  reproducibility, manifest SHA-256 correctness, v1 preservation, 15-category
+  coverage, mismatch-ratio enforcement, negation presence, dietary-safety of
+  the data itself, both-verdicts in contradiction category, evaluation
+  held-out guarantee, evaluation dimension coverage, scorer determinism +
+  catching the literal M07 sentence, separate adapter registry, M07 artefact
+  preservation, overwrite guard, offline evaluation.
+- `tests/test_llm.py` (+11): ten parametrised hostile prompt shapes plus the
+  quotes-are-harmless case.
+
+**Full suite: 196 passing, 0 failing.** No regressions.
+
+**Non-vacuity proven:** sabotaging the dataset to be sycophantic made the
+mismatch tests fail; restored and re-verified.
+
+### Security re-verification
+
+Prompt sanitiser re-tested against every shape the milestone names (colons,
+newlines, instruction-like text, quotes, HTML, template syntax) — all
+neutralised. Model paths remain configuration-only with no client input path.
+No external API, no network calls, no secrets — grep-asserted in both
+`local_llm.py` and the new `evaluate.py`.
+
+### Browser verification
+
+Logged in, set preferences (indian/vegetarian/hot), confirmed deterministic
+recommendations (Paneer Tikka 48% strong, meat excluded by dietary filter),
+and confirmed the V2 explanation appears alongside the facts table. Then
+marked Paneer Tikka unavailable to reproduce the exact M07 failure scenario —
+V2 produced *"Margherita Pizza is Italian rather than Indian … It is also
+unspiced, so it is not hot"*, where V1 had claimed both were "what you
+prefer". Unavailable and dietary-excluded items appeared nowhere. A broken
+adapter path fell back to the base model; a missing model path degraded to
+"AI explanation temporarily unavailable" in 0.03 s with all facts intact.
+
+### Remaining defects in V2 — not fixed
+
+V2 fixes the dangerous direction but is still not a good writer: it produced
+*"Italian rather than Indian, so it does not meet your vegetarian
+requirement"* (correct mismatch, non-sequitur conclusion — the pizza **is**
+vegetarian), *"extra hot rather than extra hot"*, and confused availability
+phrasing. Wrong in the conservative direction now (under-selling) rather than
+over-selling. See `docs/AI.md` §11.5.
+
+---
+
 ## MySQL verification status
 
 **MySQL integration verification pending.**
 
 No MySQL server has been reachable in this environment at any point. Every
-migration and all DDL for M02, M03, M04, and M05 has been verified against
-SQLite only — including the new `tests/test_migrations.py` suite, which
-also runs on SQLite. This has **not** been tested against MySQL and must
-not be described as if it had been.
+migration and all DDL for M02–M05 has been verified against SQLite only —
+including `tests/test_migrations.py`, which also runs on SQLite. M06 and M07
+added no migration. This has **not** been tested against MySQL and must not
+be described as if it had been.
 
 Still to check against a real MySQL ≥ 8.0.16 instance:
 
@@ -379,6 +783,19 @@ Still to check against a real MySQL ≥ 8.0.16 instance:
 | 11 | `CANCELLED` sets a status and nothing else — no refund, restock, notification, or customer-initiated cancellation | cancellation is not operationally complete |
 | 12 | The staff queue is unpaginated and unfiltered — every order, every load | degrades once order volume is non-trivial |
 | 13 | `migrations/env.py` uses `db.get_engine()`, deprecated in Flask-SQLAlchemy 3.1 (12 warnings in the suite) — pre-existing, from the Flask-Migrate template | breaks on Flask-SQLAlchemy 3.2 |
+| 14 | The TF-IDF corpus is re-vectorised on every `/recommendations` request | fine at tens–hundreds of items; needs caching before a real catalogue |
+| 15 | `scikit-learn` + `scipy` + `numpy` (~100 MB) are now runtime web dependencies for arithmetically small work | deployment image size; swap is contained to `app/services/recommendations.py` |
+| 16 | TF-IDF is bag-of-words: spice matches exactly or not at all ("hot" is not treated as nearer "medium" than "none") | ranking is coarser than a customer might expect |
+| 17 | Cold start — no preferences and no completed orders yields available items in name order at score 0.0 | new customers get no personalisation until they act |
+| 18 | Ingredients contribute to matching only where an admin entered them | uneven signal quality across the menu |
+| 19 | ~~numpy pin conflict between the two requirements files~~ — **closed in M07**; both now agree on 1.24.3 | — |
+| 20 | ~~LLM asserts matches that are false (sycophancy)~~ — **fixed in M07.1**: dataset rebalanced 60→150, V2 adapter scores 8/8 vs V1's 5/8 on held-out mismatch scenarios | — |
+| 20a | **V2 prose is still not customer-ready**: correct verdicts reached by garbled reasoning (e.g. "Italian rather than Indian, so it does not meet your vegetarian requirement" — the item *is* vegetarian). Now wrong in the conservative direction rather than over-selling | needs a larger base model and/or substantially more data before the wording is presentable unreviewed |
+| 21 | Explanation generation takes 7–9 s on CPU and has no hard wall-clock timeout (only `LLM_MAX_NEW_TOKENS=48`) | a pathological generation could hold a worker |
+| 22 | Each gunicorn worker would load its own 1.2 GB model copy (module-level singleton, per process) | multi-worker deployment needs a shared inference process |
+| 23 | The LoRA adapter is git-ignored with the rest of `models/`; reproducible from the dataset in ~21 min | a fresh clone has no adapter until training is re-run |
+| 24 | `USE_TF=0` is required because of a broken TensorFlow install in this environment | environment-specific; harmless but surprising |
+| 25 | No `Cache-Control` headers on authenticated pages — a browser served a stale `/recommendations/explain` during testing | stale personalised content after preference changes |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
 
@@ -387,11 +804,11 @@ Full ranked pre-production list: `docs/SECURITY.md` §17.
 ## Not implemented — do not assume these exist
 
 Payment gateway / card processing · refunds · customer-initiated
-cancellation · recommendation engine (TF-IDF / cosine similarity) · AI
-assistant / LLM / fine-tuning · advanced analytics · reporting dashboard ·
-deployment configuration · styled frontend (Bootstrap/JS — every page is
-plain unstyled HTML) · password reset · email verification · staff queue
-pagination/filtering.
+cancellation · **AI chatbot / conversational assistant** (M07 built
+explanation-only inference, not a chat surface) · advanced analytics ·
+reporting dashboard · deployment configuration · styled frontend
+(Bootstrap/JS — every page is plain unstyled HTML) · password reset ·
+email verification · staff queue pagination/filtering.
 
 `ai/`, `dataset/`, `training/` are intentionally empty placeholders.
 
@@ -401,41 +818,49 @@ pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | **117 passing, 0 failing**, 12 warnings (all the pre-existing `env.py` deprecation) |
-| Test files | foundation 10, auth 29, menu 26, orders 28, migrations 4, staff orders 20 |
-| Migrations | 4 revisions, head = `38297b707b89` |
+| Tests | **196 passing, 0 failing**, 12 warnings (all the pre-existing `env.py` deprecation) |
+| Test files | foundation 10, auth 29, menu 26, orders 28, migrations 4, staff orders 20, recommendations 25, llm 32, dataset_v2 22 |
+| Migrations | 4 revisions, head = `38297b707b89` (M06 and M07 added none) |
 | Tables | 9: `users`, `audit_logs`, `categories`, `menu_items`, `ingredients`, `menu_item_ingredients`, `customer_preferences`, `orders`, `order_items` |
 | Models | 10 modules in `app/models/` |
-| Blueprints | 8: health, auth, account, menu, admin_menu, cart, orders, staff_orders |
+| Services | 10 modules in `app/services/` |
+| Blueprints | 9: health, auth, account, menu, admin_menu, cart, orders, staff_orders, preferences |
 | Audit events | 16 |
+| Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
+| Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
 | Order statuses | 6 (`pending`, `confirmed`, `preparing`, `ready`, `completed`, `cancelled`) |
 | Roles | 3 (`admin`, `staff`, `customer`) |
+| Recommendation engine | deterministic TF-IDF + cosine similarity, in-process; **no LLM** |
 | Database (tests) | in-memory SQLite; migration tests use temporary on-disk SQLite |
 | Database (target) | MySQL 8 — **never verified**, see above |
-| Runtime deps | pinned in `requirements.txt`; installed set matches |
+| Runtime deps | pinned in `requirements.txt`; now includes scikit-learn/scipy/numpy |
 
 ---
 
 ## Next milestone
 
-**Milestone 06 — not yet defined.** Scope is the Architect's call. With
-roughly 7 days total for the MVP and M01–M05 complete, the ordering
-lifecycle is functionally end-to-end (browse → cart → checkout → staff
-fulfilment → customer sees status).
+**Milestone 08 — not yet defined.** Every stated project requirement now has
+an implementation: ordering end-to-end, staff fulfilment, a deterministic
+recommender, and local free AI with a hand-authored dataset and a real
+fine-tune.
 
 Candidates, in the order I would recommend them:
 
-1. **Customer preferences UI + recommendation engine** — `CustomerPreference`
-   has existed since M03 with no route to populate it, and it shares the
-   exact `Cuisine`/`SpiceLevel`/`DietaryType` vocabulary with `MenuItem`
-   specifically so this join needs no translation layer. This is the
-   project's headline differentiator and the largest remaining gap.
-2. **Frontend pass (Bootstrap)** — every page is currently unstyled HTML.
-   Cheap, highly visible, and independent of the backend.
-3. **MySQL verification + deployment prep** — known issue #1 is the only
-   item that blocks a real deployment outright, and it needs a reachable
-   MySQL server rather than more code.
+1. **Frontend pass (Bootstrap/CSS)** — every page is still plain unstyled
+   HTML. This is now by far the largest gap between what the system *does*
+   and what a reviewer *sees*, and it is low-risk and backend-independent.
+   Recommended first.
+2. **Dataset expansion + re-train** — known issue #20 is the one substantive
+   quality defect shipped in M07: the model asserts matches that are false.
+   Adding partial/failed-match examples and re-running the 21-minute
+   training would make the AI feature genuinely presentable rather than
+   merely demonstrable. Cheap and high-visibility.
+3. **MySQL verification + deployment prep** — known issue #1 remains the
+   only outright deployment blocker. It needs a reachable MySQL server
+   rather than more code, so it can run in parallel with either of the above.
 
-The AI assistant (local Qwen3-0.6B-Base, `ai/` + `training/`) remains the
-largest single unstarted piece; it should not be attempted until the
-recommendation engine and a usable frontend exist.
+I would sequence 1 → 2, with 3 in parallel whenever a MySQL server becomes
+available. A conversational AI assistant is deliberately *not* recommended:
+the explanation-only integration already satisfies the local-AI requirement,
+and a chat surface would add a prompt-injection surface the current
+architecture does not have.

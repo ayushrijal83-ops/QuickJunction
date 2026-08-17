@@ -1,10 +1,14 @@
-# Architecture — Milestone 05
+# Architecture — Milestone 07
 
 Status: foundation (M01), auth/authorization/CSRF/audit core (M02), the
 menu data layer and menu-management surface (M03), cart, checkout, order
-placement, and order history (M04), plus staff order management and the
-status workflow (M05). No payment gateway, recommendation engine, or AI
-feature exists yet.
+placement, and order history (M04), staff order management and the status
+workflow (M05), customer preferences and the deterministic recommendation
+engine (M06), plus local Qwen inference for recommendation *explanations*
+(M07). No payment gateway exists yet.
+
+**The LLM is not the source of truth.** It explains; the deterministic
+engine decides. See "Local LLM" below and `docs/AI.md`.
 
 ## Shape
 
@@ -275,6 +279,157 @@ A status change never touches money: it writes one column. Historical
 prices stay in the `OrderItem` snapshots written at checkout and are never
 recalculated from the current menu.
 
+## Preferences and the recommendation engine (M06)
+
+> **The recommendation engine is deterministic and does not use the Local
+> Qwen model yet.** No LLM, no external API (OpenAI/Gemini/Anthropic/
+> Ollama), no network access, no embeddings service, no vector database, no
+> GPU. Everything below is TF-IDF and cosine similarity computed
+> in-process. The same inputs always produce the same ranking.
+
+```
+app/routes/preferences.py     GET/POST /preferences    customer's own taste
+                              GET      /recommendations ranked menu
+                               -- both @login_required; the customer id comes
+                                  from get_current_user(), never from a form
+                                  field, query parameter, or header
+                               │
+app/services/preferences.py   get_preferences / update_preferences --
+                               one row per customer, located BY user_id.
+                               Re-validates every value against its enum.
+                               │
+app/services/recommendations.py  the engine (below)
+```
+
+### Feature representation
+
+Each candidate menu item becomes one text document
+(`build_item_document`): name, description, category name, cuisine,
+`spice_<level>`, `diet_<type>`, and its ingredient names, lowercased.
+
+Deliberately **excluded**: the price (TF-IDF is a bag-of-words model — it
+would treat "349" as a token whose *magnitude* is meaningless, and price is
+not a taste attribute) and the database id (carries no taste signal). The
+structured attributes are prefixed (`spice_hot`, `diet_vegan`) so they form
+their own tokens rather than colliding with words in the description.
+
+The customer's preferences become a query document in the *same*
+vocabulary (`build_preference_document`) — which is only possible because
+`CustomerPreference` reuses `MenuItem`'s `Cuisine`/`SpiceLevel`/
+`DietaryType` enums rather than defining parallel ones. That reuse, set up
+back in M03, is what removes any need for a translation layer here.
+
+### Scoring
+
+1. **Candidate set** — available items in active categories (the same
+   filter the public menu uses).
+2. **Dietary hard filter** — applied *before* scoring, so nothing
+   downstream can reintroduce a restricted item.
+3. **TF-IDF** — `TfidfVectorizer` fits the candidate documents.
+4. **Query vector** — the preference document, plus the history document
+   scaled by `HISTORY_WEIGHT = 0.5` when history exists.
+5. **Cosine similarity** against every candidate; sort descending, ties
+   broken on item name so output is stable.
+
+A raw cosine score is not an intuitive number for a customer, so
+`Recommendation.match_label` maps it to Strong / Good / Fair / Suggested.
+
+### Order history
+
+Implemented. Only **`COMPLETED`** orders count — a pending or cancelled
+order is not evidence anyone enjoyed anything. History is weighted at half
+of stated preference, because what a customer *says* they want outranks
+what they happened to order before.
+
+History is filtered by the same dietary rule before it is used, so a
+customer who has since gone vegetarian is not nudged back toward meat by
+their own past orders. Even if that second filter were removed, the
+candidate filter in step 2 would still make it impossible to *return* a
+restricted item.
+
+### Dietary safety rule
+
+`_DIETARY_COMPATIBILITY` maps a stated preference to the menu dietary types
+that may be shown:
+
+| Customer states | May be shown |
+| --- | --- |
+| `vegan` | vegan |
+| `vegetarian` | vegan, vegetarian |
+| `eggetarian` | vegan, vegetarian, eggetarian |
+| `non_vegetarian` | everything |
+| *(nothing stated)* | everything |
+
+`vegetarian` excludes `eggetarian` deliberately: in the cuisine this menu
+targets, "vegetarian" conventionally excludes egg, and the stricter reading
+is the safe one to be wrong about.
+
+### Limitations
+
+- Cold start: a customer with no preferences and no completed orders gets
+  the available menu in name order at score 0.0, labelled "Suggested" —
+  not a match claim the engine cannot support.
+- TF-IDF is bag-of-words: it has no notion of "hot is closer to medium
+  than to none". Spice matches exactly or not at all.
+- The corpus is re-vectorised per request. Fine at this menu's scale
+  (tens to low hundreds of items); it would need caching well before it
+  became a real catalogue.
+- Ingredients contribute only if an admin entered them.
+
+### LLM boundary — implemented in M07
+
+The Local Qwen model sits *beside* this engine, not inside it, exactly as
+planned. See "Local LLM" below.
+
+## Local LLM (M07)
+
+```
+app/services/recommendations.py     decides WHAT (authoritative)
+            │  validated MenuItem rows
+            ▼
+app/routes/preferences.py::explain  builds ExplanationRequest from those rows
+            │  facts only: name, cuisine, dietary, spice, match label
+            ▼
+app/services/local_llm.py           Qwen3-0.6B-Base, local, offline
+            │
+            ▼
+        one or two sentences of prose  (or None)
+```
+
+`ExplanationRequest` is a frozen dataclass carrying **no price, no id, and
+no availability flag**. The model is structurally incapable of restating a
+price because it is never given one, and incapable of naming an unavailable
+item because such items never survive the engine's candidate filter.
+
+**Data flow is one-way.** `local_llm` imports no model, holds no database
+session, and returns a string. There is no code path from model output back
+into the database.
+
+**Failure is a normal outcome.** Every entry point returns `None` instead of
+raising — missing weights, missing dependency, slow CPU, corrupt adapter all
+degrade to "AI explanation temporarily unavailable" while the deterministic
+facts remain on the page. `/recommendations` does not call the model at all,
+so the main page is unaffected either way.
+
+**Offline by construction.** `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` are
+set before `transformers` is imported, and both the model and the adapter
+load with `local_files_only=True`. There is no API key, endpoint, or HTTP
+client anywhere in the module — asserted by `tests/test_llm.py::test_13`.
+
+**Configuration, never request input.** `LLM_MODEL_PATH`,
+`LLM_ADAPTER_PATH`, `LLM_MAX_NEW_TOKENS` and `LLM_ENABLED` come from
+`config.py` / the environment. No function in the module accepts a path
+argument, so there is nothing for a browser to influence.
+
+Loading is lazy and process-wide (a module-level singleton behind a lock):
+the 1.2 GB model is read once on first explanation, not per request, and
+never at all in the test suite (`TestingConfig.LLM_ENABLED = False`).
+
+Training is offline and never runs in the web process —
+`training/train_lora.py` writes a LoRA adapter that the application loads
+read-only. Dataset provenance is in `data/README.md`; measured timings,
+what was actually trained, and the honest limitations are in `docs/AI.md`.
+
 ## HTTP surface
 
 ```
@@ -313,6 +468,11 @@ GET  /orders/<id>                     ->  200 or 404 (ownership-checked, IDOR-sa
 GET  /staff/orders                    ->  200, STAFF or ADMIN (401 anonymous, 403 customer)
 GET  /staff/orders/<id>               ->  200 or 404, STAFF or ADMIN
 POST /staff/orders/<id>/status        ->  302, STAFF or ADMIN, CSRF-protected, transition-validated
+
+GET  /preferences                     ->  200  own taste preferences (HTML), login required
+POST /preferences                     ->  302 → /recommendations on success, 200 + errors otherwise, CSRF-protected
+GET  /recommendations                 ->  200  ranked menu for the session's own user, login required
+GET  /recommendations/explain         ->  200  top item + deterministic facts + local-LLM prose (or a notice), login required
 ```
 
 `/health` still reports process liveness only — no version, no environment,
@@ -328,20 +488,26 @@ four forms; see `docs/SECURITY.md`.
 These directories exist and are empty on purpose — no placeholder logic that
 would have to be deleted later:
 
-- `ai/` — local Qwen3-0.6B-Base integration. The model is loaded once at
-  process start and called through a service, so a request never blocks on
-  a cold load.
-- `dataset/` — the hand-built instruction dataset.
-- `training/` — LoRA/QLoRA fine-tuning scripts. Kept out of the runtime
-  dependency set; training never runs inside the web process.
-- `models/` — local weights. Git-ignored; already holds
-  `Qwen3-0.6B-Base`.
-- The recommendation engine (scikit-learn, TF-IDF + cosine similarity) will
-  live in `app/services/` because it is business logic that needs the menu
-  and order models. The vectoriser is fitted offline and loaded, not fitted
-  per request. `MenuItem` and `CustomerPreference` already share the exact
-  same `Cuisine`/`SpiceLevel`/`DietaryType` vocabulary (`app/models/enums.py`)
-  specifically so this join needs no translation layer when it's built.
+- ~~`ai/`~~ — **built in M07**, but as `app/services/local_llm.py` rather
+  than a top-level `ai/` package: it is a service like any other, and the
+  layering rule (routes → services → models) already had the right home for
+  it. `ai/` remains an empty placeholder. One deviation from the sketch
+  here: the model is loaded **lazily on first use**, not at process start,
+  so an application that never serves an explanation never pays the 1.2 GB
+  load — and the test suite never loads it at all.
+- ~~`dataset/`~~ — the hand-authored dataset landed in `data/` (`raw/` +
+  `processed/`) per the M07 brief; `dataset/` remains an empty placeholder.
+- ~~`training/`~~ — **built in M07**: `training/train_lora.py`. Still kept
+  out of the runtime dependency path; training never runs in the web
+  process.
+- `models/` — local weights. Git-ignored; holds `Qwen3-0.6B-Base` and the
+  LoRA adapter produced by the training script.
+- ~~The recommendation engine~~ — **built in M06**
+  (`app/services/recommendations.py`), see the section above. One deviation
+  from the plan sketched here: the vectoriser is fitted **per request**, not
+  offline and loaded. At this menu's scale that is measurably cheap and
+  avoids a build/deploy step plus a staleness problem; it is documented as a
+  limitation to revisit if the catalogue grows.
 - Payment gateway / online card processing -- explicitly out of scope for
   M04. `Order.status` starts and stays `pending`; no route accepts a
   payment method or a card detail anywhere in this codebase.
