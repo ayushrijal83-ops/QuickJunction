@@ -204,6 +204,90 @@ against the menu without a translation layer in between.
 
 ---
 
+## Orders
+
+`app/models/order.py`
+
+### `orders`
+
+| Column | Type | Constraint |
+| --- | --- | --- |
+| `id` | `INTEGER` | PK |
+| `user_id` | `INTEGER` | `FK users.id ON DELETE RESTRICT`, `NOT NULL` |
+| `status` | `VARCHAR(16)` | `NOT NULL`, default `'pending'`, `CHECK` (allow-list) |
+| `subtotal` | `NUMERIC(10, 2)` | `NOT NULL`, `CHECK (subtotal >= 0)` |
+| `total` | `NUMERIC(10, 2)` | `NOT NULL`, `CHECK (total >= 0)` |
+| `created_at` / `updated_at` | `DATETIME` | `NOT NULL`, server-managed |
+
+**Index**: `ix_orders_user_created` on `(user_id, created_at)` -- backs the
+one query `GET /orders` runs: a user's own orders, newest first.
+
+**`user_id` is `ON DELETE RESTRICT`**, not `CASCADE` or `SET NULL`: an
+order is a financial record and must never be silently orphaned or deleted
+as a side effect of something happening to the account. There is no
+user-delete route anywhere in this codebase, so this is a documented
+invariant rather than one exercised by a test today.
+
+**`status`** is a `CHECK`-constrained allow-list via the same
+`enum_column()` helper as every other enumerated column (see "Allow-listed
+enum columns" above), holding `OrderStatus`'s full six-value restaurant
+lifecycle (`pending`, `confirmed`, `preparing`, `ready`, `completed`,
+`cancelled`) even though this milestone's checkout only ever writes
+`pending` and no route lets a customer change it. This is deliberate: the
+column is correct today so Milestone 05's staff status-management feature
+is a new endpoint, not a schema change.
+
+**`subtotal`/`total`**: both `Numeric(10, 2)` -> `Decimal`, same
+never-`float` rule as `menu_items.price`. `total` equals `subtotal` in this
+milestone (no tax, discount, or delivery fee exists yet) but is its own
+column, not a derived value, so a future fee/discount milestone has
+somewhere to diverge without a schema change.
+
+### `order_items`
+
+| Column | Type | Constraint |
+| --- | --- | --- |
+| `id` | `INTEGER` | PK |
+| `order_id` | `INTEGER` | `FK orders.id ON DELETE CASCADE`, `NOT NULL`, indexed |
+| `menu_item_id` | `INTEGER` | `FK menu_items.id ON DELETE RESTRICT`, `NOT NULL`, indexed |
+| `item_name_snapshot` | `VARCHAR(120)` | `NOT NULL` |
+| `unit_price_snapshot` | `NUMERIC(10, 2)` | `NOT NULL`, `CHECK (>= 0)` |
+| `quantity` | `INTEGER` | `NOT NULL`, `CHECK (quantity > 0)` |
+| `line_total` | `NUMERIC(10, 2)` | `NOT NULL`, `CHECK (>= 0)` |
+
+**`order_id`** is `ON DELETE CASCADE`: deleting an order (no route does
+this today) removes its line items with it -- the same compositional
+relationship as `Category`/`MenuItem` and their child rows elsewhere in
+this schema. **`menu_item_id`** is `ON DELETE RESTRICT`: menu items are
+never deleted anywhere in this codebase (only deactivated via
+`is_available`), and a historical order line must never be allowed to lose
+its reference even if that changes later.
+
+**Price snapshots, not live references**: `item_name_snapshot` and
+`unit_price_snapshot` are copied from `MenuItem` at checkout time and never
+updated again. A later rename or price change on the live menu item must
+never rewrite what a customer was actually charged --
+`tests/test_orders.py::test_18_price_snapshot_stored` changes the menu
+item's name and price after checkout and confirms the stored order line is
+unaffected.
+
+**The trust boundary**: every value on `OrderItem` -- `unit_price_snapshot`,
+`quantity`, `line_total` -- is computed server-side in
+`app/services/orders.py::checkout` from the current `MenuItem` row, never
+accepted from client-submitted form data. There is no code path anywhere
+in `app/routes/orders.py` that reads a price, a subtotal, or a total from
+the request. See `docs/SECURITY.md` for the full writeup, including what a
+client-submitted price/subtotal/total field is guaranteed to have zero
+effect on.
+
+**No cart table**: the cart is session-only, storing nothing but
+`{menu_item_id: quantity}` in Flask's signed session cookie (see
+`app/utils/cart.py` and `docs/ARCHITECTURE.md`'s cart/checkout section).
+Every price is re-resolved against `MenuItem` on every read, so no table is
+needed to hold a value that must never be trusted anyway.
+
+---
+
 ## Migration
 
 `migrations/versions/8d5ba0171efe_...py` (`down_revision = abf997064564`,
@@ -230,6 +314,23 @@ the final report for what specifically still needs checking against a
 real MySQL instance (native `CHECK` constraint support requires MySQL
 ≥ 8.0.16; the schema targets exactly that).
 
+**M04**: `migrations/versions/d8f3bfd0e2a9_add_cart_order_tables.py`
+(`down_revision = 8d5ba0171efe`) adds `orders`/`order_items` and widens
+`ck_audit_logs_event_type` to include `order_created`/`order_creation_failed`
+(`AuditEvent` gained those two members this milestone). Autogenerate also
+reported drop/recreate on three *unrelated* pre-existing constraints
+(`ck_users_role`, `ck_menu_items_*`, `ck_customer_preferences_*`) -- the
+same textual-diff false positive as M03's retrofit, confirmed by nothing
+about those columns having changed; those three spurious pairs were
+removed by hand, and only the genuine `ck_audit_logs_event_type` widening
+was kept. This distinction was caught the hard way: a live checkout in
+manual browser testing raised `IntegrityError` against a database migrated
+with all four constraint changes stripped, because the audit-log widening
+is real and the other three are not -- autogenerate's output alone cannot
+tell the two apart, only knowing which enums actually changed can. Verified
+with the same empty → upgrade → downgrade → re-upgrade round-trip against a
+scratch SQLite database; MySQL verification is still pending (see below).
+
 ---
 
 ## Security considerations specific to this data layer
@@ -254,3 +355,17 @@ real MySQL instance (native `CHECK` constraint support requires MySQL
   from SQLAlchemy's type declaration** -- see "Allow-listed enum columns"
   above. This is the one modeling mistake this milestone caught and fixed
   before it reached a migration that anyone would run against real data.
+- **Orders *do* have row ownership, unlike menu data** (M04):
+  `orders.user_id` is the one column in this schema an authorization
+  decision reads at the row level, and every query that returns an `Order`
+  filters by it in the query itself (`app/services/orders.py`'s
+  `list_orders_for_user`/`get_order_for_user`) rather than fetching by id
+  and checking ownership after the fact -- the difference between a
+  mismatched id returning `None`/404 and it ever being fetchable at all.
+  `tests/test_orders.py::test_21_idor_attempt_rejected` logs in as a second
+  account and confirms a direct `GET /orders/<id>` for someone else's order
+  is a plain 404, not a 403 (which would itself disclose that the id
+  exists).
+- **Every monetary value on `Order`/`OrderItem` is server-computed** (M04):
+  see the "Orders" section above and `docs/SECURITY.md` for the full
+  writeup of what a client can and cannot influence at checkout.

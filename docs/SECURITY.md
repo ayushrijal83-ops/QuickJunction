@@ -1,10 +1,10 @@
-# Security — Milestone 03 baseline
+# Security — Milestone 04 baseline
 
-Scope: foundation (M01), auth/authorization/CSRF/audit core (M02), plus the
-menu data layer and menu-management surface (M03). No cart, checkout,
-order, or payment feature exists yet. This document records what is in
-place, **why**, and what must be added before Quick Junction handles real
-orders.
+Scope: foundation (M01), auth/authorization/CSRF/audit core (M02), the menu
+data layer and menu-management surface (M03), plus cart, checkout, order
+placement, and order history (M04). No payment gateway exists yet. This
+document records what is in place, **why**, and what must be added before
+Quick Junction handles real payments.
 
 ---
 
@@ -47,7 +47,7 @@ under-iterated.
 
 - `hash_password()` / `verify_password()` wrap `argon2.PasswordHasher`.
 - `needs_rehash()` is exposed for a future migration path when parameters
-  change; not called automatically yet (no login-time rehash) — see §10.
+  change; not called automatically yet (no login-time rehash) — see §17.
 - `password_hash` is `VARCHAR(255)`: an encoded Argon2id hash is ~100
   chars; the headroom absorbs a parameter change without a migration.
 - The hash is **never** included in any JSON response, template, or log
@@ -64,7 +64,7 @@ length is the strongest lever against brute force; mandatory
 uppercase/symbol rules mostly push users toward predictable substitutions
 (`Password1!`). A maintained breach-corpus check (e.g. an HaveIBeenPwned
 k-anonymity lookup) is stronger than any hand-typed list and is future work,
-not this milestone's — see §10.
+not this milestone's — see §17.
 
 ---
 
@@ -230,11 +230,11 @@ does not need to prove the concept, and it still needs a shared backend
 new piece of infrastructure. `_LoginAttemptLimiter` exposes exactly three
 methods (`is_limited`, `record_failure`, `reset`); swapping in a
 Redis-backed `Flask-Limiter` call is a drop-in replacement behind that same
-interface when the deployment target needs it (see §10).
+interface when the deployment target needs it (see §17).
 
 Login is the only endpoint rate-limited this milestone — it is the only
 endpoint that authenticates against a secret. Public endpoints in general
-are noted as a follow-up in §10.
+are noted as a follow-up in §17.
 
 ---
 
@@ -288,7 +288,113 @@ baseline (still the standing rule for every future route):
 
 ---
 
-## 10. Audit logging
+## 10. Cart, checkout, and order trust boundary (M04)
+
+The single rule this whole milestone exists to enforce: **a price, a
+subtotal, or a total is never accepted from a client.** The client submits
+only a menu item id and a quantity; every monetary value that ends up on an
+`Order` or `OrderItem` is computed server-side, from the database, inside
+`app/services/orders.py::checkout`.
+
+**What the cart is (and is not).** `app/utils/cart.py` stores exactly
+`{menu_item_id: quantity}` in Flask's signed session cookie — no price, no
+item name, no line total, no subtotal. Because the session is
+`itsdangerous`-signed with `SECRET_KEY`, a client can read but not alter
+its contents without invalidating the signature; a tampered cookie is
+rejected by Flask before a request reaches a view. That is what makes a
+session cart safe to use here without a database table or a new dependency
+— but it is *defense in depth*, not the reason prices are safe. Even a
+cart that were fully attacker-controlled could not inject a price, because
+nothing about price is ever read from it.
+
+**Server-side revalidation happens on every read, not just at checkout.**
+`app/services/cart.py::build_cart_view` re-resolves every cart line against
+the live `MenuItem` table (same "active category + available item" filter
+as the public menu, `app/services/menu.py::get_public_menu_item`) on every
+`GET /cart` — a price change or a deactivation between "add to cart" and
+"view cart" is visible immediately.
+
+**Checkout order of operations** (`app/services/orders.py::checkout`),
+every step server-side, none trusting the caller:
+
+1. Parse the session cart's `{menu_item_id: quantity}` pairs.
+2. Reload each menu item from the database.
+3. Verify each is still available (active category + `is_available`).
+4. Verify each quantity is in bounds (1–20 per item, ≤30 distinct items).
+5. Recompute every unit price and line total from the *current* `MenuItem.price`.
+6. Sum the subtotal and total.
+7. Write `Order` + its `OrderItem` rows in one transaction.
+
+Any failure at any step raises `CheckoutError` before a single row is
+written, or triggers `db.session.rollback()` if a step after the write has
+already begun (test 19, `tests/test_orders.py`, forces a commit failure via
+monkeypatch and asserts zero `Order`/`OrderItem` rows survive). There is no
+code path that creates a partial order.
+
+**Never accepted as authoritative — verified by test, not just by
+inspection:** a client-submitted `unit_price`, `subtotal`, or `total` field
+on the checkout POST is not merely validated and rejected — there is no
+form field, no service parameter, and no code path that reads one at all.
+`tests/test_orders.py` tests 15–17 submit exactly these fields alongside a
+real checkout and assert the stored order matches the server-computed
+value regardless. The manual browser walkthrough went further: injecting
+hidden `total`, `subtotal`, `unit_price`, and `status` fields into the
+checkout form via the DevTools console before submitting, and confirming
+the resulting order's price and status were unaffected (see the final
+report).
+
+**Price snapshots freeze history.** `OrderItem.item_name_snapshot` and
+`unit_price_snapshot` are copied from `MenuItem` at checkout time and never
+updated again — a later rename or price change on the live menu item must
+never rewrite what a customer was actually charged (test 18 changes both
+after checkout and confirms the stored order line is untouched). This is
+also why `Order`/`OrderItem` have their own columns rather than a foreign
+key computation: an order is a historical record, not a live view onto the
+menu.
+
+**Order status cannot be set or changed by a customer.** `checkout` always
+writes `OrderStatus.PENDING`; there is no form field, service parameter, or
+route that accepts a client-supplied status, at creation or afterward (test
+22 submits a `status=completed` field on the checkout POST and confirms the
+created order is still `PENDING`, then confirms no route exists for a
+customer to change it post-creation). Staff status management is deferred
+to Milestone 05 — see `docs/ARCHITECTURE.md`.
+
+**Ownership (IDOR) is enforced in the query, not after fetching the row.**
+`app/services/orders.py::get_order_for_user` and `list_orders_for_user`
+both filter by `user_id` as part of the SQL query itself — a mismatched
+order id and a non-existent order id are indistinguishable, both returning
+`None`/404. `GET /orders/<id>` never returns 403 for someone else's order;
+403 would itself confirm the id exists. Test 21
+(`tests/test_orders.py::test_21_idor_attempt_rejected`) logs in as a second
+account and confirms a direct request for the first account's order id
+returns a plain 404, and the manual browser walkthrough repeated the same
+attack by hand (see the final report).
+
+**Checkout requires authentication; the cart does not.** `GET/POST
+/checkout`, `GET /orders`, and `GET /orders/<id>` are all
+`@login_required` (test 11 confirms both the checkout page and the
+checkout POST return 401 for an anonymous request, and that no order is
+created). `GET /cart` and the four cart-mutation routes are intentionally
+open to anonymous visitors — a session cart holds no PII and no money
+moves until checkout, so there is nothing an anonymous cart exposes that
+requires gating it behind login.
+
+**CSRF, same mechanism as every other state-changing form in this app.**
+Every cart-mutation route and the checkout POST are `FlaskForm`s carrying
+a `csrf_token` field, checked by Flask-WTF's `CSRFProtect` before the view
+body runs (test 23, plus a live `fetch()` with no token against the running
+dev server during the manual walkthrough, confirming `400`).
+
+**What is out of scope for this milestone, by design:** no payment
+gateway, no card data of any kind, no tax/discount/delivery-fee
+calculation (`total` equals `subtotal` unconditionally), no order
+cancellation, and no staff-facing status change. See
+`docs/ARCHITECTURE.md`'s "Room reserved for later work."
+
+---
+
+## 11. Audit logging
 
 `app/models/audit_log.py` (`AuditLog`, `AuditEvent`) +
 `app/services/audit.py` (`record_event` — the only writer).
@@ -297,15 +403,28 @@ baseline (still the standing rule for every future route):
 `login_rate_limited`, `logout` (M02); `category_created`,
 `category_updated`, `category_deactivated`, `menu_item_created`,
 `menu_item_updated`, `menu_item_availability_changed`,
-`ingredient_changed` (M03).
+`ingredient_changed` (M03); `order_created`, `order_creation_failed` (M04).
 
-**`user_id` means "actor" for the M03 events**, not "subject" — it is the
-id of the admin who performed the action, not any user the menu item might
-somehow relate to (menu items have no owner). Auth events keep the M02
-meaning (the account the event is about). Both readings coexist without a
-schema change because the column has always meant "the account most
-relevant to this row," and for a menu edit that is the person who edited
-it.
+**`user_id` means "actor" for the M03/M04 events**, not "subject" — it is
+the id of the admin who performed a menu-management action, or the
+customer who placed (or failed to place) an order. Auth events keep the
+M02 meaning (the account the event is about). All readings coexist without
+a schema change because the column has always meant "the account most
+relevant to this row."
+
+**Order events, specifically (M04):** `order_created` fires once per
+successful checkout with `{"order_id": ..., "total": "..."}` in
+`metadata_json` — enough to look up the order, nothing about its contents.
+`order_creation_failed` fires whenever `checkout()` raises `CheckoutError`
+(empty cart, an item that went unavailable mid-checkout, a quantity out of
+bounds, or a database failure during the write) with no metadata beyond
+the acting user — deliberately generic, since the failure reasons
+themselves are already shown to the customer as flashed form errors and
+don't need duplicating into the audit trail. `tests/test_orders.py` test
+24 asserts the audit row's `user_id` and that the order id appears in
+`metadata_json`; test 25 asserts a checkout failure (item deactivated
+after being added to the cart) produces exactly one `order_creation_failed`
+row.
 
 **Columns, deliberately narrow:** `event_type`, `user_id` (nullable — a
 failed login for a username that doesn't exist names no account),
@@ -347,11 +466,11 @@ timestamps.
 **Retention:** not enforced in code. `audit_logs` rows contain IP addresses
 and login activity and should be treated as sensitive: a defined retention
 window (90 days is a reasonable starting point) and access restricted to
-operators. Automatic purging is future work — see §12.
+operators. Automatic purging is future work — see §17.
 
 ---
 
-## 11. Debug and environment separation
+## 12. Debug and environment separation
 
 - `DEBUG` is `True` only in `DevelopmentConfig`.
 - `ProductionConfig` hard-codes `DEBUG = False` / `TESTING = False` and its
@@ -365,7 +484,7 @@ traceback. Debug mode in production is remote code execution.
 
 ---
 
-## 12. Error handling
+## 13. Error handling
 
 `app/utils/errors.py` registers two handlers:
 
@@ -388,14 +507,14 @@ users are expected to read errors on.
 
 ---
 
-## 13. Security logging
+## 14. Security logging
 
 `app/utils/logging.py` provides two channels:
 
 - `app.logger` → console + `logs/app.log` (rotating, 2 MiB × 5).
 - `quickjunction.security` → console + `logs/security.log` (rotating,
   always at least `INFO`, non-propagating) — now actively written to by
-  every audit event (§10).
+  every audit event (§11).
 
 `logs/` is git-ignored. File logging is off in the testing configuration.
 
@@ -411,7 +530,7 @@ output into a ticket.
 
 ---
 
-## 14. Health endpoint
+## 15. Health endpoint
 
 `GET /health` returns exactly `{"status": "ok"}`. Unchanged from Milestone
 01: no version, environment name, hostname, path, configuration value, or
@@ -419,38 +538,43 @@ database status.
 
 ---
 
-## 15. Protection against accidental secret commits
+## 16. Protection against accidental secret commits
 
 Unchanged from Milestone 01 — `.gitignore` coverage, no real `.env` in the
 repository. See the project `README.md` for the current rule set.
 
 ---
 
-## 16. Not yet implemented — required before production
+## 17. Not yet implemented — required before production
 
 Ranked by how much damage the absence causes. Items completed this
 milestone (authentication, authorization, CSRF, session fixation
-protection, an initial rate limiter) are removed from this list.
+protection, an initial rate limiter, and — as of M04 — order audit
+logging) are removed from this list.
 
 | # | Item | Needed by |
 | --- | --- | --- |
-| 1 | Multi-worker-safe rate limiting (Flask-Limiter + Redis) | first multi-worker/multi-instance deployment |
-| 2 | Security headers: HSTS, `X-Content-Type-Options`, `X-Frame-Options`, CSP (via Flask-Talisman or the reverse proxy) | first HTML page shipped to real users |
-| 3 | Strip the `Server` header — the dev server advertises `Werkzeug/... Python/...` | deployment |
-| 4 | TLS termination + HTTP→HTTPS redirect | deployment |
-| 5 | A dedicated MySQL user with least privilege — no `GRANT ALL` in production | deployment |
-| 6 | Password reset flow (with its own rate limiting and token expiry) | first locked-out real user |
-| 7 | Email verification at registration | before email is trusted for anything (e.g. password reset) |
-| 8 | Login-time rehash (`needs_rehash()` is written but not called) | first Argon2 parameter change |
-| 9 | A maintained breached-password check (e.g. HaveIBeenPwned k-anonymity) replacing the hand-typed deny-list | before it matters for a real user base |
-| 10 | Audit log retention/purge policy, enforced in code | first real data / compliance review |
-| 11 | Audit trail for order/billing changes | first order |
+| 1 | Payment gateway / online card processing | first real transaction |
+| 2 | Multi-worker-safe rate limiting (Flask-Limiter + Redis) | first multi-worker/multi-instance deployment |
+| 3 | Security headers: HSTS, `X-Content-Type-Options`, `X-Frame-Options`, CSP (via Flask-Talisman or the reverse proxy) | first HTML page shipped to real users |
+| 4 | Strip the `Server` header — the dev server advertises `Werkzeug/... Python/...` | deployment |
+| 5 | TLS termination + HTTP→HTTPS redirect | deployment |
+| 6 | A dedicated MySQL user with least privilege — no `GRANT ALL` in production | deployment |
+| 7 | Password reset flow (with its own rate limiting and token expiry) | first locked-out real user |
+| 8 | Email verification at registration | before email is trusted for anything (e.g. password reset) |
+| 9 | Login-time rehash (`needs_rehash()` is written but not called) | first Argon2 parameter change |
+| 10 | A maintained breached-password check (e.g. HaveIBeenPwned k-anonymity) replacing the hand-typed deny-list | before it matters for a real user base |
+| 11 | Audit log retention/purge policy, enforced in code | first real data / compliance review |
 | 12 | Encrypted, tested database backups | first real data |
 | 13 | Dependency scanning (`pip-audit`) in CI | first CI run |
 | 14 | Content negotiation on error responses (HTML vs JSON) | first real HTML page beyond auth forms |
-| 15 | **MySQL verification of the M02+M03 migration** (`CHECK` constraints, `Numeric` price type, foreign keys, indexes) — no local MySQL server was reachable in this environment; see `docs/DATABASE.md` | before any real (non-SQLite) deployment |
+| 15 | **MySQL verification of the M02+M03+M04 migrations** (`CHECK` constraints, `Numeric` price/subtotal/total types, foreign keys, indexes) — no local MySQL server was reachable in this environment; see `docs/DATABASE.md` | before any real (non-SQLite) deployment |
 | 16 | Ingredient administration beyond the menu-item form's comma-separated field (rename/merge/delete an ingredient independently of any one menu item) | first time a typo'd ingredient name needs correcting across many items |
 | 17 | Per-field price-change audit history (currently a price change is folded into the generic `menu_item_updated` event, not its own event) | if price-change history becomes a compliance or dispute-resolution need |
+| 18 | Order cancellation (customer- or staff-initiated) | first customer who needs to cancel |
+| 19 | Staff order-status management (`OrderStatus` already supports the full lifecycle — see `docs/ARCHITECTURE.md`) | Milestone 05 |
+| 20 | Cart persistence across login (an anonymous cart is discarded on login/logout since `login_user()` clears the session — see `docs/SECURITY.md` §3) | first user who builds a cart before signing in |
+| 21 | Multi-worker-safe checkout idempotency (a double-submitted checkout under concurrent requests relies on the cart being cleared client-side and server-side after the first success, not on a dedicated idempotency key) | first multi-worker/multi-instance deployment |
 
 ### AI-specific, for the milestone that adds the model
 
