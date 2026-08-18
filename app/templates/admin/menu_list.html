@@ -1,38 +1,74 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Menu items - Quick Junction Admin</title>
-</head>
-<body>
-  <p><a href="{{ url_for('account.index') }}">&larr; Account</a></p>
-  <h1>Menu items</h1>
+{% extends "base.html" %}
+{% block title %}Menu items &mdash; Quick Junction Admin{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Menu items</h1>
+    <p class="text-secondary mb-0">Every item, including those not currently available.</p>
+  </div>
+  <div class="d-flex gap-2">
+    {# Shown for admins only; the route enforces the role regardless. #}
+    {% if current_user and current_user.role.value == "admin" %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('admin_menu.category_list') }}">Categories</a>
+      <a class="btn btn-primary" href="{{ url_for('admin_menu.menu_create') }}">New menu item</a>
+    {% endif %}
+  </div>
+</div>
 
-  {% if current_user and current_user.role.value == "admin" %}
-    <p><a href="{{ url_for('admin_menu.menu_create') }}">+ New menu item</a></p>
-  {% endif %}
-
-  <table border="1" cellpadding="4">
-    <tr><th>Name</th><th>Category</th><th>Price</th><th>Available</th><th></th></tr>
-    {% for item in items %}
-      <tr>
-        <td>{{ item.name }}</td>
-        <td>{{ item.category.name }}</td>
-        <td>{{ item.price }}</td>
-        <td>{{ "yes" if item.is_available else "no" }}</td>
-        <td>
-          {% if current_user and current_user.role.value == "admin" %}
-            <a href="{{ url_for('admin_menu.menu_edit', item_id=item.id) }}">Edit</a>
-          {% endif %}
-        </td>
-      </tr>
-    {% endfor %}
-  </table>
-</body>
-</html>
+{% if items %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Category</th>
+            <th scope="col">Attributes</th>
+            <th scope="col" class="text-end">Price</th>
+            <th scope="col">Availability</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <th scope="row" class="fw-semibold">{{ item.name }}</th>
+              <td>{{ item.category.name }}</td>
+              <td class="small">
+                <span class="badge rounded-pill text-bg-light border">{{ item.cuisine.value|replace("_", " ")|title }}</span>
+                <span class="badge rounded-pill text-bg-light border">{{ item.dietary_type.value|replace("_", " ")|title }}</span>
+                <span class="badge rounded-pill text-bg-light border">{{ item.spice_level.value|replace("_", " ")|title }}</span>
+              </td>
+              <td class="text-end qj-price">{{ item.price }}</td>
+              <td>
+                {% if item.is_available %}
+                  <span class="badge text-bg-success">Available</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">Unavailable</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                {% if current_user and current_user.role.value == "admin" %}
+                  <a class="btn btn-sm btn-outline-primary"
+                     href="{{ url_for('admin_menu.menu_edit', item_id=item.id) }}">Edit</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">No menu items yet</h2>
+    {% if current_user and current_user.role.value == "admin" %}
+      <p class="mb-3">Create a category first, then add menu items to it.</p>
+      <a class="btn btn-primary" href="{{ url_for('admin_menu.menu_create') }}">New menu item</a>
+    {% else %}
+      <p class="mb-0">An administrator has not added any menu items yet.</p>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

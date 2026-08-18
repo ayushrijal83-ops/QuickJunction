@@ -1,52 +1,35 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Register - Quick Junction</title>
-</head>
-<body>
-  <h1>Create an account</h1>
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, submit %}
+{% block title %}Create an account &mdash; Quick Junction{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-7 col-lg-5">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">Create an account</h1>
+        <p class="text-secondary small mb-4">You need an account to place an order.</p>
 
-  <form method="post" action="{{ url_for('auth.register') }}" novalidate>
-    {{ form.hidden_tag() }}
+        <form method="post" action="{{ url_for('auth.register') }}" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.username, autofocus=true, autocomplete="username",
+                   help="3–32 characters: letters, digits and underscores.") }}
+          {{ field(form.email, type="email", autocomplete="email") }}
+          {{ field(form.password, autocomplete="new-password",
+                   help="At least 10 characters, including a letter and a digit.") }}
+          {{ field(form.password_confirm, autocomplete="new-password") }}
 
-    <p>
-      {{ form.username.label }}<br>
-      {{ form.username(size=32) }}
-      {% for error in form.username.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
+          {% for error in form.errors.get("_general", []) %}
+            <div class="alert alert-danger py-2">{{ error }}</div>
+          {% endfor %}
+
+          <div class="d-grid">{{ submit("Create account") }}</div>
+        </form>
+      </div>
+    </div>
+    <p class="text-center mt-3 mb-0">
+      Already have an account? <a href="{{ url_for('auth.login') }}">Log in</a>
     </p>
-
-    <p>
-      {{ form.email.label }}<br>
-      {{ form.email(size=32) }}
-      {% for error in form.email.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
-    </p>
-
-    <p>
-      {{ form.password.label }}<br>
-      {{ form.password(size=32) }}
-      {% for error in form.password.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
-    </p>
-
-    <p>
-      {{ form.password_confirm.label }}<br>
-      {{ form.password_confirm(size=32) }}
-      {% for error in form.password_confirm.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
-    </p>
-
-    {% if form.errors.get("_general") %}
-      {% for error in form.errors["_general"] %}<p class="error">{{ error }}</p>{% endfor %}
-    {% endif %}
-
-    {{ form.submit() }}
-  </form>
-
-  <p><a href="{{ url_for('auth.login') }}">Already have an account? Log in.</a></p>
-</body>
-</html>
+  </div>
+</div>
+{% endblock %}

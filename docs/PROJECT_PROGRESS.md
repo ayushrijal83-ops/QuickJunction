@@ -4,8 +4,8 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-08-17 (end of Milestone 07.1)
-Current state: **Milestone 07.1 complete.** Next: Milestone 08.
+Last updated: 2026-08-18 (end of Milestone 09)
+Current state: **Milestone 09 complete — demo-ready, session replay closed.**
 
 > **Document history:** this file did not exist until the end of Milestone
 > 04. Milestones 01–03 below were reconstructed by reading the repository
@@ -28,13 +28,14 @@ Current state: **Milestone 07.1 complete.** Next: Milestone 08.
 | 06 | Customer preferences + deterministic recommendation engine | ✅ Complete |
 | 07 | Local Qwen inference + hand-authored dataset + LoRA fine-tune | ✅ Complete |
 | 07.1 | Dataset rebalance (60→150) + V2 retrain + 3-way evaluation | ✅ Complete |
-| 08 | Not yet defined | ⬜ Not started |
-| — | Payment gateway, frontend styling, deployment | ⬜ Not started |
+| 08 | Finalization: Bootstrap UI, MySQL E2E, security audit, demo readiness | ✅ Complete |
+| 09 | Security hardening: server-side session revocation | ✅ Complete |
+| — | Payment gateway, production deployment | ⬜ Not started |
 
-**Test suite: 196 passing, 0 failing** (`pytest`; in-memory SQLite for
+**Test suite: 239 passing, 0 failing** (`pytest`; in-memory SQLite for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
-**MySQL verification: PENDING** — see [MySQL verification status](#mysql-verification-status).
+**MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
 
 ---
 
@@ -745,24 +746,371 @@ over-selling. See `docs/AI.md` §11.5.
 
 ---
 
+## Milestone 08 — Finalization, UI polish, MySQL E2E ✅
+
+Finalization milestone: no new product features, no schema change, no
+retraining. Bootstrap UI, verified MySQL operation, a live security audit, a
+measured performance fix, and demo readiness.
+
+### MySQL end-to-end — verified
+
+Everything in [MySQL verification status](#mysql-verification-status) was
+observed against a live **MySQL 8.0.46** server, `quick_junction`, Alembic
+head **`38297b707b89`**. Highlights:
+
+- All **15 `CHECK` constraints** present *and enforced* — direct `INSERT`s of
+  a negative price, an invalid cuisine and an invalid role were each rejected
+  by the server.
+- Every money column `decimal(10,2)`; **zero** float/double columns anywhere.
+- All **8 foreign keys** with the intended `ON DELETE` rule; all InnoDB.
+- Full application flow exercised on MySQL (see Browser verification below).
+
+**No schema change and no migration were needed in M08.**
+
+### Bootstrap UI
+
+Bootstrap 5.3.3 is **vendored locally** under `app/static/vendor/` (305 KB),
+not loaded from a CDN — the project is offline-first, and a CDN would be the
+only runtime dependency on the public internet. A test asserts no page
+references a CDN host.
+
+- New `app/templates/base.html`: responsive navbar, role-aware links, flash
+  alerts, footer. **All 18 existing templates converted to extend it.**
+- New partials: `_menu_card.html`, `_forms.html` (field/select/checkbox/
+  submit macros), `_status_badge.html`.
+- New `app/static/css/app.css` — 30 lines; everything Bootstrap already
+  provides is used as-is.
+- **New homepage at `/`** (`app/routes/main.py`). The site root previously
+  returned **404** — a real gap for a demo.
+- Order status badges are colour-coded; menu items are cards with clear
+  prices, attribute badges and availability state; every list has a designed
+  empty state; submit buttons disable and show a spinner on click.
+- Accessibility: `visually-hidden` labels on icon-only controls, `scope` on
+  table headers, `aria-label` on the nav toggle, breadcrumbs, and
+  server-driven `is-invalid`/`invalid-feedback` validation messages.
+
+Security properties held through the redesign, asserted by tests: no `|safe`
+anywhere, a CSRF token in every POST form, hostile menu names escaped on
+every page that renders them, no secret in any rendered page.
+
+### AI presentation
+
+`/recommendations/explain` now shows two clearly separated panels:
+
+| Panel | Label | Content |
+| --- | --- | --- |
+| Left (green) | **Calculated by Quick Junction** | price, cuisine, dietary type, spice, match — each annotated "matches your preference" / "you prefer X" |
+| Right (blue) | **Advisory** | the model's sentence, italicised, with a caveat that the left panel is authoritative |
+
+If the model is unavailable the right panel shows "AI explanation
+temporarily unavailable." and the left panel is unchanged.
+
+### AI evaluation — re-run, no regression
+
+`python training/evaluate.py` reproduced M07.1 **exactly** (greedy decoding,
+identical generations):
+
+| System | Passed | Keyword coverage |
+| --- | --- | --- |
+| Base Qwen3-0.6B | 8/8 | 10/32 |
+| M07 adapter (v1) | 5/8 | 12/32 |
+| **M07.1 adapter (v2, in use)** | **8/8** | **16/32** |
+
+No quality regression, so **no retraining was performed**, per the brief.
+
+Adapter behaviour verified live:
+
+| Configuration | Result |
+| --- | --- |
+| V2 adapter (production default) | generates |
+| V1 adapter (retained) | generates |
+| No adapter configured | falls back to base model |
+| Missing adapter directory | falls back to base model |
+| Malformed model path | `None` → clean fallback message |
+| Path-traversal attempt (`../../etc`) | `None` → no file access |
+
+### Security audit — 36 live checks
+
+Executed against the running application on MySQL, not from source reading:
+**35 passed, 1 real finding.**
+
+Authentication (wrong password rejected, session established, logout,
+fixation rotation) · Authorization (customer→staff 403, customer→admin 403,
+**staff→admin 403**, admin→both 200, anonymous 401, forged
+`X-Role`/`X-User-Role`/`X-User-Id` ignored) · CSRF (valid accepted; missing
+and forged rejected 400 on preferences, cart, checkout and staff status) ·
+Input handling (invalid enums rejected without writing, negative quantity
+rejected, nonexistent menu id rejected) · Disclosure (no hash in identity
+JSON, no credential material on any page, no traceback on 401/404) · IDOR
+(owner 200, other customer **404**, anonymous 401) · AI (deterministic facts
+present, advisory label, no external endpoint).
+
+**Finding — logout does not revoke a copied session cookie.** A `qj_session`
+value captured *before* logout still authenticated afterwards (replay
+returned `200` from `/orders` and `/account/me`). This is inherent to
+Flask's stateless signed-cookie sessions: `session.clear()` clears only the
+client's own copy. **`docs/SECURITY.md` §6 previously overstated this** as
+"invalidating the old session immediately"; that claim has been corrected.
+Bounded by `HttpOnly`/`Secure`/`SameSite`, the 8-hour lifetime, and the
+per-request `User` reload. A real fix needs server-side session state (a
+session table or a `token_version` column) — deliberately **not** added in a
+finalization milestone. Pinned by
+`tests/test_ui.py::test_no_server_side_session_revocation_exists`.
+
+### Performance — one real N+1 found and fixed
+
+| Page | Time | SQL queries |
+| --- | --- | --- |
+| `/` | 9 ms | 5 |
+| `/menu` | 10 ms | 2 |
+| `/cart` | 5 ms | 0 |
+| `/orders` | 6 ms | 1 |
+| `/staff/orders` | 9 ms | flat (eager-loaded since M05) |
+| `/recommendations` | 18 ms | **14 → 5** |
+
+`build_item_document()` reads `category` and `ingredients` for every
+candidate, which lazy-loaded **one query per item** (9 separate `ingredients`
+queries for a 9-item menu). `candidate_items()` and `build_history_document()
+` now eager-load both. Pinned by
+`tests/test_recommendations.py::test_23`, which builds a 12-item menu and
+asserts the query count stays flat.
+
+Model loading confirmed to happen **once per process**, not per request:
+three consecutive explanation requests took 23 s, 9.2 s, 9.1 s.
+
+### Browser verification — full demo workflow on MySQL
+
+Homepage → register `demoguest` → log in → browse menu → set preferences
+(vegetarian/Indian/hot) → recommendations (Paneer Tikka top at 34 %; meat
+dishes absent entirely) → AI explanation (facts panel + advisory panel) →
+add to cart (2 × 249.00 = 498.00) → checkout → **Order #2 PENDING** → log in
+as `staff` → order queue → `PENDING → CONFIRMED → PREPARING → READY →
+COMPLETED` → back as customer, status shows **COMPLETED** → log in as
+`admin`, menu management renders with availability badges → log out.
+
+Negative cases observed: invalid transition (`COMPLETED → PREPARING`) with a
+**valid** CSRF token rejected, order unchanged · CSRF-less status change 400
+· staff→admin 403 · customer→staff 403 · customer→another order 404 ·
+unavailable item absent from the public menu · unknown route clean 404 with
+no traceback · after logout all protected routes 401 while public pages 200.
+
+### Tests — 221 passing
+
+| File | Tests |
+| --- | --- |
+| `test_foundation.py` | 10 |
+| `test_auth.py` | 29 |
+| `test_menu.py` | 26 |
+| `test_orders.py` | 28 |
+| `test_migrations.py` | 4 |
+| `test_staff_orders.py` | 20 |
+| `test_recommendations.py` | 26 |
+| `test_llm.py` | 32 |
+| `test_dataset_v2.py` | 22 |
+| **`test_ui.py` (new)** | **24** |
+
+**221 passed, 0 failed, 0 skipped, 12 warnings** (all the pre-existing
+Flask-SQLAlchemy `get_engine` deprecation in `migrations/env.py`).
+
+Ten tests broke during the UI conversion because they assert on user-visible
+copy. **No test was weakened**: the copy was adjusted so the original
+assertions hold unmodified ("Your cart is empty." kept its period; the order
+table renders "Order #N").
+
+### Demo readiness
+
+`scripts/seed_demo.py` — idempotent, refuses to run against a production
+config. Creates 3 categories, 10 menu items (one deliberately unavailable)
+and three accounts: `customer` / `staff` / `admin`, all
+`demo-password-1`. README documents install, `.env`, migrations, tests, run,
+and a five-minute demo path.
+
+### AI positioning (accurate statement)
+
+We did **not** train a large language model from scratch. We used
+Qwen3-0.6B-Base as the foundation model, hand-authored a project-specific
+instruction dataset, fine-tuned locally with parameter-efficient LoRA
+(0.84 % of parameters), evaluated the adapter against held-out scenarios,
+and integrated it as an explanation-only component.
+
+---
+
+## Milestone 09 — Session revocation hardening ✅
+
+Single-issue hardening milestone. No product features, no retraining, no
+recommendation or UI changes. It closes the one genuine vulnerability the M08
+audit found.
+
+### The vulnerability (root cause)
+
+M08 verified live that a `qj_session` cookie **copied before logout still
+authenticated afterwards** — replaying it returned `200` from `/orders` and
+`/account/me` after the original browser had logged out.
+
+Cause, confirmed by reading the code rather than assumed: the session was a
+signed cookie carrying exactly one value, `user_id`, and `get_current_user()`
+accepted any validly-signed cookie whose user existed and was active. There
+was **no server-side state to invalidate**, so `session.clear()` on logout
+could only clear the browser's own copy — never a copy someone else held. The
+copy stayed valid for the full 8-hour lifetime.
+
+### The fix
+
+`users.session_version`, an integer counter:
+
+| Step | Behaviour |
+| --- | --- |
+| `login_user()` | stamps the session with the user's current `session_version` |
+| every request | `get_current_user()` compares session version against the column; mismatch → clear session, return `None` |
+| `logout_user()` | increments the column, so every session issued before that logout stops validating |
+
+A **counter, not a token** — nothing secret is stored in the column or placed
+in the cookie, so there is no session secret to leak, hash or rotate. The
+value is never logged and never appears in a response body.
+
+`logout_user()` still clears the cookie even if the counter cannot be
+committed, so the browser in hand is logged out regardless.
+
+**Scope: logout revokes all of that user's sessions.** One counter cannot
+distinguish sessions, so logging out on one device logs the account out
+everywhere. Per-session revocation would need a session table or a per-session
+token — a materially larger subsystem for a marginal usability gain, and
+over-revoking is the safe direction. Pinned by
+`test_9_logout_revokes_every_session_for_that_user` so it is an explicit
+choice, not an accident.
+
+**Fail-closed on upgrade:** sessions predating the migration carry no version
+and are refused, so every pre-existing login is invalidated on deploy.
+
+### Migration
+
+One migration, `2d9f3b20045f` (`down_revision = 38297b707b89`), adding a
+single column. Head is now **`2d9f3b20045f`**.
+
+Verified **against live MySQL 8.0.46**: `upgrade` → column present as
+`int NOT NULL DEFAULT 0` with existing rows backfilled to `0` → `downgrade` →
+column removed → `upgrade` → head. `tests/test_migrations.py` still passes, so
+the chain continues to reproduce the models' schema exactly.
+
+### Verification — live, with controls
+
+Every replay check is paired with a **control** replaying a cookie that has
+*not* been revoked, so a broken harness cannot produce a false pass.
+
+Against MySQL across separate processes (no shared application state):
+
+| Step | Result |
+| --- | --- |
+| owner `/orders` before logout | 200 |
+| CONTROL — replay captured cookie pre-logout | **200** (harness works) |
+| owner `/orders` after logout | 401 |
+| **REPLAY captured cookie after logout** | **401 — fixed** |
+| replay `/account/me` after logout | 401 |
+| fresh login | 200 |
+| old cookie after fresh login | 401 |
+
+### Tests — 18 new, 239 total
+
+`tests/test_session_revocation.py`: logout invalidates the current session;
+copied cookie cannot authenticate after logout (across `/orders`,
+`/account/me`, `/preferences`); fresh login works; unauthenticated still 401;
+forged/garbage cookies never authenticate; RBAC unaffected; a revoked *staff*
+session loses staff access; forged role headers still ignored; CSRF still
+enforced; no session material in logs or response bodies; login→logout→login
+cycles stable with the counter incrementing; a failed login neither
+authenticates nor revokes; session-fixation protection retained; deactivation
+still immediate; one user's logout does not affect another user; multi-device
+revocation semantics; and an end-to-end checkout smoke test.
+
+**239 passed, 0 failed, 0 skipped.** No existing test was weakened.
+
+**Non-vacuity proven:** disabling the version comparison makes exactly the
+three replay tests fail (`test_2`, `test_5b`, `test_9`); restored and
+re-verified.
+
+The M08 placeholder test that asserted *no* revocation existed — written to
+fail the moment one was added — did exactly that, and was replaced by
+`test_session_revocation_state_exists`.
+
+### Security regression audit — 36/36
+
+The standing live audit re-run in full: authentication, authorization
+(customer→staff/admin 403, staff→admin 403, admin→both 200, anonymous 401),
+forged role headers, CSRF (missing and forged across four routes), input
+handling, disclosure, IDOR (404 not 403), and the AI boundary.
+
+**"old session cookie unusable after logout" moved from FAIL to PASS.** It was
+the only failing check in M08; the audit is now 36/36.
+
+### Browser verification
+
+Login as customer → `/orders` 200 → logout → `/orders`, `/account/me`,
+`/preferences` all 401 while `/menu` stays 200 → fresh login 200 → RBAC
+re-checked per role: staff (queue 200, admin 403), admin (queue 200, admin
+200), customer (both 403) → final logout 401.
+
+`document.cookie` was confirmed **empty** in the browser: `HttpOnly` prevents
+a page script from reading `qj_session` at all, which is precisely why the
+capture/replay half of the test is performed at the HTTP layer instead.
+
+### Finding — test-harness weakness (not a production issue)
+
+While building the regression tests I found that the pytest `app` fixture
+holds **one** application context open for the whole test, and Flask reuses an
+already-pushed app context instead of creating one per request. `g.current_user`
+therefore persists between requests *and across different test clients* within
+a test — an anonymous client was observed being served as an authenticated
+user, and a second `login()` silently no-opped because `/login` redirects when
+someone is already signed in.
+
+Production is unaffected: each real request pushes its own application
+context, which is why the live MySQL verification above behaves correctly.
+
+It does mean any test that switches identity mid-test can pass for the wrong
+reason. The new tests clear the cache explicitly via `forget_cached_user()`,
+documented at the call site. Auditing the older suites for the same latent
+weakness is recorded as known issue #29 rather than attempted in a
+single-issue hardening milestone.
+
+---
+
 ## MySQL verification status
 
-**MySQL integration verification pending.**
+**MySQL verification is COMPLETE.** Performed in M08 against a live server;
+every line below is an observed result, not a claim.
 
-No MySQL server has been reachable in this environment at any point. Every
-migration and all DDL for M02–M05 has been verified against SQLite only —
-including `tests/test_migrations.py`, which also runs on SQLite. M06 and M07
-added no migration. This has **not** been tested against MySQL and must not
-be described as if it had been.
+| | |
+| --- | --- |
+| Server | **MySQL 8.0.46** |
+| Database | `quick_junction` |
+| Driver | PyMySQL 1.2.0 |
+| Alembic head | **`2d9f3b20045f`** (`flask db current` reports it as head; was `38297b707b89` before M09) |
+| Tables | 10 — the 9 application tables plus `alembic_version` |
+| Engine | InnoDB for every table |
 
-Still to check against a real MySQL ≥ 8.0.16 instance:
+**Verified properties that SQLite could never confirm:**
 
-- CHECK constraint creation and enforcement (native support requires
-  ≥ 8.0.16; schema targets exactly that)
-- `Numeric(10,2)` behaviour for `price`, `subtotal`, `total`,
-  `unit_price_snapshot`, `line_total`
-- Foreign key `ON DELETE RESTRICT` / `CASCADE` semantics under InnoDB
-- Index creation, and per-schema uniqueness of CHECK constraint names
+- **All 15 `CHECK` constraints exist natively** (`information_schema`), and
+  are **enforced**: direct `INSERT`s of a negative price, an out-of-vocabulary
+  cuisine, and an invalid user role were each rejected by the server.
+- **Money columns are `decimal(10,2)`** — `menu_items.price`,
+  `orders.subtotal`, `orders.total`, `order_items.unit_price_snapshot`,
+  `order_items.line_total`. A scan of `information_schema.columns` found
+  **zero** `float` or `double` columns anywhere in the schema.
+- **All 8 foreign keys** carry the intended `ON DELETE` rule:
+  `orders → users` RESTRICT, `order_items → orders` CASCADE,
+  `order_items → menu_items` RESTRICT, `menu_items → categories` RESTRICT,
+  `customer_preferences → users` CASCADE, `audit_logs → users` SET NULL, and
+  both `menu_item_ingredients` keys CASCADE.
+
+**Application flows exercised against MySQL** (not SQLite): registration,
+login, logout, menu browsing, preferences, recommendations, cart, checkout,
+customer order history, staff order queue, the full status workflow, admin
+menu management, and AI explanation. Decimal handling, order snapshots,
+transaction behaviour, audit logging, CSRF and authorization all behaved as
+designed — see the M08 section for the specific observations.
+
+No schema change was made in M08; no migration was added.
 
 ---
 
@@ -770,7 +1118,7 @@ Still to check against a real MySQL ≥ 8.0.16 instance:
 
 | # | Issue | Impact |
 | --- | --- | --- |
-| 1 | MySQL never verified (see above) | blocks any non-SQLite deployment |
+| 1 | ~~MySQL never verified~~ — **closed in M08**: verified end to end against MySQL 8.0.46 | — |
 | 2 | ~~Migrations not exercised by tests~~ — **closed in M05** by `tests/test_migrations.py`; note the application tests still use `create_all()` by design | — |
 | 3 | Anonymous cart is discarded on login (`login_user()` clears the session for fixation protection) — no cart merge | user who builds a cart before signing in loses it |
 | 4 | Checkout idempotency relies on the cart being cleared after success, not a dedicated idempotency key | concurrent double-submit under multiple workers |
@@ -796,6 +1144,11 @@ Still to check against a real MySQL ≥ 8.0.16 instance:
 | 23 | The LoRA adapter is git-ignored with the rest of `models/`; reproducible from the dataset in ~21 min | a fresh clone has no adapter until training is re-run |
 | 24 | `USE_TF=0` is required because of a broken TensorFlow install in this environment | environment-specific; harmless but surprising |
 | 25 | No `Cache-Control` headers on authenticated pages — a browser served a stale `/recommendations/explain` during testing | stale personalised content after preference changes |
+| 26 | ~~Logout does not revoke a copied session cookie~~ — **closed in M09** via `users.session_version`; verified live on MySQL with controls, 18 regression tests | — |
+| 26a | Logout revokes **all** of that user's sessions, not just the current device — a deliberate consequence of using one counter instead of per-session state | logging out on a phone signs the account out on a laptop too |
+| 29 | **Test-harness weakness**: the pytest `app` fixture holds one application context open, so `g.current_user` persists across requests and clients within a test. Production is unaffected (one context per request), but identity-switching tests can pass for the wrong reason unless they clear it | older suites not yet audited for this |
+| 27 | AI explanation takes ~9 s per request on CPU after the model is loaded (23 s including first load) | acceptable on its own route; would not be acceptable inline |
+| 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
 
@@ -818,21 +1171,23 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | **196 passing, 0 failing**, 12 warnings (all the pre-existing `env.py` deprecation) |
-| Test files | foundation 10, auth 29, menu 26, orders 28, migrations 4, staff orders 20, recommendations 25, llm 32, dataset_v2 22 |
-| Migrations | 4 revisions, head = `38297b707b89` (M06 and M07 added none) |
+| Tests | **239 passing, 0 failing, 0 skipped**, 12 warnings (all the pre-existing `env.py` deprecation) |
+| Test files | foundation 10, auth 29, menu 26, orders 28, migrations 4, staff orders 20, recommendations 26, llm 32, dataset_v2 22, ui 24, session revocation 18 |
+| Migrations | **5 revisions, head = `2d9f3b20045f`** (M09 added `users.session_version`) |
 | Tables | 9: `users`, `audit_logs`, `categories`, `menu_items`, `ingredients`, `menu_item_ingredients`, `customer_preferences`, `orders`, `order_items` |
 | Models | 10 modules in `app/models/` |
 | Services | 10 modules in `app/services/` |
-| Blueprints | 9: health, auth, account, menu, admin_menu, cart, orders, staff_orders, preferences |
+| Blueprints | 10: health, main, auth, account, menu, admin_menu, cart, orders, staff_orders, preferences |
 | Audit events | 16 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
 | Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
 | Order statuses | 6 (`pending`, `confirmed`, `preparing`, `ready`, `completed`, `cancelled`) |
 | Roles | 3 (`admin`, `staff`, `customer`) |
+| Sessions | signed cookie (user id + version); server-side revocation via `users.session_version` |
 | Recommendation engine | deterministic TF-IDF + cosine similarity, in-process; **no LLM** |
+| Frontend | Bootstrap 5.3.3, vendored locally (no CDN); 1 base layout + 3 partials + 19 pages |
 | Database (tests) | in-memory SQLite; migration tests use temporary on-disk SQLite |
-| Database (target) | MySQL 8 — **never verified**, see above |
+| Database (target) | **MySQL 8.0.46 — verified end to end in M08** |
 | Runtime deps | pinned in `requirements.txt`; now includes scikit-learn/scipy/numpy |
 
 ---

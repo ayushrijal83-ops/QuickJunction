@@ -1,0 +1,12 @@
+{# Order status badge. Expects `status` (an OrderStatus member).
+   Colour is presentation only -- the authoritative status is the enum value
+   rendered inside the badge. #}
+{%- set _colours = {
+  "pending":   "text-bg-secondary",
+  "confirmed": "text-bg-info",
+  "preparing": "text-bg-warning",
+  "ready":     "text-bg-primary",
+  "completed": "text-bg-success",
+  "cancelled": "text-bg-danger",
+} -%}
+<span class="badge {{ _colours.get(status.value, 'text-bg-secondary') }} text-uppercase">{{ status.value }}</span>

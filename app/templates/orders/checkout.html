@@ -1,45 +1,85 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Checkout - Quick Junction</title>
-</head>
-<body>
-  <p><a href="{{ url_for('cart.index') }}">&larr; Back to cart</a></p>
-  <h1>Checkout</h1>
+{% extends "base.html" %}
+{% from "partials/_forms.html" import submit %}
+{% block title %}Checkout &mdash; Quick Junction{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<h1 class="h3 mb-3">Checkout</h1>
 
-  {% if cart.lines %}
-    <ul>
-      {% for line in cart.lines %}
-        <li>
-          {% if line.menu_item %}
-            {{ line.menu_item.name }} -- {{ line.quantity }} x {{ line.unit_price }} = {{ line.line_total }}
+{% if cart.lines %}
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-white"><strong>Your order</strong></div>
+        <div class="table-responsive">
+          <table class="table align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Item</th>
+                <th scope="col" class="text-end">Unit price</th>
+                <th scope="col" class="text-center">Qty</th>
+                <th scope="col" class="text-end">Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in cart.lines %}
+                <tr {% if not line.menu_item %}class="table-warning"{% endif %}>
+                  <td>
+                    {% if line.menu_item %}
+                      {{ line.menu_item.name }}
+                    {% else %}
+                      Item #{{ line.menu_item_id }}
+                      <span class="badge text-bg-secondary">No longer available</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-end qj-price">{{ line.unit_price if line.unit_price is not none else "—" }}</td>
+                  <td class="text-center">{{ line.quantity }}</td>
+                  <td class="text-end qj-price">{{ line.line_total if line.line_total is not none else "—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p class="small text-secondary mt-2 mb-0">
+        Every price is recalculated on the server from the current menu when you
+        place the order.
+      </p>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-secondary">Total</h2>
+          <dl class="row mb-3">
+            <dt class="col-7 fw-normal">Subtotal</dt>
+            <dd class="col-5 text-end qj-price mb-1">{{ cart.subtotal }}</dd>
+            <dt class="col-7">Total</dt>
+            <dd class="col-5 text-end qj-price h5 mb-0">{{ cart.subtotal }}</dd>
+          </dl>
+
+          {% if cart.has_unavailable %}
+            <div class="alert alert-warning py-2 small">
+              Remove the unavailable item(s) before placing your order.
+            </div>
+            <div class="d-grid">
+              <a class="btn btn-outline-secondary" href="{{ url_for('cart.index') }}">Back to cart</a>
+            </div>
           {% else %}
-            Item #{{ line.menu_item_id }} is no longer available -- remove it before checking out.
+            <form method="post" action="{{ url_for('orders.checkout_submit') }}">
+              {{ form.csrf_token }}
+              <div class="d-grid">{{ submit("Place order", "btn btn-success btn-lg") }}</div>
+            </form>
+            <a class="btn btn-link w-100 mt-2" href="{{ url_for('cart.index') }}">Back to cart</a>
           {% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-
-    <p>Subtotal: {{ cart.subtotal }}</p>
-    <p>Total: {{ cart.subtotal }}</p>
-
-    {% if cart.has_unavailable %}
-      <p class="flash flash-error">Remove the unavailable item(s) above before placing your order.</p>
-    {% else %}
-      <form method="post" action="{{ url_for('orders.checkout_submit') }}">
-        {{ form.csrf_token }}
-        <button type="submit">Place order</button>
-      </form>
-    {% endif %}
-  {% else %}
-    <p>Your cart is empty.</p>
-  {% endif %}
-</body>
-</html>
+        </div>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">Your cart is empty.</h2>
+    <p class="mb-3">There is nothing to check out.</p>
+    <a class="btn btn-primary" href="{{ url_for('menu.index') }}">Browse the menu</a>
+  </div>
+{% endif %}
+{% endblock %}

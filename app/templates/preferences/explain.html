@@ -1,48 +1,143 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Why we picked this - Quick Junction</title>
-</head>
-<body>
-  <p><a href="{{ url_for('preferences.recommendations') }}">&larr; All recommendations</a></p>
-  <h1>Why we picked this</h1>
+{% extends "base.html" %}
+{% block title %}Why we picked this &mdash; Quick Junction{% endblock %}
 
-  {% if top %}
-    <h2>{{ top.menu_item.name }}</h2>
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('preferences.recommendations') }}">Recommended</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Why we picked this</li>
+  </ol>
+</nav>
 
-    {# Deterministic half: produced entirely by app/services/recommendations.py.
-       This is complete on its own and is what the customer should rely on.
-       The price below is read off the MenuItem row, never from the model. #}
-    <table border="1" cellpadding="4">
-      <tr><th>Fact</th><th>Value</th></tr>
-      <tr><td>Category</td><td>{{ top.menu_item.category.name }}</td></tr>
-      <tr><td>Price</td><td>{{ top.menu_item.price }}</td></tr>
-      <tr><td>Cuisine</td><td>{{ top.menu_item.cuisine.value }}</td></tr>
-      <tr><td>Dietary type</td><td>{{ top.menu_item.dietary_type.value }}</td></tr>
-      <tr><td>Spice level</td><td>{{ top.menu_item.spice_level.value }}</td></tr>
-      <tr><td>Match</td><td>{{ top.match_label }}{% if top.score > 0 %} ({{ top.score_percent }}%){% endif %}</td></tr>
-    </table>
+{% if top %}
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+    <div>
+      <h1 class="h3 mb-1">{{ top.menu_item.name }}</h1>
+      <span class="text-secondary">{{ top.menu_item.category.name }}</span>
+    </div>
+    <span class="qj-price h4 mb-0">{{ top.menu_item.price }}</span>
+  </div>
 
-    <p>
-      Your preferences:
-      {{ (preference.cuisine_preference.value if preference and preference.cuisine_preference else "no cuisine set") }} &middot;
-      {{ (preference.dietary_preference.value if preference and preference.dietary_preference else "no dietary preference set") }} &middot;
-      {{ (preference.spice_preference.value if preference and preference.spice_preference else "no spice preference set") }}
-    </p>
+  <div class="row g-4">
+    {# ---------------------------------------------------------------
+       AUTHORITATIVE HALF. Everything in this panel is produced by the
+       deterministic recommendation engine and read straight off the
+       MenuItem row. It is complete on its own and is what the customer
+       should rely on.
+       --------------------------------------------------------------- #}
+    <div class="col-lg-7">
+      <div class="card shadow-sm qj-facts-panel h-100">
+        <div class="card-header bg-white d-flex align-items-center gap-2">
+          <strong>Why this item was recommended</strong>
+          <span class="badge text-bg-success">Calculated by Quick Junction</span>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-3">
+              <tbody>
+                <tr>
+                  <th scope="row" class="fw-normal text-secondary" style="width:40%">Price</th>
+                  <td class="qj-price fw-semibold">{{ top.menu_item.price }}</td>
+                </tr>
+                <tr>
+                  <th scope="row" class="fw-normal text-secondary">Cuisine</th>
+                  <td>
+                    {{ top.menu_item.cuisine.value|replace("_", " ")|title }}
+                    {% if preference and preference.cuisine_preference %}
+                      {% if preference.cuisine_preference == top.menu_item.cuisine %}
+                        <span class="badge text-bg-success">matches your preference</span>
+                      {% else %}
+                        <span class="badge text-bg-secondary">you prefer {{ preference.cuisine_preference.value|replace("_", " ")|title }}</span>
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row" class="fw-normal text-secondary">Dietary type</th>
+                  <td>
+                    {{ top.menu_item.dietary_type.value|replace("_", " ")|title }}
+                    {% if preference and preference.dietary_preference %}
+                      <span class="badge text-bg-success">allowed by your diet</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row" class="fw-normal text-secondary">Spice level</th>
+                  <td>
+                    {{ top.menu_item.spice_level.value|replace("_", " ")|title }}
+                    {% if preference and preference.spice_preference %}
+                      {% if preference.spice_preference == top.menu_item.spice_level %}
+                        <span class="badge text-bg-success">matches your preference</span>
+                      {% else %}
+                        <span class="badge text-bg-secondary">you prefer {{ preference.spice_preference.value|replace("_", " ")|title }}</span>
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row" class="fw-normal text-secondary">Match</th>
+                  <td>
+                    <span class="badge {{ 'text-bg-success' if top.score >= 0.45 else ('text-bg-primary' if top.score >= 0.20 else 'text-bg-secondary') }}">{{ top.match_label }}</span>
+                    {% if top.score > 0 %}<span class="small text-secondary ms-1">{{ top.score_percent }}%</span>{% endif %}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-    <h3>AI explanation</h3>
-    {% if explanation %}
-      <p class="ai-explanation">{{ explanation }}</p>
-      <p><small>Generated locally. The match above is calculated by Quick Junction, not by the AI.</small></p>
-    {% else %}
-      <p class="ai-unavailable">AI explanation temporarily unavailable.</p>
-      <p><small>The recommendation above is unaffected.</small></p>
-    {% endif %}
-  {% else %}
-    <p>There is nothing to recommend right now, so there is nothing to explain.</p>
-  {% endif %}
+          <p class="small text-secondary mb-0">
+            These facts come from the menu database and the matching engine.
+            Items excluded by your dietary preference are never considered.
+          </p>
+        </div>
+      </div>
+    </div>
 
-  <p><a href="{{ url_for('preferences.preferences') }}">Update my preferences</a></p>
-</body>
-</html>
+    {# ---------------------------------------------------------------
+       ADVISORY HALF. Generated locally by the fine-tuned Qwen adapter.
+       Rendered as escaped text; nothing on this page reads it back, and
+       it is never used for price, availability or dietary decisions.
+       --------------------------------------------------------------- #}
+    <div class="col-lg-5">
+      <div class="card shadow-sm qj-ai-panel h-100">
+        <div class="card-header bg-white d-flex align-items-center gap-2">
+          <strong>AI explanation</strong>
+          <span class="badge text-bg-info">Advisory</span>
+        </div>
+        <div class="card-body d-flex flex-column">
+          {% if explanation %}
+            <blockquote class="mb-3">
+              <p class="mb-0 fst-italic">{{ explanation }}</p>
+            </blockquote>
+            <p class="small text-secondary mt-auto mb-0">
+              Written by a small language model running on this server, from the
+              facts on the left. It can occasionally phrase things awkwardly
+              &mdash; the panel on the left is the authoritative version.
+            </p>
+          {% else %}
+            <div class="alert alert-secondary mb-3">
+              AI explanation temporarily unavailable.
+            </div>
+            <p class="small text-secondary mt-auto mb-0">
+              The recommendation itself is unaffected &mdash; it is calculated
+              without the model.
+            </p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap gap-2 mt-4">
+    <a class="btn btn-primary" href="{{ url_for('menu.detail', item_id=top.menu_item.id) }}">View this item</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('preferences.recommendations') }}">All recommendations</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">Nothing to explain</h2>
+    <p class="mb-3">There is nothing to recommend right now, so there is nothing to explain.</p>
+    <a class="btn btn-outline-primary" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
+  </div>
+{% endif %}
+{% endblock %}

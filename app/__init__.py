@@ -48,6 +48,21 @@ def create_app(config_name: str | None = None) -> Flask:
     # So a template can show/hide admin-only controls without every route
     # passing the user in explicitly. Still just a display convenience --
     # every route re-checks authorization itself (see app/utils/authorization.py).
-    app.context_processor(lambda: {"current_user": get_current_user()})
+    #
+    # cart_count drives the navbar badge. It counts quantities in the signed
+    # session only -- it touches no database row and grants no authority, so
+    # a tampered cookie can at worst show a wrong number on a badge.
+    def _template_globals() -> dict:
+        from app.utils.cart import get_cart
+
+        total = 0
+        for quantity in get_cart().values():
+            try:
+                total += int(quantity)
+            except (TypeError, ValueError):
+                continue
+        return {"current_user": get_current_user(), "cart_count": total}
+
+    app.context_processor(_template_globals)
 
     return app

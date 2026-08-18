@@ -1,52 +1,39 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>My preferences - Quick Junction</title>
-</head>
-<body>
-  <p><a href="{{ url_for('account.index') }}">&larr; Account</a></p>
-  <h1>My taste preferences</h1>
+{% extends "base.html" %}
+{% from "partials/_forms.html" import select, submit %}
+{% block title %}My preferences &mdash; Quick Junction{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
-
-  <p>All three are optional. Leave one as &ldquo;No preference&rdquo; if you
-  would rather not say.</p>
-
-  <form method="post" action="{{ url_for('preferences.preferences') }}">
-    {{ form.csrf_token }}
-
-    <p>
-      {{ form.dietary_preference.label }}<br>
-      {{ form.dietary_preference() }}
-      {% for error in form.dietary_preference.errors %}
-        <span class="error">{{ error }}</span>
-      {% endfor %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <h1 class="h3 mb-1">My taste preferences</h1>
+    <p class="text-secondary mb-4">
+      These drive your recommendations. All three are optional &mdash; leave any
+      as &ldquo;No preference&rdquo; if you would rather not say.
     </p>
 
-    <p>
-      {{ form.cuisine_preference.label }}<br>
-      {{ form.cuisine_preference() }}
-      {% for error in form.cuisine_preference.errors %}
-        <span class="error">{{ error }}</span>
-      {% endfor %}
-    </p>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" action="{{ url_for('preferences.preferences') }}" novalidate>
+          {{ form.csrf_token }}
+          {{ select(form.dietary_preference,
+                    help="Used as a strict filter: we never suggest something your diet excludes.") }}
+          {{ select(form.cuisine_preference) }}
+          {{ select(form.spice_preference) }}
 
-    <p>
-      {{ form.spice_preference.label }}<br>
-      {{ form.spice_preference() }}
-      {% for error in form.spice_preference.errors %}
-        <span class="error">{{ error }}</span>
-      {% endfor %}
-    </p>
+          <div class="d-flex flex-wrap gap-2">
+            {{ submit("Save preferences") }}
+            <a class="btn btn-outline-secondary" href="{{ url_for('preferences.recommendations') }}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
 
-    <button type="submit">Save preferences</button>
-  </form>
-
-  <p><a href="{{ url_for('preferences.recommendations') }}">See my recommendations</a></p>
-</body>
-</html>
+    <div class="alert alert-light border mt-3 small mb-0">
+      <strong>How your dietary preference is used.</strong> It is applied as a
+      hard filter before anything is ranked, so a restricted item can never be
+      recommended to you &mdash; not by the matching engine, and not by your own
+      order history.
+    </div>
+  </div>
+</div>
+{% endblock %}

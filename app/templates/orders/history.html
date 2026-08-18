@@ -1,24 +1,44 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Order history - Quick Junction</title>
-</head>
-<body>
-  <p><a href="{{ url_for('menu.index') }}">&larr; Back to menu</a></p>
-  <h1>Your orders</h1>
+{% extends "base.html" %}
+{% block title %}My orders &mdash; Quick Junction{% endblock %}
 
-  {% if orders %}
-    <ul>
-      {% for order in orders %}
-        <li>
-          <a href="{{ url_for('orders.detail', order_id=order.id) }}">Order #{{ order.id }}</a>
-          -- {{ order.status.value }} -- {{ order.total }} -- {{ order.created_at }}
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p>You have no orders yet.</p>
-  {% endif %}
-</body>
-</html>
+{% block content %}
+<h1 class="h3 mb-3">My orders</h1>
+
+{% if orders %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Order</th>
+            <th scope="col">Placed</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="text-end">Total</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <th scope="row" class="fw-semibold">Order #{{ order.id }}</th>
+              <td class="text-secondary">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</td>
+              <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
+              <td class="text-end qj-price">{{ order.total }}</td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('orders.detail', order_id=order.id) }}">View</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">No orders yet</h2>
+    <p class="mb-3">When you place an order it will appear here with its status.</p>
+    <a class="btn btn-primary" href="{{ url_for('menu.index') }}">Browse the menu</a>
+  </div>
+{% endif %}
+{% endblock %}

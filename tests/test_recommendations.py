@@ -467,3 +467,41 @@ def test_22_engine_is_deterministic(client, db):
     first = [(r.menu_item.id, round(r.score, 10)) for r in recommend_for_user(user.id, preference)]
     for _ in range(3):
         assert [(r.menu_item.id, round(r.score, 10)) for r in recommend_for_user(user.id, preference)] == first
+
+
+# --- Query efficiency (M08) ---------------------------------------------------
+
+
+def test_23_recommendations_do_not_issue_a_query_per_item(client, db):
+    """M08 measured an N+1: build_item_document() reads `category` and
+    `ingredients` for every candidate, which lazy-loaded one query per item
+    (14 statements for a 9-item menu). candidate_items() now eager-loads
+    both, so query count must stay flat as the menu grows."""
+    from sqlalchemy import event
+    from app.services.menu import sync_menu_item_ingredients
+
+    category = make_category(name="Mains")
+    user = make_user()
+    for index in range(12):
+        item = make_menu_item(category=category, name=f"Dish {index:02d}", price="100.00")
+        sync_menu_item_ingredients(item, ["rice", "spice"])
+
+    statements = []
+
+    @event.listens_for(_db.engine, "before_cursor_execute")
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    try:
+        _db.session.expire_all()
+        statements.clear()
+        results = recommend_for_user(user.id, set_preference(user.id, cuisine=Cuisine.INDIAN))
+    finally:
+        event.remove(_db.engine, "before_cursor_execute", _count)
+
+    # 12 items exist but the engine caps output at MAX_RECOMMENDATIONS; all
+    # 12 are still scored, which is what would trigger the N+1.
+    assert len(results) == 10
+    # One for the candidate set, one for ingredients, one for history, plus a
+    # little slack -- but nowhere near one per item.
+    assert len(statements) <= 6, f"expected a flat query count, issued {len(statements)}"

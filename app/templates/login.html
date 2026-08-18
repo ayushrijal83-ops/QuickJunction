@@ -1,38 +1,31 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Log in - Quick Junction</title>
-</head>
-<body>
-  <h1>Log in</h1>
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, submit %}
+{% block title %}Log in &mdash; Quick Junction{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-1">Log in</h1>
+        <p class="text-secondary small mb-4">Welcome back to Quick Junction.</p>
 
-  <form method="post" action="{{ url_for('auth.login') }}" novalidate>
-    {{ form.hidden_tag() }}
+        <form method="post" action="{{ url_for('auth.login') }}" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.username, autofocus=true, autocomplete="username") }}
+          {{ field(form.password, autocomplete="current-password") }}
 
-    <p>
-      {{ form.username.label }}<br>
-      {{ form.username(size=32) }}
+          {% for error in form.errors.get("_general", []) %}
+            <div class="alert alert-danger py-2">{{ error }}</div>
+          {% endfor %}
+
+          <div class="d-grid">{{ submit("Log in") }}</div>
+        </form>
+      </div>
+    </div>
+    <p class="text-center mt-3 mb-0">
+      Need an account? <a href="{{ url_for('auth.register') }}">Register</a>
     </p>
-
-    <p>
-      {{ form.password.label }}<br>
-      {{ form.password(size=32) }}
-    </p>
-
-    {% if form.errors.get("_general") %}
-      {% for error in form.errors["_general"] %}<p class="error">{{ error }}</p>{% endfor %}
-    {% endif %}
-
-    {{ form.submit() }}
-  </form>
-
-  <p><a href="{{ url_for('auth.register') }}">Need an account? Register.</a></p>
-</body>
-</html>
+  </div>
+</div>
+{% endblock %}

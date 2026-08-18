@@ -1,0 +1,37 @@
+/* Quick Junction — the small amount of styling Bootstrap does not give us.
+   Deliberately short: anything Bootstrap already provides is used as-is
+   rather than re-implemented. */
+
+.qj-price {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Menu/recommendation cards: equal height in a row, image-free by design. */
+.qj-card-title {
+  font-size: 1.05rem;
+}
+
+/* The AI explanation block is visually distinct from the deterministic
+   facts beside it, so a reader can tell at a glance which is authoritative. */
+.qj-ai-panel {
+  border-left: 4px solid var(--bs-info);
+  background: var(--bs-light);
+}
+
+.qj-facts-panel {
+  border-left: 4px solid var(--bs-success);
+}
+
+/* Empty states */
+.qj-empty {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--bs-secondary-color);
+}
+
+/* Submit buttons disable themselves on click (see base.html usage); keep the
+   label from shifting when the spinner appears. */
+button[disabled] .spinner-border {
+  vertical-align: -0.125em;
+}

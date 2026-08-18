@@ -1,11 +1,12 @@
-# Architecture — Milestone 07
+# Architecture — Milestone 09
 
 Status: foundation (M01), auth/authorization/CSRF/audit core (M02), the
 menu data layer and menu-management surface (M03), cart, checkout, order
 placement, and order history (M04), staff order management and the status
 workflow (M05), customer preferences and the deterministic recommendation
 engine (M06), plus local Qwen inference for recommendation *explanations*
-(M07). No payment gateway exists yet.
+(M07), a rebalanced dataset and V2 adapter (M07.1), and a Bootstrap UI with
+verified MySQL operation (M08). No payment gateway exists yet.
 
 **The LLM is not the source of truth.** It explains; the deterministic
 engine decides. See "Local LLM" below and `docs/AI.md`.
@@ -94,18 +95,26 @@ never imported here is silently missing from every migration.
 Migration mechanics (`flask db upgrade` from empty → schema, `flask db
 downgrade` → empty, re-`upgrade`) were verified against a scratch SQLite
 database in both M02 and M03, because no local MySQL server has been
-reachable in this environment. **MySQL verification is still pending** —
-see `docs/DATABASE.md` and `docs/SECURITY.md` for exactly what that
-verification needs to check once a server is available.
+reachable at the time. **MySQL verification was completed in M08** against
+MySQL 8.0.46 (constraints enforced, decimal money, foreign keys, indexes) —
+see `docs/PROJECT_PROGRESS.md` for the observed results.
 
 ## Authentication and authorization
 
-Session-based, not token-based: the session cookie holds one integer (the
-user id), signed by `SECRET_KEY`. `app/utils/authorization.py` re-loads the
-`User` row from the database on every request rather than trusting
-anything cached in the session or sent by the client — a role change or
-deactivation takes effect on the user's next request. Full reasoning in
-`docs/SECURITY.md` §3–4.
+Session-based, not token-based: the session cookie holds two integers — the
+user id and a session version — signed by `SECRET_KEY`.
+`app/utils/authorization.py` re-loads the `User` row from the database on
+every request rather than trusting anything cached in the session or sent by
+the client, so a role change or deactivation takes effect on the user's next
+request. Full reasoning in `docs/SECURITY.md` §3–4.
+
+**Session revocation (M09).** Because the cookie is stateless, `session.clear()`
+on logout could only clear the browser's own copy — a copy captured beforehand
+kept authenticating (found in the M08 audit). `users.session_version` is the
+server-side state that closes this: `login_user` stamps the session with it,
+every request compares the two, and `logout_user` increments it, so all
+sessions issued before a logout stop validating. It is a counter, not a token,
+so nothing secret is stored in the cookie. See `docs/SECURITY.md` §6.
 
 ```
 app/routes/auth.py      register / login / logout — parses the request,

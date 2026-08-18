@@ -47,6 +47,22 @@ class User(db.Model):
 
     is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.true())
 
+    # Server-side session revocation (M09).
+    #
+    # Flask's session is a signed cookie with no server-side store, so
+    # ``session.clear()`` on logout can only clear the *client's* copy -- a
+    # cookie captured beforehand replayed successfully (see docs/SECURITY.md
+    # §6). This counter is the server-side state that makes revocation real:
+    # ``login_user`` copies the current value into the session, every request
+    # compares the two, and ``logout_user`` increments it, so every session
+    # issued before that logout stops validating.
+    #
+    # Deliberately a counter, not a token: nothing secret is stored here or
+    # placed in the cookie, so there is no session secret to leak.
+    session_version: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, server_default=sa.text("0")
+    )
+
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False

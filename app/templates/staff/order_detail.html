@@ -1,54 +1,104 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Order #{{ order.id }} - Quick Junction Staff</title>
-</head>
-<body>
-  <p><a href="{{ url_for('staff_orders.order_list') }}">&larr; Order queue</a></p>
-  <h1>Order #{{ order.id }}</h1>
+{% extends "base.html" %}
+{% block title %}Order #{{ order.id }} &mdash; Quick Junction Staff{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('staff_orders.order_list') }}">Order queue</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Order #{{ order.id }}</li>
+  </ol>
+</nav>
 
-  <p>Customer: {{ order.customer.username }}</p>
-  <p>Placed: {{ order.created_at }}</p>
-  <p>Status: <strong>{{ order.status.value }}</strong></p>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <h1 class="h3 mb-0">Order #{{ order.id }}</h1>
+  {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+</div>
 
-  {# Snapshot values written at checkout -- never recalculated from the
-     current menu price. #}
-  <table border="1" cellpadding="4">
-    <tr><th>Item</th><th>Unit price</th><th>Qty</th><th>Line total</th></tr>
-    {% for item in order.items %}
-      <tr>
-        <td>{{ item.item_name_snapshot }}</td>
-        <td>{{ item.unit_price_snapshot }}</td>
-        <td>{{ item.quantity }}</td>
-        <td>{{ item.line_total }}</td>
-      </tr>
-    {% endfor %}
-  </table>
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-white"><strong>Items</strong></div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col" class="text-end">Unit price</th>
+              <th scope="col" class="text-center">Qty</th>
+              <th scope="col" class="text-end">Line total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {# Snapshot values written at checkout -- never recalculated from
+               the current menu price. #}
+            {% for item in order.items %}
+              <tr>
+                <td>{{ item.item_name_snapshot }}</td>
+                <td class="text-end qj-price">{{ item.unit_price_snapshot }}</td>
+                <td class="text-center">{{ item.quantity }}</td>
+                <td class="text-end qj-price">{{ item.line_total }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="table-light">
+            <tr>
+              <th scope="row" colspan="3" class="text-end fw-normal">Subtotal</th>
+              <td class="text-end qj-price">{{ order.subtotal }}</td>
+            </tr>
+            <tr>
+              <th scope="row" colspan="3" class="text-end">Total</th>
+              <td class="text-end qj-price fw-semibold">{{ order.total }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
 
-  <p>Subtotal: {{ order.subtotal }}</p>
-  <p>Total: {{ order.total }}</p>
+  <div class="col-lg-4">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-secondary">Order details</h2>
+        <dl class="row mb-0 small">
+          <dt class="col-5 fw-normal text-secondary">Customer</dt>
+          <dd class="col-7">{{ order.customer.username }}</dd>
+          <dt class="col-5 fw-normal text-secondary">Placed</dt>
+          <dd class="col-7">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</dd>
+          <dt class="col-5 fw-normal text-secondary">Status</dt>
+          <dd class="col-7 mb-0">{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</dd>
+        </dl>
+      </div>
+    </div>
 
-  {% if next_statuses %}
-    <h2>Update status</h2>
-    {# One button per currently-legal transition. This is UI convenience
-       only: app/services/orders.py re-validates the transition against the
-       order's real status on every POST. #}
-    {% for status in next_statuses %}
-      <form method="post" action="{{ url_for('staff_orders.order_status_update', order_id=order.id) }}" style="display:inline">
-        {{ form.csrf_token }}
-        <input type="hidden" name="status" value="{{ status.value }}">
-        <button type="submit">Mark {{ status.value }}</button>
-      </form>
-    {% endfor %}
-  {% else %}
-    <p>This order is {{ order.status.value }} and can no longer change.</p>
-  {% endif %}
-</body>
-</html>
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Update status</strong></div>
+      <div class="card-body">
+        {% if next_statuses %}
+          <p class="small text-secondary">
+            Only the transitions allowed from <strong>{{ order.status.value }}</strong> are offered.
+          </p>
+          {# One button per currently-legal transition. This is UI convenience
+             only: app/services/orders.py re-validates the transition against
+             the order's real status on every POST. #}
+          <div class="d-grid gap-2">
+            {% for status in next_statuses %}
+              <form method="post" action="{{ url_for('staff_orders.order_status_update', order_id=order.id) }}">
+                {{ form.csrf_token }}
+                <input type="hidden" name="status" value="{{ status.value }}">
+                <button type="submit"
+                        class="btn btn-sm w-100 {{ 'btn-outline-danger' if status.value == 'cancelled' else 'btn-primary' }}">
+                  Mark {{ status.value }}
+                </button>
+              </form>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="mb-0 text-secondary">
+            This order is <strong>{{ order.status.value }}</strong> and can no longer change.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

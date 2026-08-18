@@ -1,22 +1,67 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Order #{{ order.id }} - Quick Junction</title>
-</head>
-<body>
-  <p><a href="{{ url_for('orders.history') }}">&larr; Back to orders</a></p>
-  <h1>Order #{{ order.id }}</h1>
-  <p>Status: {{ order.status.value }}</p>
-  <p>Placed: {{ order.created_at }}</p>
+{% extends "base.html" %}
+{% block title %}Order #{{ order.id }} &mdash; Quick Junction{% endblock %}
 
-  <ul>
-    {% for item in order.items %}
-      <li>{{ item.item_name_snapshot }} -- {{ item.quantity }} x {{ item.unit_price_snapshot }} = {{ item.line_total }}</li>
-    {% endfor %}
-  </ul>
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('orders.history') }}">My orders</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Order #{{ order.id }}</li>
+  </ol>
+</nav>
 
-  <p>Subtotal: {{ order.subtotal }}</p>
-  <p>Total: {{ order.total }}</p>
-</body>
-</html>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <h1 class="h3 mb-0">Order #{{ order.id }}</h1>
+  {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+</div>
+
+<p class="text-secondary">Placed {{ order.created_at.strftime("%d %b %Y at %H:%M") }}</p>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Items</strong></div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col" class="text-end">Unit price</th>
+              <th scope="col" class="text-center">Qty</th>
+              <th scope="col" class="text-end">Line total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {# Snapshot values recorded at checkout -- never recalculated from
+               the current menu price. #}
+            {% for item in order.items %}
+              <tr>
+                <td>{{ item.item_name_snapshot }}</td>
+                <td class="text-end qj-price">{{ item.unit_price_snapshot }}</td>
+                <td class="text-center">{{ item.quantity }}</td>
+                <td class="text-end qj-price">{{ item.line_total }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="small text-secondary mt-2 mb-0">
+      Prices shown are the prices at the time you ordered.
+    </p>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-secondary">Total</h2>
+        <dl class="row mb-0">
+          <dt class="col-7 fw-normal">Subtotal</dt>
+          <dd class="col-5 text-end qj-price mb-1">{{ order.subtotal }}</dd>
+          <dt class="col-7">Total</dt>
+          <dd class="col-5 text-end qj-price h5 mb-0">{{ order.total }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

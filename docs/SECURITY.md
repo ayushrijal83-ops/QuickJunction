@@ -1,11 +1,12 @@
-# Security — Milestone 07 baseline
+# Security — Milestone 09 baseline
 
 Scope: foundation (M01), auth/authorization/CSRF/audit core (M02), the menu
 data layer and menu-management surface (M03), cart, checkout, order
 placement, and order history (M04), staff order management and the status
 workflow (M05), customer preferences and the deterministic recommendation
-engine (M06), plus local Qwen inference for recommendation explanations
-(M07). No payment gateway exists yet. This document records what is in
+engine (M06), local Qwen inference for recommendation explanations (M07),
+the Bootstrap UI and verified MySQL operation (M08), plus **server-side
+session revocation (M09)**. No payment gateway exists yet. This document records what is in
 place, **why**, and what must be added before Quick Junction handles real
 payments.
 
@@ -184,10 +185,65 @@ full stop.
 | `MAX_CONTENT_LENGTH` | 2 MiB | Caps request bodies so a large upload cannot exhaust memory. |
 
 `login_user()` sets `session.permanent = True` so the 8-hour lifetime
-applies; `logout_user()` calls `session.clear()`, which both removes the
-user id and rotates the cookie's signature, invalidating the old session
-immediately (test 20: a protected endpoint returns 401 right after logout,
-in the same test client / cookie jar).
+applies; `logout_user()` calls `session.clear()`, so the browser that logged
+out is immediately unauthenticated (test 20: a protected endpoint returns 401
+right after logout, in the same test client / cookie jar).
+
+**Session revocation — the M08 finding, fixed in M09.**
+
+*The history, kept deliberately:* an early version of this section claimed
+logout "invalidat[es] the old session immediately". That overstated what a
+stateless signed cookie can do, and the **M08 audit disproved it**: a
+`qj_session` value captured *before* logout still authenticated afterwards —
+replaying it returned `200` from `/orders` and `/account/me` after the
+original browser had logged out.
+
+*Root cause:* the session was a signed cookie carrying only a user id, and
+`get_current_user()` accepted any validly-signed cookie whose user existed and
+was active. There was no server-side state to invalidate, so `session.clear()`
+could only clear the browser's own copy — never a copy someone else held.
+
+*The fix (M09):* `users.session_version`, an integer counter.
+
+| Step | Behaviour |
+| --- | --- |
+| `login_user()` | stamps the session with the user's current `session_version` |
+| every request | `get_current_user()` compares the session's version against the column; a mismatch clears the session and returns `None` |
+| `logout_user()` | increments the column, so every session issued before that logout stops validating |
+
+Nothing secret is stored or transmitted: the cookie gains an integer counter,
+not a token, so there is no session secret that could leak. The counter is
+never logged and never appears in a response body (asserted by
+`tests/test_session_revocation.py` tests 7 and 7b).
+
+*Scope — logout revokes **all** of that user's sessions.* A single counter
+cannot distinguish one session from another, so logging out on one device logs
+the account out everywhere. Per-session revocation would need per-session
+server-side state (a session table, or a token in the cookie) — a materially
+larger subsystem for a marginal usability gain. Erring toward revoking too
+much is the safe direction, and the behaviour is pinned by
+`test_9_logout_revokes_every_session_for_that_user` so it is an explicit
+choice rather than an accident.
+
+*Fail-closed on upgrade:* sessions issued before the migration carry no
+version at all, so they fail the comparison and are refused. Every
+pre-existing login is invalidated when M09 is deployed — intended.
+
+*Verified* (M09), each with a control proving the replay harness works:
+
+- Live against MySQL 8.0.46 across separate processes: capture → control
+  replay `200` → logout → replay `401` → fresh login `200` → old cookie still
+  `401`.
+- The standing security audit's "old session cookie unusable after logout"
+  check moved from **FAIL** to **PASS** (36/36).
+- 18 regression tests in `tests/test_session_revocation.py`; disabling the
+  version comparison makes exactly the three replay tests fail, so they are
+  not vacuous.
+
+*Still bounded by, not replaced by, the cookie attributes:* `HttpOnly` (a page
+script cannot read `qj_session` — re-confirmed in the browser, `document.cookie`
+is empty), `Secure` in production, `SameSite=Lax`, and the 8-hour lifetime.
+Revocation is now the primary control rather than the only hope.
 
 ---
 
@@ -841,7 +897,7 @@ order-status management in M05) are removed from this list.
 | 12 | Encrypted, tested database backups | first real data |
 | 13 | Dependency scanning (`pip-audit`) in CI | first CI run |
 | 14 | Content negotiation on error responses (HTML vs JSON) | first real HTML page beyond auth forms |
-| 15 | **MySQL verification of the M02–M05 migrations** (`CHECK` constraints, `Numeric` price/subtotal/total types, foreign keys, indexes) — no local MySQL server was reachable in this environment; see `docs/DATABASE.md` | before any real (non-SQLite) deployment |
+| 15 | ~~MySQL verification~~ — **completed in M08** against MySQL 8.0.46: constraints enforced, decimal money, foreign keys, InnoDB | — |
 | 16 | Ingredient administration beyond the menu-item form's comma-separated field (rename/merge/delete an ingredient independently of any one menu item) | first time a typo'd ingredient name needs correcting across many items |
 | 17 | Per-field price-change audit history (currently a price change is folded into the generic `menu_item_updated` event, not its own event) | if price-change history becomes a compliance or dispute-resolution need |
 | 18 | Order cancellation *handling* — M05 added the `CANCELLED` status transition, but nothing downstream of it: no refund, no restock, no customer notification, and no customer-initiated cancellation | first customer who needs to cancel a real order |

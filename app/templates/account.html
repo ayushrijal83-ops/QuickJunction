@@ -1,30 +1,68 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>My account - Quick Junction</title>
-</head>
-<body>
-  <h1>Logged in as {{ user.username }}</h1>
-  <p>Role: {{ user.role.value }}</p>
-  <p><a href="{{ url_for('menu.index') }}">Menu</a> | <a href="{{ url_for('cart.index') }}">Cart</a> | <a href="{{ url_for('orders.history') }}">My orders</a></p>
-  <p><a href="{{ url_for('preferences.recommendations') }}">Recommended for you</a> | <a href="{{ url_for('preferences.preferences') }}">My preferences</a></p>
+{% extends "base.html" %}
+{% block title %}My account &mdash; Quick Junction{% endblock %}
 
-  {# Display convenience only -- every staff route re-checks the role
-     server-side via require_role, so hiding this link is not the control. #}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ user.username }}</h1>
+    <span class="badge text-bg-secondary text-uppercase">{{ user.role.value }}</span>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6">Recommended for you</h2>
+        <p class="small text-secondary">Dishes matched to your stated preferences.</p>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('preferences.recommendations') }}">View recommendations</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6">My preferences</h2>
+        <p class="small text-secondary">Set your diet, cuisine and spice level.</p>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6">My orders</h2>
+        <p class="small text-secondary">Track the status of orders you have placed.</p>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('orders.history') }}">View orders</a>
+      </div>
+    </div>
+  </div>
+
+  {# Shown for convenience only; the routes themselves enforce the role. #}
   {% if user.role.value in ("staff", "admin") %}
-    <p><a href="{{ url_for('staff_orders.order_list') }}">Order queue (staff)</a></p>
+    <div class="col-md-6 col-lg-4">
+      <div class="card h-100 shadow-sm border-primary-subtle">
+        <div class="card-body">
+          <h2 class="h6">Order queue <span class="badge text-bg-primary">Staff</span></h2>
+          <p class="small text-secondary">Work through incoming orders.</p>
+          <a class="btn btn-sm btn-primary" href="{{ url_for('staff_orders.order_list') }}">Open queue</a>
+        </div>
+      </div>
+    </div>
   {% endif %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
-
-  <form method="post" action="{{ url_for('auth.logout') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit">Log out</button>
-  </form>
-</body>
-</html>
+  {% if user.role.value == "admin" %}
+    <div class="col-md-6 col-lg-4">
+      <div class="card h-100 shadow-sm border-primary-subtle">
+        <div class="card-body">
+          <h2 class="h6">Menu management <span class="badge text-bg-danger">Admin</span></h2>
+          <p class="small text-secondary">Create and edit categories and menu items.</p>
+          <a class="btn btn-sm btn-primary" href="{{ url_for('admin_menu.menu_list') }}">Manage menu</a>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

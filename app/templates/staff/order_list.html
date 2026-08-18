@@ -1,41 +1,55 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Order queue - Quick Junction Staff</title>
-</head>
-<body>
-  <p><a href="{{ url_for('account.index') }}">&larr; Account</a></p>
-  <h1>Order queue</h1>
+{% extends "base.html" %}
+{% block title %}Order queue &mdash; Quick Junction Staff{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Order queue</h1>
+    <p class="text-secondary mb-0">All customer orders, newest first.</p>
+  </div>
+  <span class="badge text-bg-primary">Staff view</span>
+</div>
 
-  {% if orders %}
-    <table border="1" cellpadding="4">
-      <tr>
-        <th>Order</th><th>Customer</th><th>Placed</th>
-        <th>Status</th><th>Items</th><th>Total</th><th></th>
-      </tr>
-      {% for order in orders %}
-        <tr>
-          <td>#{{ order.id }}</td>
-          {# Username only -- staff need to identify the customer, not to
-             read their email address. #}
-          <td>{{ order.customer.username }}</td>
-          <td>{{ order.created_at }}</td>
-          <td>{{ order.status.value }}</td>
-          <td>{{ order.items | length }}</td>
-          <td>{{ order.total }}</td>
-          <td><a href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open</a></td>
-        </tr>
-      {% endfor %}
-    </table>
-  {% else %}
-    <p>No orders yet.</p>
-  {% endif %}
-</body>
-</html>
+{% if orders %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Order</th>
+            <th scope="col">Customer</th>
+            <th scope="col">Placed</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="text-center">Items</th>
+            <th scope="col" class="text-end">Total</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <th scope="row" class="fw-semibold">#{{ order.id }}</th>
+              {# Username only -- staff need to identify the customer, not to
+                 read their email address. #}
+              <td>{{ order.customer.username }}</td>
+              <td class="text-secondary">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</td>
+              <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
+              <td class="text-center">{{ order.items | length }}</td>
+              <td class="text-end qj-price">{{ order.total }}</td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">No orders yet</h2>
+    <p class="mb-0">Orders placed by customers will appear here.</p>
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,39 +1,35 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{{ "Edit" if category else "New" }} category - Quick Junction Admin</title>
-</head>
-<body>
-  <p><a href="{{ url_for('admin_menu.category_list') }}">&larr; Categories</a></p>
-  <h1>{{ "Edit" if category else "New" }} category</h1>
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, checkbox, submit %}
+{% block title %}{{ "Edit" if category else "New" }} category &mdash; Quick Junction Admin{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for cat, message in messages %}
-      <p class="flash flash-{{ cat }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('admin_menu.category_list') }}">Categories</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ "Edit" if category else "New" }}</li>
+  </ol>
+</nav>
 
-  <form method="post" novalidate>
-    {{ form.hidden_tag() }}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <h1 class="h3 mb-3">{{ "Edit" if category else "New" }} category</h1>
 
-    <p>
-      {{ form.name.label }}<br>
-      {{ form.name(size=40) }}
-      {% for error in form.name.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
-    </p>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.name, autofocus=true) }}
+          {{ field(form.description, rows=3) }}
+          {{ checkbox(form.is_active,
+                      help="Deactivating a category hides its items from the public menu.") }}
 
-    <p>
-      {{ form.description.label }}<br>
-      {{ form.description(rows=3, cols=40) }}
-      {% for error in form.description.errors %}<br><span class="error">{{ error }}</span>{% endfor %}
-    </p>
-
-    <p>
-      {{ form.is_active() }} {{ form.is_active.label }}
-    </p>
-
-    {{ form.submit() }}
-  </form>
-</body>
-</html>
+          <div class="d-flex flex-wrap gap-2">
+            {{ submit("Save category") }}
+            <a class="btn btn-outline-secondary" href="{{ url_for('admin_menu.category_list') }}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

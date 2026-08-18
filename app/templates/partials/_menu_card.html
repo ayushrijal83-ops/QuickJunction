@@ -1,0 +1,45 @@
+{# One menu item card. Expects `item` (a MenuItem row) and, when an
+   add-to-cart form should render, `add_form` in the surrounding context.
+   Price always comes from the database row -- never from anything computed
+   in a template. #}
+<div class="card h-100 shadow-sm">
+  <div class="card-body d-flex flex-column">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <h3 class="qj-card-title card-title mb-1">
+        <a class="text-decoration-none" href="{{ url_for('menu.detail', item_id=item.id) }}">{{ item.name }}</a>
+      </h3>
+      <span class="qj-price fw-semibold">{{ item.price }}</span>
+    </div>
+
+    <p class="text-secondary small mb-2">{{ item.category.name }}</p>
+
+    {% if item.description %}
+      <p class="card-text small mb-3">{{ item.description }}</p>
+    {% endif %}
+
+    <div class="d-flex flex-wrap gap-1 mb-3">
+      <span class="badge rounded-pill text-bg-light border">{{ item.cuisine.value|replace("_", " ")|title }}</span>
+      <span class="badge rounded-pill text-bg-light border">{{ item.dietary_type.value|replace("_", " ")|title }}</span>
+      <span class="badge rounded-pill text-bg-light border">Spice: {{ item.spice_level.value|replace("_", " ")|title }}</span>
+    </div>
+
+    <div class="mt-auto">
+      {% if item.is_available %}
+        {% if add_form is defined %}
+          <form method="post" action="{{ url_for('cart.add') }}" class="d-flex gap-2">
+            {{ add_form.csrf_token }}
+            <input type="hidden" name="menu_item_id" value="{{ item.id }}">
+            <label class="visually-hidden" for="qty-{{ item.id }}">Quantity for {{ item.name }}</label>
+            <input class="form-control form-control-sm" style="max-width:5rem"
+                   type="number" id="qty-{{ item.id }}" name="quantity" value="1" min="1" max="20">
+            <button type="submit" class="btn btn-sm btn-primary flex-grow-1">Add to cart</button>
+          </form>
+        {% else %}
+          <a class="btn btn-sm btn-outline-primary w-100" href="{{ url_for('menu.detail', item_id=item.id) }}">View item</a>
+        {% endif %}
+      {% else %}
+        <span class="badge text-bg-secondary">Unavailable</span>
+      {% endif %}
+    </div>
+  </div>
+</div>

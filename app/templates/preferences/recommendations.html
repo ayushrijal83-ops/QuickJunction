@@ -1,55 +1,98 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Recommended for you - Quick Junction</title>
-</head>
-<body>
-  <p><a href="{{ url_for('menu.index') }}">&larr; Back to menu</a></p>
-  <h1>Recommended for you</h1>
+{% extends "base.html" %}
+{% block title %}Recommended for you &mdash; Quick Junction{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
-
-  {% if preference and (preference.dietary_preference or preference.cuisine_preference or preference.spice_preference) %}
-    <p>
-      Based on your preferences:
-      {% if preference.dietary_preference %}{{ preference.dietary_preference.value }}{% endif %}
-      {% if preference.cuisine_preference %} &middot; {{ preference.cuisine_preference.value }}{% endif %}
-      {% if preference.spice_preference %} &middot; {{ preference.spice_preference.value }} spice{% endif %}
-    </p>
-  {% else %}
-    <p>You have not set any preferences yet, so these are simply what is
-    available today.</p>
-  {% endif %}
-
-  <p>
-    <a href="{{ url_for('preferences.preferences') }}">Update my preferences</a>
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+  <h1 class="h3 mb-0">Recommended for you</h1>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
     {% if recommendations %}
-      | <a href="{{ url_for('preferences.explain') }}">Why was the top item picked?</a>
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('preferences.explain') }}">Why the top pick?</a>
+    {% endif %}
+  </div>
+</div>
+
+{% set has_prefs = preference and (preference.dietary_preference or preference.cuisine_preference or preference.spice_preference) %}
+{% if has_prefs %}
+  <p class="mb-4">
+    <span class="text-secondary">Based on:</span>
+    {% if preference.dietary_preference %}
+      <span class="badge rounded-pill text-bg-light border">{{ preference.dietary_preference.value|replace("_", " ")|title }}</span>
+    {% endif %}
+    {% if preference.cuisine_preference %}
+      <span class="badge rounded-pill text-bg-light border">{{ preference.cuisine_preference.value|replace("_", " ")|title }}</span>
+    {% endif %}
+    {% if preference.spice_preference %}
+      <span class="badge rounded-pill text-bg-light border">Spice: {{ preference.spice_preference.value|replace("_", " ")|title }}</span>
     {% endif %}
   </p>
+{% else %}
+  <div class="alert alert-info d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <span>You have not set any preferences yet, so these are simply what is available today.</span>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('preferences.preferences') }}">Set preferences</a>
+  </div>
+{% endif %}
 
-  {% if recommendations %}
-    <table border="1" cellpadding="4">
-      <tr><th>Item</th><th>Description</th><th>Category</th><th>Price</th><th>Match</th></tr>
-      {# Every row is a real MenuItem row from the database; the price below
-         is read off that row, never from anything the engine computed. #}
-      {% for rec in recommendations %}
-        <tr>
-          <td><a href="{{ url_for('menu.detail', item_id=rec.menu_item.id) }}">{{ rec.menu_item.name }}</a></td>
-          <td>{{ rec.menu_item.description or "" }}</td>
-          <td>{{ rec.menu_item.category.name }}</td>
-          <td>{{ rec.menu_item.price }}</td>
-          <td>{{ rec.match_label }}{% if rec.score > 0 %} ({{ rec.score_percent }}%){% endif %}</td>
-        </tr>
-      {% endfor %}
-    </table>
-  {% else %}
-    <p>No recommendations available right now.</p>
-  {% endif %}
-</body>
-</html>
+{% if recommendations %}
+  <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+    {% for rec in recommendations %}
+      <div class="col">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+              <h2 class="qj-card-title card-title mb-0">
+                <a class="text-decoration-none" href="{{ url_for('menu.detail', item_id=rec.menu_item.id) }}">{{ rec.menu_item.name }}</a>
+              </h2>
+              {# Price is read from the MenuItem row, never from the engine. #}
+              <span class="qj-price fw-semibold">{{ rec.menu_item.price }}</span>
+            </div>
+            <p class="small text-secondary mb-2">{{ rec.menu_item.category.name }}</p>
+
+            {% if rec.menu_item.description %}
+              <p class="card-text small mb-3">{{ rec.menu_item.description }}</p>
+            {% endif %}
+
+            <div class="d-flex flex-wrap gap-1 mb-3">
+              <span class="badge rounded-pill text-bg-light border">{{ rec.menu_item.cuisine.value|replace("_", " ")|title }}</span>
+              <span class="badge rounded-pill text-bg-light border">{{ rec.menu_item.dietary_type.value|replace("_", " ")|title }}</span>
+              <span class="badge rounded-pill text-bg-light border">Spice: {{ rec.menu_item.spice_level.value|replace("_", " ")|title }}</span>
+            </div>
+
+            <div class="mt-auto">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <span class="badge {{ 'text-bg-success' if rec.score >= 0.45 else ('text-bg-primary' if rec.score >= 0.20 else ('text-bg-secondary' if rec.score > 0 else 'text-bg-light border')) }}">
+                  {{ rec.match_label }}
+                </span>
+                {% if rec.score > 0 %}
+                  <span class="small text-secondary">{{ rec.score_percent }}% match</span>
+                {% endif %}
+              </div>
+              {% if rec.score > 0 %}
+                <div class="progress" style="height:6px" role="progressbar"
+                     aria-label="Match strength for {{ rec.menu_item.name }}"
+                     aria-valuenow="{{ rec.score_percent }}" aria-valuemin="0" aria-valuemax="100">
+                  <div class="progress-bar" style="width: {{ rec.score_percent }}%"></div>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <p class="small text-secondary mt-3 mb-0">
+    Matches are calculated by Quick Junction from your preferences and the menu.
+    Items your dietary preference excludes are never shown.
+  </p>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">Nothing to recommend right now</h2>
+    <p class="mb-3">
+      Nothing currently available matches your preferences. Try relaxing them, or
+      check back when the menu changes.
+    </p>
+    <a class="btn btn-outline-primary" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
+  </div>
+{% endif %}
+{% endblock %}

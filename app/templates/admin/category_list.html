@@ -1,30 +1,60 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Categories - Quick Junction Admin</title>
-</head>
-<body>
-  <p><a href="{{ url_for('account.index') }}">&larr; Account</a></p>
-  <h1>Categories</h1>
+{% extends "base.html" %}
+{% block title %}Categories &mdash; Quick Junction Admin{% endblock %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <p class="flash flash-{{ category }}">{{ message }}</p>
-    {% endfor %}
-  {% endwith %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Categories</h1>
+    <p class="text-secondary mb-0">
+      Categories are deactivated rather than deleted; an inactive category hides
+      its items from the public menu.
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_menu.menu_list') }}">Menu items</a>
+    <a class="btn btn-primary" href="{{ url_for('admin_menu.category_create') }}">New category</a>
+  </div>
+</div>
 
-  <p><a href="{{ url_for('admin_menu.category_create') }}">+ New category</a></p>
-
-  <table border="1" cellpadding="4">
-    <tr><th>Name</th><th>Active</th><th></th></tr>
-    {% for category in categories %}
-      <tr>
-        <td>{{ category.name }}</td>
-        <td>{{ "yes" if category.is_active else "no" }}</td>
-        <td><a href="{{ url_for('admin_menu.category_edit', category_id=category.id) }}">Edit</a></td>
-      </tr>
-    {% endfor %}
-  </table>
-</body>
-</html>
+{% if categories %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Description</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for category in categories %}
+            <tr>
+              <th scope="row" class="fw-semibold">{{ category.name }}</th>
+              <td class="text-secondary small">{{ category.description or "—" }}</td>
+              <td>
+                {% if category.is_active %}
+                  <span class="badge text-bg-success">Active</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">Inactive</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{{ url_for('admin_menu.category_edit', category_id=category.id) }}">Edit</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <h2 class="h5">No categories yet</h2>
+    <p class="mb-3">Create a category before adding menu items.</p>
+    <a class="btn btn-primary" href="{{ url_for('admin_menu.category_create') }}">New category</a>
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,4 +1,4 @@
-# AI — local Qwen integration (Milestones 07 and 07.1)
+# AI — local Qwen integration (Milestones 07, 07.1 and 08)
 
 > **M07.1 status:** the dataset was rebalanced (60 → 150 examples) and a
 > second LoRA adapter was trained. Evaluation on held-out scenarios showed
@@ -499,3 +499,82 @@ legitimate in dish names and cannot forge `label: value` structure, which is
 what the sanitiser actually defends. Model paths remain configuration-only,
 inference remains offline with no API key, and `training/evaluate.py` is
 grep-asserted to contain no network client or credential.
+
+
+---
+
+# 12. Milestone 08 — presentation and re-verification
+
+No retraining, no change to the model, the adapter or the security boundary.
+M08 re-ran the evaluation, verified the fallbacks, and rebuilt the
+presentation layer around the existing architecture.
+
+## 12.1 Evaluation re-run (unchanged)
+
+`python training/evaluate.py` reproduced M07.1 **exactly** — greedy decoding
+makes the generations byte-identical between runs:
+
+| System | Passed | Keyword coverage |
+| --- | --- | --- |
+| Base Qwen3-0.6B | 8/8 | 10/32 |
+| M07 adapter (v1) | 5/8 | 12/32 |
+| **M07.1 adapter (v2, in use)** | **8/8** | **16/32** |
+
+No regression, so **no retraining was performed**. Both adapters remain on
+disk; `LLM_ADAPTER_PATH` defaults to v2.
+
+## 12.2 Fallback behaviour verified live
+
+| Configuration | Observed |
+| --- | --- |
+| V2 adapter (production default) | generates an explanation |
+| V1 adapter (explicitly selected) | generates an explanation |
+| No adapter configured | falls back to the base model |
+| Missing adapter directory | falls back to the base model |
+| Malformed model path | returns `None` → "temporarily unavailable" |
+| Path traversal (`../../etc`) | returns `None`, no file access |
+
+In every failing case `/recommendations` was unaffected and
+`/recommendations/explain` still rendered the full deterministic panel.
+
+## 12.3 Presentation — separating authority from advice
+
+The explanation page now renders two labelled panels side by side:
+
+- **Left, green border — "Why this item was recommended"**, badged
+  *Calculated by Quick Junction*. Price, cuisine, dietary type, spice level
+  and match, each annotated against the customer's stated preference
+  ("matches your preference" / "you prefer Indian"). Read straight from the
+  `MenuItem` row and the engine.
+- **Right, blue border — "AI explanation"**, badged *Advisory*. The model's
+  sentence in italics, with a caption stating that the left panel is the
+  authoritative version.
+
+This is presentation only. The security boundary is unchanged: the model is
+still given no price, no id and no availability flag; its output is still
+escaped text that nothing reads back.
+
+## 12.4 Performance measured
+
+Model loading is a **process-wide singleton**, confirmed by three consecutive
+requests: 23 s (including the one-time load), then 9.2 s and 9.1 s. It is not
+reloaded per request.
+
+Explanations therefore live on their own route — `/recommendations` never
+invokes the model and renders in ~18 ms.
+
+## 12.5 Honest positioning
+
+The accurate statement, unchanged:
+
+> We did not train a large language model from scratch. We used
+> **Qwen3-0.6B-Base** as the foundation model and created a project-specific
+> hand-authored instruction dataset. We fine-tuned the model locally using
+> parameter-efficient **LoRA** training (0.84 % of parameters), evaluated the
+> resulting adapter against held-out scenarios, and integrated the resulting
+> local adapter into Quick Junction as an **explanation component**.
+
+The quality limitations recorded in §11.5 still stand: V2 fixed the
+sycophancy that made V1 unsafe to show, but its prose can still be garbled or
+attach a correct observation to the wrong conclusion. It is a demonstration
+of the integration, not polished customer copy.

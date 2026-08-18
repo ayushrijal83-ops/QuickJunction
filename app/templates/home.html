@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Quick Junction &mdash; order from our kitchen{% endblock %}
+
+{% block content %}
+<div class="p-4 p-md-5 mb-4 rounded-3 bg-white border">
+  <div class="col-lg-8">
+    <h1 class="display-6 fw-semibold">Order from the Quick Junction kitchen</h1>
+    <p class="lead text-secondary mb-4">
+      Browse the menu, tell us what you like, and we will suggest dishes that
+      actually match your diet, cuisine and spice preferences.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-primary btn-lg" href="{{ url_for('menu.index') }}">Browse the menu</a>
+      {% if current_user %}
+        <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('preferences.recommendations') }}">My recommendations</a>
+      {% else %}
+        <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('auth.register') }}">Create an account</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-secondary">Personalised</h2>
+        <p class="card-text mb-0">
+          Recommendations are calculated from your stated preferences and your
+          completed orders &mdash; and never suggest something your diet excludes.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-secondary">Transparent</h2>
+        <p class="card-text mb-0">
+          Every suggestion comes with the exact facts behind it: cuisine,
+          dietary type, spice level and the price from our menu.
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card h-100 border-0 shadow-sm">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-secondary">Private</h2>
+        <p class="card-text mb-0">
+          Our AI explanations run on this server. Nothing about your order or
+          your preferences is sent to an outside service.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h2 class="h4 mb-0">Available today</h2>
+  <a href="{{ url_for('menu.index') }}">See the full menu</a>
+</div>
+
+{% if items %}
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3">
+    {% for item in items %}
+      <div class="col">
+        {% include "partials/_menu_card.html" %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white">
+    <p class="mb-0">Nothing is available right now. Please check back shortly.</p>
+  </div>
+{% endif %}
+{% endblock %}
