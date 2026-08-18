@@ -70,7 +70,7 @@
     "train": "f5149387fb23506b967dcd7db606ef1a3bb2616dc3cf3cc7e278904bb8d8468e",
     "validation": "13d70ed41930c4950309adc94ba0f9cf1c32c52a02c30398c07dd17a59ef37d2"
   },
-  "split_method": "Deterministic and content-addressed: SHA-256 per example, ordered by hash within category, first N of each category held out. No RNG.",
+  "split_method": "Deterministic and content-addressed: SHA-256 per example, ordered by hash within category, first N of each category held out. No RNG. Examples carrying a 'group_id' sort last, so contrastive groups stay whole in training; the build fails if any group straddles the split.",
   "totals": {
     "categories": 15,
     "raw": 150,

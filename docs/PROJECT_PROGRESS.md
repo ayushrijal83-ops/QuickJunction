@@ -1192,30 +1192,227 @@ email verification · staff queue pagination/filtering.
 
 ---
 
+## Milestone 07.2 — Dataset V3 authored and validated (**training not performed**) ✅
+
+**Scope: dataset only.** No model was trained, no V3 adapter was created,
+`training/train_lora.py` was not run, and no application behaviour changed.
+`LLM_ADAPTER_PATH` still resolves to the V2 adapter. Full detail in
+`docs/AI.md` §13.
+
+### Why V3
+
+The M07.2 design audit measured V2 against the prompt the app actually sends
+(`app/services/local_llm.py::build_prompt`): only **13 %** of V2 examples used
+the production prompt shape and only **7 %** used its exact instruction
+string. V2 was fine-tuned largely on prompts production never sends.
+
+Four of V2's fifteen categories were also **unreachable**:
+`ingredient_mismatch`, `unavailable_items`, `no_recommendations` and
+`preference_over_history` describe situations the application cannot produce —
+`ExplanationRequest` is a frozen dataclass of eight fields with no price,
+ingredients, availability or history, and the model is never invoked when
+there are no recommendations.
+
+### What was built
+
+| | |
+| --- | --- |
+| Seed file | `data/raw/seed_examples_v3.jsonl` — **200 examples, 13 categories** |
+| Prompt shape | **100 %** production shape and instruction string |
+| Contrastive groups | **20 × 3 = 60**, all intact in training |
+| Train / validation | **161 / 39** (3 per category) |
+| Raw SHA-256 | `d1f136ca…d55f406` |
+| Overlap with V1/V2 | **zero** |
+| Rebuild | byte-identical, verified |
+
+Every example is hand-authored. The `input` block is rendered from the
+production template so its shape is guaranteed; every `output` sentence was
+written by hand.
+
+### Builder change — minimal and backward-compatible
+
+Contrastive groups must not straddle the train/validation boundary, but group
+members span different categories and validation is drawn per category. The
+fix in `scripts/build_dataset.py` is an optional `group_id` field plus one
+extra term in the ordering key, so grouped examples sort last and whole groups
+stay in training; `build()` then asserts the outcome and refuses to write if
+any group is split.
+
+**Backward compatibility was proven, not assumed:** v1 and v2 carry no
+`group_id`, so the ordering collapses to the original hash order. Rebuilding
+both produced **byte-identical** `train.jsonl` and `validation.jsonl`. The
+only v1/v2 change on disk is the `split_method` description inside their
+manifests, which had to change because the builder's documented method did.
+
+### Verification
+
+**25 validation checks, all passing** — shape, vocabulary, reachability under
+the dietary hard filter, sentence count, no invented attributes, no invented
+context, unset preferences never claimed as matched, "all three" only when
+literally true, `Suggested` never asserting a match, no cross-dimension
+confusion, no duplicates, zero V1/V2 overlap.
+
+**Non-vacuity proven for every check.** Each was re-run against a deliberately
+corrupted dataset (injected price, fabricated order history, a match claimed
+on an unset preference, a broken group, a copied V1 example) and every one
+flipped to failing.
+
+`tests/test_dataset_v3.py` carries 29 of these as permanent tests, 16 of them
+independently re-verified as non-vacuous. **268 passed** (239 → 268), no
+existing test weakened.
+
+`test_7` fails if a V3 adapter appears or the training default changes, so the
+"dataset only" boundary cannot be crossed silently.
+
+### Known limitation
+
+Whether V3 improves generation is **unknown and unmeasured** — no V3 model
+exists. V3 also does not address the prose-fluency defect in `docs/AI.md`
+§11.5, which is a capacity limit of a 0.6B model rather than a data problem.
+
+---
+
+## Milestone 07.3 — V3 evaluation and comparison ✅ (**V3 not promoted**)
+
+Evaluation only: no training, no adapter change, no production configuration
+change. Full detail in `docs/AI.md` §14.
+
+**Verdict: KEEP V2 for now.** V3 is clearly better than V2 on the real
+production task, but it regressed on one specific class that should be fixed
+before it faces customers.
+
+### Harness
+
+`training/evaluate.py` and `training/eval_results_m07_1.json` were left
+**untouched** as historical evidence. A separate harness was added because the
+old one cannot load V3 and because four of its eight scenarios test situations
+the application cannot produce (availability, order history, an exclusion
+note, an empty candidate list).
+
+New: `training/eval_scenarios_production.py`,
+`training/evaluate_production.py`, `training/eval_results_m07_3.json`,
+`tests/test_evaluation_production.py`.
+
+25 held-out cases (16 scenarios + 3 contrastive groups × 3), rendered by the
+real `build_prompt`, generated greedily at the production token limit, and
+trimmed by production's own `_tidy` — so the scored text is what a customer
+would see. Verified absent from all 386 dataset prompts with zero dish-name
+reuse.
+
+### Results
+
+| System | Passed | Difference coverage | Avg s |
+| --- | ---: | ---: | ---: |
+| base | 17/25 | 5/19 | 5.43 |
+| v1 | 9/25 | 8/19 | 6.17 |
+| v2 | 16/25 | 13/19 | 5.51 |
+| **v3** | **22/25** | **17/19** | **4.01** |
+
+Contrastive groups — V3's design target: **v3 9/9**, v2 6/9, v1 3/9, base 4/9.
+
+V3 eliminated every hallucination (v2: 4), every overclaim (v2: 3), the
+"only item on the menu" invention (v2: 3), and the dietary-compatibility
+error (v2: 1). It is also the most concise system at 19.2 words average
+against v2's 30.0.
+
+The base model's 17/25 is **flattering**: it writes third-person copy
+(0/25 address the customer), names the dish in 1/25, and several "passes"
+contain false claims the second-person-tuned detectors miss. On the
+register-independent measure it is last at 5/19.
+
+### Why V3 is not promoted
+
+All three V3 failures cluster on **"not set"** handling — the one dimension
+where it is worse than V2 (2 errors vs 0). It narrates unset preferences
+instead of leaving them alone, once leaking the literal `not set` placeholder
+as an item attribute. That is the target for a V4 dataset pass.
+
+### Production safety
+
+`DEFAULT_DATASET_VERSION` is `v2`; `LLM_ADAPTER_PATH` resolves to
+`models/qwen3-0.6b-quickjunction-lora-v2`. **291 tests pass** (270 → 291).
+
+---
+
+## Milestone 07.4 — Dataset V4 authored and validated (**training not performed**) ✅
+
+Dataset only: no training, no V4 adapter, no production change. Detail in
+`docs/AI.md` §15.
+
+### Target
+
+M07.3 found V3 better than V2 everywhere except **"not set"** handling (2
+errors vs 0). Measured against the V3 file: 31 of its 41 unset-involving
+examples narrate the unsetness, and **none** models silently omitting an unset
+dimension. A second defect: 16 examples have item cuisine `other` and **none**
+verbalise it, so the model substituted a concrete wrong cuisine.
+
+### Composition
+
+**240 examples, 15 categories** = the **159 V3 examples with no unset
+preference retained byte-for-byte** (they produced M07.3's wins, and all 20
+contrastive groups live entirely inside them) + **81 newly authored** replacing
+the 41 defective ones.
+
+New categories: `unset_omitted_silently` (30), `unset_partial_match` (16),
+`unset_none_set` (10), `cuisine_other_unnamed` (15); `low_signal_suggested`
+rebuilt (13).
+
+Four authoring rules: an unset dimension is never mentioned at all (57 of 67
+unset examples, vs V3's 0); the all-unset case is the sole exception; the
+literal `not set` never appears in any output; `other` is never named as a
+concrete cuisine.
+
+### Build and verification
+
+`python scripts/build_dataset.py --version v4` -> **195 train / 45 validation**,
+20 groups all in train, byte-identical rebuild. Registering v4 left v1/v2/v3
+processed outputs **byte-identical**.
+
+**29 validation checks, all passing and all proven non-vacuous** -- including by
+reinserting V3's three actual failure sentences and confirming each is caught.
+Zero overlap with V1/V2; overlap with V3 is exactly the 159 retained examples;
+**zero overlap with the 25 M07.3 evaluation prompts**.
+
+**315 tests pass** (291 -> 315); `tests/test_dataset_v4.py` adds 24.
+
+### Still unknown
+
+Whether V4 fixes the behaviour is unmeasured -- no V4 model exists. The
+hypothesis is falsifiable: retrain on v4, re-run
+`training/evaluate_production.py`, and check that the not-set class clears
+without regressing the other axes.
+
+---
+
 ## Next milestone
 
-**Milestone 08 — not yet defined.** Every stated project requirement now has
-an implementation: ordering end-to-end, staff fulfilment, a deterministic
-recommender, and local free AI with a hand-authored dataset and a real
-fine-tune.
+**Train V4 and re-run the M07.3 evaluation.** That is the only remaining step
+in this line of work, and the hypothesis is falsifiable:
 
-Candidates, in the order I would recommend them:
+```
+python training/train_lora.py --dataset-version v4 --epochs 3
+python training/evaluate_production.py --systems base v2 v3 v4     --json training/eval_results_m07_5.json
+```
 
-1. **Frontend pass (Bootstrap/CSS)** — every page is still plain unstyled
-   HTML. This is now by far the largest gap between what the system *does*
-   and what a reviewer *sees*, and it is low-risk and backend-independent.
-   Recommended first.
-2. **Dataset expansion + re-train** — known issue #20 is the one substantive
-   quality defect shipped in M07: the model asserts matches that are false.
-   Adding partial/failed-match examples and re-running the 21-minute
-   training would make the AI feature genuinely presentable rather than
-   merely demonstrable. Cheap and high-visibility.
-3. **MySQL verification + deployment prep** — known issue #1 remains the
-   only outright deployment blocker. It needs a reachable MySQL server
-   rather than more code, so it can run in parallel with either of the above.
+Requirements before training:
 
-I would sequence 1 → 2, with 3 in parallel whenever a MySQL server becomes
-available. A conversational AI assistant is deliberately *not* recommended:
-the explanation-only integration already satisfies the local-AI requirement,
-and a chat surface would add a prompt-injection surface the current
-architecture does not have.
+- `v4` must be registered in `training/train_lora.py::DATASET_VERSIONS`
+  (currently v1/v2/v3 only, so `--dataset-version v4` will be rejected by
+  argparse -- the same blocker M07.4's predecessor hit).
+- Expect ~150 optimizer steps (195 examples x 3 epochs / grad-accum 4) and
+  roughly 75-80 minutes on CPU, extrapolating from V3's 123 steps in 61.4 min.
+- The adapter must go to `models/qwen3-0.6b-quickjunction-lora-v4/`, never over
+  V1, V2 or V3. The existing overwrite guard covers this once registered.
+
+Success criterion, decided in advance: **NOT_SET_ERROR drops to 0** while
+HALLUCINATION, OVERCLAIM, DIETARY_COMPATIBILITY_ERROR and CROSS_DIMENSION_ERROR
+stay at 0 and contrastive tracking stays at 9/9. If not-set clears without
+regressions, promoting becomes a supportable decision for the first time.
+
+Two smaller items, unchanged:
+
+- `training/evaluate.py` still contains four scenarios the application cannot
+  produce; retiring or re-pointing them is deferred work, not a blocker.
+- Known issue #29: auditing the older test suites for the `g.current_user`
+  app-context caching weakness found in M09.

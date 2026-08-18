@@ -1,9 +1,14 @@
-# AI — local Qwen integration (Milestones 07, 07.1 and 08)
+# AI — local Qwen integration (Milestones 07, 07.1, 08 and 07.2)
 
 > **M07.1 status:** the dataset was rebalanced (60 → 150 examples) and a
 > second LoRA adapter was trained. Evaluation on held-out scenarios showed
 > **v1 5/8 → v2 8/8**, so **V2 replaced V1 as the default adapter**. The M07
 > adapter is retained on disk and is still selectable. See §11.
+>
+> **M07.2 status: V3 dataset authored and validated; training pending.**
+> 200 examples, every one in the exact prompt shape production emits — a
+> defect V2 had, where only 13 % of examples did. **No model was trained, no
+> V3 adapter exists, and runtime behaviour is unchanged.** See §13.
 
 
 Everything here runs **locally and offline**. No external LLM API, no paid
@@ -87,14 +92,20 @@ Fully documented in [`data/README.md`](../data/README.md). Summary:
 | --- | --- |
 | Source | **hand-authored for this project** — not scraped, not downloaded, not LLM-generated |
 | Raw (v1) | `data/raw/seed_examples.jsonl` — 60 examples |
-| Raw (v2, current) | `data/raw/seed_examples_v2.jsonl` — 150 examples — see §11 |
+| Raw (v2, **trained, in use**) | `data/raw/seed_examples_v2.jsonl` — 150 examples — see §11 |
+| Raw (v3, **authored, not trained**) | `data/raw/seed_examples_v3.jsonl` — 200 examples — see §13 |
 | Train / validation (v1) | 50 / 10 |
 | Train / validation (v2) | 120 / 30 |
-| Categories | 10 in v1, 15 in v2 |
-| Format | JSONL: `category`, `instruction`, `input`, `output` |
+| Train / validation (v3) | 161 / 39 |
+| Categories | 10 in v1, 15 in v2, 13 in v3 |
+| Format | JSONL: `category`, `instruction`, `input`, `output` (+ optional `group_id` in v3) |
 | Split | deterministic, content-addressed (SHA-256), no RNG |
 
-Regenerate with `python scripts/build_dataset.py` — byte-reproducible.
+Regenerate with `python scripts/build_dataset.py [--version v1|v2|v3]` —
+byte-reproducible.
+
+> **V3 is a dataset only.** No V3 adapter exists, no V3 training run has been
+> performed, and `LLM_ADAPTER_PATH` still points at the V2 adapter.
 
 ## 4. Training
 
@@ -578,3 +589,409 @@ The quality limitations recorded in §11.5 still stand: V2 fixed the
 sycophancy that made V1 unsafe to show, but its prose can still be garbled or
 attach a correct observation to the wrong conclusion. It is a demonstration
 of the integration, not polished customer copy.
+
+---
+
+# 13. Milestone 07.2 — dataset V3 (authored and validated; **not trained**)
+
+> **Scope boundary.** This milestone authored and validated a dataset. It did
+> **not** train a model, did not create a V3 adapter, did not run
+> `training/train_lora.py`, and did not change any runtime behaviour.
+> `LLM_ADAPTER_PATH` still resolves to the V2 adapter.
+> `tests/test_dataset_v3.py::test_7` fails if that boundary is crossed.
+
+## 13.1 Why V3 exists — the prompt-shape defect
+
+The M07.2 design audit measured V2 against the prompt the application actually
+sends (`app/services/local_llm.py::build_prompt`):
+
+| | V2 |
+| --- | --- |
+| Examples using the production **prompt shape** | **13 %** |
+| Examples using the production **instruction string** | **7 %** |
+
+V2 was therefore fine-tuned largely on prompts production never sends. Worse,
+four of its fifteen categories (`ingredient_mismatch`, `unavailable_items`,
+`no_recommendations`, `preference_over_history`) describe situations the app
+cannot produce: `ExplanationRequest` is a frozen dataclass with exactly eight
+fields and carries **no** price, ingredients, availability or order history,
+and the model is never called when there are no recommendations at all.
+
+V3 is built the other way round — from the production contract inward.
+
+## 13.2 Composition
+
+200 examples, 13 categories. `data/processed/v3/manifest.json` is the
+authoritative record.
+
+| Category | n | What it teaches |
+| --- | ---: | --- |
+| `full_match` | 26 | every stated preference aligns |
+| `cuisine_and_spice_differ` | 20 | two dimensions differ at once |
+| `match_with_unset` | 20 | some preferences unset, the rest match |
+| `cuisine_differs_only` | 16 | exactly one dimension differs |
+| `spice_differs_only` | 16 | exactly one dimension differs |
+| `single_attribute_match` | 16 | only one of three preferences is met |
+| `label_fact_consistency` | 16 | wording must track the match label |
+| `no_cross_dimension_errors` | 14 | never call a cuisine a spice level |
+| `dietary_compatible_not_identical` | 12 | vegan item for a vegetarian customer |
+| `no_invented_attributes` | 12 | no price, ingredients, calories, availability |
+| `no_invented_context` | 12 | no order history, popularity or reviews |
+| `low_signal_suggested` | 10 | `Suggested` (score 0.0) claims nothing |
+| `unset_stays_unset` | 10 | "not set" is never reported as matched |
+
+Every example is **hand-authored**: not scraped, not downloaded, not generated
+by another language model. The `input` block is rendered mechanically from the
+production template so its *shape* is guaranteed correct; every `output`
+sentence was written by hand.
+
+## 13.3 Contrastive groups
+
+**20 groups × 3 = 60 examples.** Each group fixes one customer preference
+block and varies only the candidate item:
+
+| Member | Varies | Category |
+| --- | --- | --- |
+| A | nothing — all preferences align | `full_match` |
+| B | exactly one dimension | `cuisine_differs_only` / `spice_differs_only` |
+| C | two dimensions | `cuisine_and_spice_differ` / `single_attribute_match` |
+
+This is the signal V2 lacked entirely: the model sees the *same* customer with
+three different candidates and must say something different about each.
+
+**A group must never be split across train and validation** — training on two
+members while holding out the third leaks the very contrast the group teaches.
+Group members also span different categories, and validation is drawn per
+category, so this needed a builder change.
+
+**The minimal backward-compatible change** (`scripts/build_dataset.py`): an
+optional `group_id` field, and one extra term in the ordering key —
+
+```python
+def order_key(example):
+    return ("group_id" in example, example_hash(example))
+```
+
+Grouped examples sort last, so validation fills from ungrouped examples first
+and whole groups stay in training. `build()` then **asserts** the outcome and
+refuses to write if any group straddles the boundary.
+
+Backward compatibility is proven, not asserted: v1 and v2 carry no `group_id`,
+so the term is constant there and the ordering collapses to the original hash
+order. Rebuilding both after the change produced **byte-identical**
+`train.jsonl` and `validation.jsonl` (verified by SHA-256 before and after).
+The only v1/v2 change on disk is the `split_method` description string inside
+their manifests, which had to change because the builder's method did.
+
+## 13.4 Build
+
+```
+python scripts/build_dataset.py --version v3
+```
+
+| | |
+| --- | --- |
+| Raw | 200 |
+| Train / validation | **161 / 39** (3 per category × 13) |
+| Contrastive groups | 20, **all in train**, none split |
+| Raw SHA-256 | `d1f136caa1e51603df31486be82d1d9b21d7eea9e2806b240819e9748d55f406` |
+| Rebuild | byte-identical, verified |
+
+## 13.5 Validation — 25 checks, all passing
+
+Shape and vocabulary: exactly 200 examples; exact category counts; one
+identical instruction string; every `input` matching the production prompt
+regex anchored at both ends; all values drawn from the production enums; all
+match labels from the production vocabulary.
+
+Reachability: every candidate is one the dietary hard filter
+(`_DIETARY_COMPATIBILITY`) would actually have kept, so no example teaches a
+situation the engine cannot produce.
+
+Honesty: one or two sentences as the instruction promises; no invented
+attributes; no invented context; an unset preference never described as
+matched; "all three preferences" claimed only when literally true; a
+`Suggested` item never described as matching anything; no cross-dimension
+confusion; outputs unchanged by production's `_sanitise()`.
+
+Integrity: no duplicates; 20 intact groups; **zero content overlap with V1 and
+V2** (SHA-256 over instruction + input + output).
+
+**Non-vacuity was proven for all of them.** Each check was re-run against a
+deliberately corrupted copy of the dataset — an injected price, a fabricated
+order history, a match claimed on an unset preference, a `Suggested` item
+described as matching, a broken group, a copied V1 example — and every check
+flipped to failing. A check that cannot be made to fail is not testing
+anything.
+
+`tests/test_dataset_v3.py` carries 29 of these as permanent tests; 16 were
+independently re-verified as non-vacuous against the real test file. Suite:
+**268 passed** (239 before, +29).
+
+## 13.6 What V3 does *not* address
+
+V3 targets the prompt-shape and honesty defects. It does **not** fix the prose
+fluency problem recorded in §11.5 — that is a capacity limit of a 0.6B model
+under LoRA, and more data of the same kind is unlikely to resolve it.
+
+Whether V3 actually improves generation is **unknown and unmeasured**, because
+no V3 model has been trained. Any claim about V3 quality would be fabricated
+until a training run and a held-out evaluation have been performed.
+
+---
+
+# 14. Milestone 07.3 — V3 evaluation (**V3 not promoted**)
+
+> **Outcome: KEEP V2 for now.** V3 is clearly better than V2 on the real
+> production task, but it carries a small residual defect class that should be
+> fixed before it becomes the customer-facing adapter. Detail below.
+>
+> `LLM_ADAPTER_PATH` still resolves to the V2 adapter and
+> `DEFAULT_DATASET_VERSION` is still `v2`.
+
+## 14.1 Why a new harness
+
+`training/evaluate.py` and `training/eval_results_m07_1.json` are **untouched**
+— they are the historical record of M07.1. A separate harness was added
+because the old one could not do this job:
+
+1. It has no `v3` entry and cannot load the V3 adapter.
+2. **Four of its eight scenarios are unreachable in production** —
+   `dietary_mismatch`, `unavailable_item`, `no_recommendation` and
+   `preference_over_history` reference availability, order history, an
+   exclusion note or an empty candidate list. `ExplanationRequest` carries
+   none of those, so scoring V3 on them would measure behaviour the
+   application can never trigger.
+3. Its scoring is keyword-only.
+
+New files: `training/eval_scenarios_production.py` (cases) and
+`training/evaluate_production.py` (scorer + runner), writing
+`training/eval_results_m07_3.json`.
+
+## 14.2 Method
+
+Prompts are rendered by the real `build_prompt`; decoding is greedy at the
+production token limit; output is trimmed by production's own `_tidy`. **The
+scored text is exactly what a customer would see.** Raw continuations are
+stored alongside for diagnosis.
+
+25 held-out cases — 16 scenarios across the eight required dimensions plus 9
+contrastive cases (3 groups × 3). Verified absent from all 386 prompts in the
+v1/v2/v3 raw and processed splits, with zero dish-name reuse from the 210
+names those datasets use.
+
+Expectations are **derived from each case's own facts** rather than from
+keyword lists, so the scorer asks "did the model tell the truth about this
+candidate" instead of "did it emit a favoured phrase".
+
+## 14.3 Results
+
+| System | Passed | Difference coverage | Avg s |
+| --- | ---: | ---: | ---: |
+| base | 17/25 | 5/19 | 5.43 |
+| v1 | 9/25 | 8/19 | 6.17 |
+| v2 | 16/25 | 13/19 | 5.51 |
+| **v3** | **22/25** | **17/19** | **4.01** |
+
+Failure taxonomy (cases exhibiting each):
+
+| | base | v1 | v2 | **v3** |
+| --- | ---: | ---: | ---: | ---: |
+| HALLUCINATION | 6 | 6 | 4 | **0** |
+| OVERCLAIM | 0 | 3 | 3 | **0** |
+| LABEL_FACT_CONTRADICTION | 1 | 7 | 3 | **1** |
+| DIETARY_COMPATIBILITY_ERROR | 0 | 2 | 1 | **0** |
+| CROSS_DIMENSION_ERROR | 0 | 1 | 0 | **0** |
+| GARBLED_PROSE | 1 | 2 | 2 | **1** |
+| NOT_SET_ERROR | 0 | 2 | 0 | **2** |
+
+Contrastive groups, where V3 was explicitly designed to help:
+
+| System | Passed | Coverage |
+| --- | ---: | ---: |
+| base | 4/9 | 1/9 |
+| v1 | 3/9 | 4/9 |
+| v2 | 6/9 | 6/9 |
+| **v3** | **9/9** | **8/9** |
+
+## 14.4 The base-model score is flattering, and should not be read as "base is fine"
+
+Base scores 17/25 but writes **third-person marketing copy** — 0/25 outputs
+address the customer, 20/25 talk about "the customer", and it names the dish
+in 1/25. Several of its "passes" contain outright false claims the
+second-person-tuned detectors miss, e.g. for a customer preferring Chinese it
+wrote *"aligns with the customer's preference for a medium-spice, Thai
+cuisine"*, and for an item with `spice: none` it wrote *"both flavorful and
+spicy"*. On the register-independent measure — naming the actual difference —
+base is last at 5/19. It is not usable as customer copy.
+
+## 14.5 V2 failure classes, and whether V3 fixes them
+
+| Class | v2 | v3 |
+| --- | ---: | ---: |
+| invented "only item on the menu" | 3 | **0 — fixed** |
+| false availability wording | 1 | **0 — fixed** |
+| dietary mismatch where compatibility exists | 1 | **0 — fixed** |
+| cross-dimension (cuisine stated as dietary) | 0 | 0 |
+| contradictory comparison ("X rather than X") | 1 | **0 — fixed** |
+| false preference claim when "not set" | 0 | **2 — regressed** |
+
+V2's own instances, for the record: *"It is the only item on the menu that
+fits all three criteria"*; *"it is a continental dish rather than a
+continental one"*; *"Spinach Frittata … matching all three preferences. It is
+not vegan, however, so it is not a good fit for a vegan diet"* (the customer
+is eggetarian — vegan was never requested).
+
+## 14.6 V3's residual defect — why promotion waits
+
+V3's three failing cases cluster on **"not set"** handling, the one dimension
+where it is worse than V2:
+
+- *"Nopales Salad is vegan as you asked, but it is Mexican rather than the
+  cuisine you set."* — no cuisine preference was set.
+- *"Panzanella is vegan and mild as you asked… You only wanted vegan and mild
+  preferences."* — the customer did set a cuisine preference.
+- *"Fattoush Salad is not set and has no heat… It is an Indian dish."* — leaks
+  the literal `not set` placeholder as an attribute, and the item is `other`,
+  not Indian.
+
+This is ironic given `unset_stays_unset` and `match_with_unset` are V3
+categories, and it is the specific thing a V4 pass should target: the dataset
+teaches the model to *mention* unset preferences, and it has over-generalised
+into narrating them, sometimes wrongly.
+
+Everything else improved: zero hallucinations, zero overclaims, zero dietary
+compatibility errors, perfect contrastive tracking, and the most concise
+output of any system (19.2 words average vs V2's 30.0).
+
+## 14.7 Honest limits of this evaluation
+
+- 25 cases is a **behavioural probe, not a statistic**. No confidence
+  interval is claimed.
+- The scorer is regex-based and register-sensitive; it under-penalises the
+  base model's third-person phrasing (§14.4). Detector corrections found
+  during manual review were applied **uniformly to all four systems** and
+  re-run over the saved generations, so the comparison stays exact — but the
+  absolute numbers should be read as approximate.
+- Every output was also **read by hand**; the automated table alone was not
+  the basis of the verdict.
+- Training loss was explicitly *not* used as evidence.
+
+---
+
+# 15. Milestone 07.4 — dataset V4 (authored and validated; **not trained**)
+
+> **Scope: dataset only.** No model was trained, no V4 adapter exists, and no
+> production configuration changed. `LLM_ADAPTER_PATH` still resolves to the
+> V2 adapter. `tests/test_dataset_v4.py::test_6` fails if that changes.
+
+## 15.1 The defect V4 targets
+
+M07.3 (§14) found V3 better than V2 on every axis except one: **"not set"
+handling**, where it produced 2 errors to V2's 0. Its three failures were
+
+- *"…it is Mexican rather than **the cuisine you set**"* — no cuisine was set.
+- *"**You only wanted vegan and mild preferences**"* — a cuisine *was* set.
+- *"Fattoush Salad **is not set** and has no heat… **It is an Indian dish**"* —
+  the placeholder leaked as an attribute, and the item's cuisine is `other`.
+
+Measured against the V3 file itself:
+
+| | V3 |
+| --- | ---: |
+| Examples with ≥1 unset preference | 41 / 200 |
+| …that narrate the unsetness or count preferences | **31 (76%)** |
+| …that positively describe matches while **silently omitting** the unset dimension | **0** |
+| Examples whose item cuisine is `other` | 16 |
+| …that verbalise `other` in the output | **0** |
+
+So V3 taught *"if a preference is unset, say something about it"*. The model
+over-generalised into narrating, and when narration went wrong it invented a
+preference or leaked the placeholder. Separately, having never seen `other`
+verbalised, it substituted a concrete wrong cuisine.
+
+## 15.2 Composition — 240 examples, 15 categories
+
+**159 V3 examples are retained byte-for-byte** — every V3 example that carries
+no unset preference. These produced M07.3's wins (zero hallucinations, zero
+overclaims, zero dietary errors, 9/9 contrastive), and **all 20 contrastive
+groups live entirely inside this set**, so that signal survives intact. The 41
+defective examples are dropped and replaced by 81 newly authored ones.
+
+| Category | V3 | V4 | |
+| --- | ---: | ---: | --- |
+| full_match | 26 | 26 | retained |
+| cuisine_and_spice_differ | 20 | 20 | retained |
+| cuisine_differs_only | 16 | 16 | retained |
+| spice_differs_only | 16 | 16 | retained |
+| single_attribute_match | 16 | 16 | retained |
+| no_cross_dimension_errors | 14 | 14 | retained |
+| dietary_compatible_not_identical | 12 | 12 | retained |
+| no_invented_attributes | 12 | 12 | retained |
+| no_invented_context | 12 | 12 | retained |
+| label_fact_consistency | 16 | 12 | retained (4 unset ones dropped) |
+| low_signal_suggested | 10 | 13 | 3 retained + 10 rebuilt |
+| **unset_omitted_silently** | — | **30** | **new — the core fix** |
+| **unset_partial_match** | — | **16** | new |
+| **unset_none_set** | — | **10** | new |
+| **cuisine_other_unnamed** | — | **15** | new |
+| **Total** | 200 | **240** | |
+
+## 15.3 The four authoring rules
+
+1. **An unset dimension is not mentioned at all** — not its value, not its
+   unsetness. 57 of the 67 unset-involving examples (85%) follow this, against
+   V3's zero.
+2. **Sole exception:** when all three are unset there is nothing to compare, so
+   `unset_none_set` acknowledges it. That is the one place it is correct.
+3. **The literal string `not set` never appears in any output**, so it is never
+   a target token.
+4. **Item cuisine `other` is never named as a concrete cuisine.** Safe forms
+   are taught explicitly: deny the preferred cuisine ("it is not Indian"), refer
+   to it relationally ("the cuisine you chose"), or omit it when unset.
+
+## 15.4 Build
+
+```
+python scripts/build_dataset.py --version v4
+```
+
+| | |
+| --- | --- |
+| Raw | 240 |
+| Train / validation | **195 / 45** (3 per category × 15) |
+| Contrastive groups | 20, all in train, none split |
+| Raw SHA-256 | `be19d0fc394cf2b9d7e1715e9e2552f72b7db222a7e859472e95af13dedebd18` |
+| Rebuild | byte-identical, verified |
+
+Registering `v4` did not disturb earlier versions: v1, v2 and v3 processed
+outputs rebuild **byte-identical**.
+
+## 15.5 Validation — 29 checks, all passing, all non-vacuous
+
+Beyond the V3 guarantees (prompt shape, enum vocabulary, dietary-filter
+reachability, sentence count, no invented attributes or context, no duplicates,
+group integrity), V4 adds six checks that encode the fix directly: no literal
+`not set`; no mention of an unset dimension in the strict-silent categories; no
+narration of unsetness there; no assertion of a preference on an unset
+dimension; `unset_none_set` acknowledges without claiming a match; and `other`
+is never named as a concrete cuisine.
+
+**Non-vacuity was proven for every check**, including by reinserting V3's three
+actual failure sentences and confirming each is caught.
+
+Leakage: zero overlap with V1 and V2; overlap with V3 is **exactly the 159
+retained examples**; and **zero overlap with the 25 M07.3 evaluation prompts**,
+which matters because those are the cases that will judge V4.
+
+`tests/test_dataset_v4.py` carries 24 of these as permanent tests, 9 of them
+independently re-verified as non-vacuous. Suite: **315 passed** (291 → 315).
+
+## 15.6 What is still unknown
+
+Whether V4 actually fixes the behaviour is **unmeasured** — no V4 model exists.
+The hypothesis is specific and falsifiable: retrain on v4 and re-run
+`training/evaluate_production.py`; the not-set class should clear without
+regressing grounding, contrastive tracking, dietary compatibility or
+label/fact consistency. Until that run happens, no claim about V4 quality is
+supportable.

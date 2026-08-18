@@ -58,6 +58,32 @@ VERSIONS = {
             "fix the M07 sycophancy defect."
         ),
     },
+    "v3": {
+        "raw": RAW_DIR / "seed_examples_v3.jsonl",
+        "validation_per_category": 3,
+        "legacy_output": None,
+        "description": (
+            "M07.2 dataset (200 examples, 13 categories). Every example uses "
+            "the exact production prompt shape emitted by "
+            "app/services/local_llm.py::build_prompt, which only 13% of v2 did. "
+            "Includes 20 contrastive groups of 3 that hold the customer "
+            "preference fixed and vary the candidate item."
+        ),
+    },
+    "v4": {
+        "raw": RAW_DIR / "seed_examples_v4.jsonl",
+        "validation_per_category": 3,
+        "legacy_output": None,
+        "description": (
+            "M07.4 dataset (240 examples, 15 categories). Retains the 159 v3 "
+            "examples that carry no unset preference -- the ones that produced "
+            "v3's M07.3 wins, including all 20 contrastive groups -- and "
+            "replaces the 41 unset-involving examples with 81 newly authored "
+            "ones. Fixes v3's not-set regression by teaching silent omission "
+            "of unset dimensions, and teaches the 'other' cuisine that v3 "
+            "never verbalised."
+        ),
+    },
 }
 
 DEFAULT_VERSION = "v2"
@@ -100,14 +126,37 @@ def load_raw(raw_path: Path) -> list[dict]:
 
 
 def split(examples: list[dict], validation_per_category: int) -> tuple[list[dict], list[dict]]:
+    """Hold out the first N examples of each category, ordered by content hash.
+
+    **Contrastive groups (v3).** An example may carry an optional ``group_id``.
+    Grouped examples are minimal-pair variants that share one customer
+    preference block and differ only in the candidate item, so holding one
+    member out while training on its siblings would leak the contrast the
+    group exists to teach. Group members also span *different* categories,
+    and validation is chosen per category, so without special handling they
+    would be scattered across both splits.
+
+    The fix is one term in the sort key: grouped examples sort *after*
+    ungrouped ones, so validation is filled from ungrouped examples first and
+    whole groups stay in training. Every category must therefore keep more
+    than ``validation_per_category`` ungrouped examples -- ``build`` asserts
+    the resulting integrity rather than trusting it.
+
+    Backwards compatible by construction: v1 and v2 carry no ``group_id``, so
+    the extra term is constant there and the ordering collapses to the
+    original hash order, reproducing byte-identical output.
+    """
     by_category: dict[str, list[dict]] = defaultdict(list)
     for example in examples:
         by_category[example["category"]].append(example)
 
+    def order_key(example: dict) -> tuple[bool, str]:
+        return ("group_id" in example, example_hash(example))
+
     train: list[dict] = []
     validation: list[dict] = []
     for category in sorted(by_category):
-        ordered = sorted(by_category[category], key=example_hash)
+        ordered = sorted(by_category[category], key=order_key)
         if len(ordered) <= validation_per_category:
             raise SystemExit(
                 f"category {category!r} has only {len(ordered)} example(s); "
@@ -150,6 +199,23 @@ def build(version: str) -> dict:
     if overlap:
         raise SystemExit(f"{len(overlap)} example(s) appear in both splits -- refusing to write.")
 
+    # A contrastive group must land entirely in one split (see `split`). This
+    # verifies the outcome instead of assuming the ordering achieved it, so a
+    # future category whose ungrouped examples run short fails the build rather
+    # than silently leaking a minimal pair into validation.
+    group_splits: dict[str, set[str]] = defaultdict(set)
+    for name, bucket in (("train", train), ("validation", validation)):
+        for example in bucket:
+            if "group_id" in example:
+                group_splits[example["group_id"]].add(name)
+    straddling = sorted(g for g, s in group_splits.items() if len(s) > 1)
+    if straddling:
+        raise SystemExit(
+            f"{len(straddling)} contrastive group(s) straddle the train/validation "
+            f"boundary ({', '.join(straddling[:5])}) -- refusing to write. Add more "
+            f"ungrouped examples to the affected categories."
+        )
+
     out_dir = PROCESSED_DIR / version
     write(out_dir / "train.jsonl", train)
     write(out_dir / "validation.jsonl", validation)
@@ -179,7 +245,9 @@ def build(version: str) -> dict:
         ),
         "split_method": (
             "Deterministic and content-addressed: SHA-256 per example, ordered by "
-            "hash within category, first N of each category held out. No RNG."
+            "hash within category, first N of each category held out. No RNG. "
+            "Examples carrying a 'group_id' sort last, so contrastive groups stay "
+            "whole in training; the build fails if any group straddles the split."
         ),
         "validation_per_category": spec["validation_per_category"],
         "totals": {
@@ -195,6 +263,14 @@ def build(version: str) -> dict:
             "validation": file_sha256(out_dir / "validation.jsonl"),
         },
     }
+    # Only versions that actually use contrastive groups carry this key, so
+    # the v1 and v2 manifests keep the shape M07/M07.1 published.
+    if group_splits:
+        manifest["contrastive_groups"] = {
+            "count": len(group_splits),
+            "all_in_train": all(s == {"train"} for s in group_splits.values()),
+        }
+
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

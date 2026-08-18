@@ -1,16 +1,29 @@
 # Quick Junction — instruction dataset
 
-> **Two versions exist.** **v2 is current** (150 examples, 15 categories,
-> `data/raw/seed_examples_v2.jsonl`), built in M07.1 to fix the M07 defect
-> where the model asserted that mismatched items matched. **v1** (60
-> examples, 10 categories) is preserved unchanged as the record of what M07
-> actually trained on. Build either with
-> `python scripts/build_dataset.py --version v1|v2`; each writes its own
+> **Four versions exist.**
+>
+> - **v1** (60 examples, 10 categories) — preserved unchanged as the record
+>   of what M07 actually trained on.
+> - **v2** (150 examples, 15 categories) — built in M07.1 to fix the M07
+>   defect where the model asserted that mismatched items matched.
+>   **This is the version the in-use adapter was trained on.**
+> - **v3** (200 examples, 13 categories, `data/raw/seed_examples_v3.jsonl`) —
+>   authored in M07.2 so that **every** example uses the exact prompt shape
+>   `app/services/local_llm.py::build_prompt` emits, which only 13 % of v2
+>   did. **Trained in M07.2; evaluated in M07.3; not promoted** — it beat v2
+>   on every axis except "not set" handling.
+> - **v4** (240 examples, 15 categories, `data/raw/seed_examples_v4.jsonl`) —
+>   authored in M07.4 to fix exactly that regression while retaining the 159
+>   v3 examples that produced its wins. **Authored and validated; no V4 model
+>   has been trained.**
+>
+> Build any of them with
+> `python scripts/build_dataset.py --version v1|v2|v3|v4`; each writes its own
 > `data/processed/<version>/` directory plus a `manifest.json` recording
 > counts, curation method, duplicate policy and SHA-256s.
 >
-> The section below describes **v1**. See "Version 2" at the end, and
-> `docs/AI.md` §11, for v2.
+> The section below describes **v1**. See "Version 2" at the end and
+> `docs/AI.md` §11 for v2; `docs/AI.md` §13 for v3; §15 for v4.
 
 Hand-authored instruction data for fine-tuning the local Qwen3-0.6B-Base
 model to explain recommendations produced by Quick Junction's deterministic
@@ -159,7 +172,7 @@ Manual review passes applied while writing:
 
 ---
 
-# Version 2 (M07.1) — current
+# Version 2 (M07.1) — the version the in-use adapter was trained on
 
 ## Why a second version
 
@@ -250,3 +263,190 @@ by `tests/test_dataset_v2.py` (22 tests):
   `training/evaluate.py` on 8 separately-authored held-out scenarios.
 - The rebalance fixed the sycophancy but not fluency — v2 still produces
   garbled or non-sequitur sentences. See `docs/AI.md` §11.5.
+
+---
+
+# Version 3 (M07.2) — authored and validated, **not trained**
+
+> No V3 adapter exists. `LLM_ADAPTER_PATH` still points at the V2 adapter.
+> Full detail in `docs/AI.md` §13.
+
+## Why v3 exists
+
+Measured against the prompt the application actually sends
+(`app/services/local_llm.py::build_prompt`), **only 13 % of v2 used the
+production prompt shape and only 7 % used its exact instruction string**. V2
+was therefore fine-tuned largely on prompts production never sends.
+
+Four v2 categories were also unreachable: `ingredient_mismatch`,
+`unavailable_items`, `no_recommendations` and `preference_over_history`
+describe situations the app cannot produce, because `ExplanationRequest`
+carries no price, ingredients, availability or order history, and the model is
+never invoked when there are no recommendations at all.
+
+V3 is authored from the production contract inward. Every example uses the
+same instruction string and the same prompt shape production emits, and every
+candidate is one the dietary hard filter would actually have kept.
+
+## Composition
+
+| | v1 (M07) | v2 (M07.1) | v3 (M07.2) |
+| --- | --- | --- | --- |
+| Seed file | `seed_examples.jsonl` | `seed_examples_v2.jsonl` | `seed_examples_v3.jsonl` |
+| Examples | 60 | 150 | **200** |
+| Categories | 10 | 15 | **13** |
+| Train / validation | 50 / 10 | 120 / 30 | **161 / 39** |
+| Production prompt shape | partial | 13 % | **100 %** |
+| Contrastive groups | — | — | **20 × 3** |
+| Trained? | yes | yes | **no** |
+
+| Category | n |
+| --- | ---: |
+| `full_match` | 26 |
+| `cuisine_and_spice_differ` | 20 |
+| `match_with_unset` | 20 |
+| `cuisine_differs_only` | 16 |
+| `spice_differs_only` | 16 |
+| `single_attribute_match` | 16 |
+| `label_fact_consistency` | 16 |
+| `no_cross_dimension_errors` | 14 |
+| `dietary_compatible_not_identical` | 12 |
+| `no_invented_attributes` | 12 |
+| `no_invented_context` | 12 |
+| `low_signal_suggested` | 10 |
+| `unset_stays_unset` | 10 |
+
+## Contrastive groups and the `group_id` field
+
+V3 adds one optional field to the schema:
+
+```json
+{"category": "full_match", "group_id": "contrastive_001",
+ "instruction": "...", "input": "...", "output": "..."}
+```
+
+Twenty groups of three hold the **customer preference block fixed** and vary
+only the candidate item — all-align, one dimension differs, two dimensions
+differ. The model sees the same customer with three different candidates and
+must say something different about each.
+
+`group_id` is metadata only: the builder's example hash is computed over
+`instruction`/`input`/`output` alone, so it does not affect identity,
+deduplication or the V1/V2 overlap comparison. It affects one thing — grouped
+examples sort last when validation is drawn, so a group is never split across
+train and validation. The build fails if one ever is.
+
+## How it was created
+
+Written by hand for this project, exactly as v1 and v2 were: not scraped, not
+downloaded, not bulk-generated by another language model. The `input` block is
+rendered from the production prompt template so its *shape* is guaranteed
+correct; every `output` sentence was written by hand.
+
+## Validation
+
+25 checks, all passing, and **each proven non-vacuous** by re-running it
+against a deliberately corrupted copy of the dataset. Permanent versions live
+in `tests/test_dataset_v3.py` (29 tests).
+
+Beyond the v1/v2 guarantees, v3 additionally enforces:
+
+- Every `input` matches the production prompt regex, anchored at both ends.
+- Every candidate would have survived the dietary hard filter.
+- Outputs are unchanged by production's `_sanitise()`.
+- An unset preference is never described as matched.
+- "All three preferences" is claimed only when literally true.
+- A `Suggested` item (similarity 0.0) never asserts a match.
+- No cross-dimension confusion — a cuisine is never called a spice level.
+- Zero content overlap with v1 and v2.
+
+## Limitations (v3)
+
+- **Untrained and unmeasured.** No V3 model exists, so nothing can be said
+  about whether V3 improves generation quality.
+- Does not address the fluency defect in `docs/AI.md` §11.5 — that is a
+  capacity limit of a 0.6B model under LoRA, not a data problem.
+- Still small, still single-turn, still English-only, still illustrative dish
+  names.
+- 39 validation examples remain a coverage check, not a statistical metric.
+
+---
+
+# Version 4 (M07.4) — authored and validated, **not trained**
+
+> No V4 adapter exists. `LLM_ADAPTER_PATH` still points at the V2 adapter.
+> Full detail in `docs/AI.md` §15.
+
+## Why v4 exists
+
+M07.3 evaluated base/v1/v2/v3 on 25 held-out production-shaped cases. V3 beat
+V2 on every axis except one — **"not set"** handling, where V3 made 2 errors
+and V2 made none. V3 produced *"rather than the cuisine you set"* when no
+cuisine was set, *"you only wanted vegan and mild preferences"* when a cuisine
+was set, and *"Fattoush Salad is not set and has no heat"*, leaking the
+placeholder as an item attribute.
+
+Measured against the v3 file: **31 of its 41 unset-involving examples narrate
+the unsetness, and none teaches silently omitting an unset dimension.** V3
+taught the model that an unset preference always requires a remark; the model
+obliged and sometimes got the remark wrong.
+
+Separately, 16 v3 examples have item cuisine `other` and **none** verbalise it,
+so the model had no learned phrasing and substituted a concrete wrong cuisine.
+
+## Composition
+
+| | v3 | v4 |
+| --- | ---: | ---: |
+| Examples | 200 | **240** |
+| Categories | 13 | **15** |
+| Train / validation | 161 / 39 | **195 / 45** |
+| Contrastive groups | 20 × 3 | 20 × 3 (retained intact) |
+| Unset-involving examples | 41 | **67** |
+| …teaching silent omission | **0** | **57** |
+| Trained? | yes | **no** |
+
+V4 retains **159 v3 examples byte-for-byte** — every one that carries no unset
+preference. Those produced v3's M07.3 wins, and all 20 contrastive groups sit
+inside them. The 41 defective examples are dropped and replaced by 81 newly
+authored ones.
+
+| New / rebuilt category | n |
+| --- | ---: |
+| `unset_omitted_silently` | 30 |
+| `unset_partial_match` | 16 |
+| `cuisine_other_unnamed` | 15 |
+| `low_signal_suggested` (rebuilt) | 10 |
+| `unset_none_set` | 10 |
+
+## The four authoring rules
+
+1. **An unset dimension is not mentioned at all** — neither its value nor the
+   fact that it is unset. The explanation describes only what the customer set.
+2. **Sole exception:** when all three are unset there is nothing to compare, so
+   `unset_none_set` acknowledges it. That is the one place it is correct.
+3. **The literal string `not set` never appears in any output.**
+4. **Item cuisine `other` is never named as a concrete cuisine** — deny the
+   preferred one ("it is not Indian"), refer to it relationally ("the cuisine
+   you chose"), or omit it.
+
+## Validation
+
+29 checks, all passing, **all proven non-vacuous** — including by reinserting
+v3's three real failure sentences and confirming each is caught. Zero overlap
+with v1 and v2; overlap with v3 is exactly the 159 retained examples; and
+**zero overlap with the 25 M07.3 evaluation prompts**, without which the
+comparison that will judge v4 would be scoring it on its own training data.
+
+Permanent tests: `tests/test_dataset_v4.py` (24 tests).
+
+## Limitations (v4)
+
+- **Untrained and unmeasured.** No V4 model exists, so nothing can be said
+  about whether the fix works. The hypothesis is falsifiable: retrain and
+  re-run `training/evaluate_production.py`.
+- The correction is a *behavioural* one applied through data. If the model
+  instead learns to omit dimensions it should mention, that would be the
+  opposite failure — which is exactly what the M07.3 harness would detect.
+- Still small, still single-turn, still English-only, still illustrative dish
+  names. 45 validation examples remain a coverage check, not a metric.

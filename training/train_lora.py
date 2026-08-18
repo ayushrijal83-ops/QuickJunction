@@ -45,6 +45,14 @@ DATASET_VERSIONS = {
         "dir": BASE_DIR / "data" / "processed" / "v2",
         "output": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v2",
     },
+    "v3": {
+        "dir": BASE_DIR / "data" / "processed" / "v3",
+        "output": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v3",
+    },
+    "v4": {
+        "dir": BASE_DIR / "data" / "processed" / "v4",
+        "output": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v4",
+    },
 }
 DEFAULT_DATASET_VERSION = "v2"
 
