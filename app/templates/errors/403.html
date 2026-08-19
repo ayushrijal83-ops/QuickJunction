@@ -1,0 +1,11 @@
+{% extends "errors/_layout.html" %}
+{% block title %}Not permitted &mdash; Quick Junction{% endblock %}
+{% block heading %}You do not have access to this page{% endblock %}
+{% block explanation %}
+  Your account is signed in, but this area is reserved for another role.
+  If you think that is wrong, ask an administrator to check your permissions.
+{% endblock %}
+{% block actions %}
+  <a class="btn btn-primary" href="{{ url_for('main.home') }}">Go to the home page</a>
+  <a class="btn btn-outline-secondary" href="{{ url_for('account.index') }}">My account</a>
+{% endblock %}

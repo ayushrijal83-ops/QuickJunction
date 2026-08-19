@@ -36,9 +36,9 @@
             {% for item in order.items %}
               <tr>
                 <td>{{ item.item_name_snapshot }}</td>
-                <td class="text-end qj-price">{{ item.unit_price_snapshot }}</td>
+                <td class="text-end qj-price">{{ item.unit_price_snapshot | money }}</td>
                 <td class="text-center">{{ item.quantity }}</td>
-                <td class="text-end qj-price">{{ item.line_total }}</td>
+                <td class="text-end qj-price">{{ item.line_total | money }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -56,9 +56,9 @@
         <h2 class="h6 text-uppercase text-secondary">Total</h2>
         <dl class="row mb-0">
           <dt class="col-7 fw-normal">Subtotal</dt>
-          <dd class="col-5 text-end qj-price mb-1">{{ order.subtotal }}</dd>
+          <dd class="col-5 text-end qj-price mb-1">{{ order.subtotal | money }}</dd>
           <dt class="col-7">Total</dt>
-          <dd class="col-5 text-end qj-price h5 mb-0">{{ order.total }}</dd>
+          <dd class="col-5 text-end qj-price h5 mb-0">{{ order.total | money }}</dd>
         </dl>
       </div>
     </div>

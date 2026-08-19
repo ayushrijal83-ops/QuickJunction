@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -603,3 +604,71 @@ def apply_preference_safeguard(text: str | None, request: ExplanationRequest) ->
         return text
     logger.info("Explanation rejected: it credited a preference the customer did not set")
     return deterministic_explanation(request)
+
+
+# ---------------------------------------------------------------------------
+# Startup warm-up (M07.8)
+# ---------------------------------------------------------------------------
+#
+# Loading the 1.2 GB base model plus the adapter takes ~15 s. Because the load
+# is lazy, that cost lands on whoever asks for the *first* explanation --
+# measured at 18.3 s end to end, against ~3.7 s for every request after it.
+# In a live demonstration that first request is the one someone is watching.
+#
+# Warming up moves the cost to startup, where nobody is waiting. It is
+# deliberately conservative:
+#
+#   * It runs on a daemon thread, so startup never blocks and shutdown is
+#     never held open by it.
+#   * It calls the ordinary ``_load()``. That is already double-checked
+#     locking around a module singleton, so a real request arriving mid-warm-up
+#     simply waits on the same lock and reuses the same instance -- there is no
+#     path to two concurrent loads within a process.
+#   * It cannot break anything: ``_load()`` never raises, and on failure the
+#     existing degradation applies unchanged (a warning, and explanations
+#     return ``None``).
+#
+# **Multi-worker note.** Each worker process has its own singleton, so N
+# workers warming up means N copies of a 1.2 GB model resident at once. That
+# is a deliberate operator decision rather than a default, which is why
+# ``LLM_WARMUP`` defaults to on only in development (the demo case) and off in
+# production. Set ``LLM_WARMUP=true`` in production only after checking the
+# memory maths for the configured worker count.
+
+_warmup_started = False
+
+
+def warm_up(app) -> bool:
+    """Load the model in the background if configured to. Returns whether a
+    warm-up thread was actually started."""
+    global _warmup_started
+
+    if _warmup_started:
+        return False  # idempotent: create_app may be called more than once
+    if app.config.get("TESTING"):
+        return False
+    if not app.config.get("LLM_ENABLED", True):
+        return False
+    if not app.config.get("LLM_WARMUP", False):
+        return False
+
+    # Flask's reloader runs the app in a child process; the parent would warm
+    # a model it never serves from.
+    if app.config.get("DEBUG") and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return False
+
+    def _run() -> None:
+        with app.app_context():
+            started = time.monotonic()
+            tokenizer, model = _load()
+            elapsed = time.monotonic() - started
+            if model is None or tokenizer is None:
+                # _load already logged the reason; degradation is unchanged.
+                logger.info("Local LLM warm-up did not complete after %.1fs", elapsed)
+            else:
+                logger.info("Local LLM warmed up in %.1fs; first explanation will be fast", elapsed)
+
+    _warmup_started = True
+    threading.Thread(target=_run, name="llm-warmup", daemon=True).start()
+    logger.info("Local LLM warm-up started in the background")
+    return True

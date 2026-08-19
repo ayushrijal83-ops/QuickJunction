@@ -7,7 +7,12 @@
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
     {% if recommendations %}
-      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('preferences.explain') }}">Why the top pick?</a>
+      {# data-loading: the explanation page runs the model on CPU and takes a
+         few seconds, so the button reports progress instead of appearing to
+         do nothing. See app/static/js/loading.js. #}
+      <a class="btn btn-outline-primary btn-sm"
+         href="{{ url_for('preferences.explain') }}"
+         data-loading="Generating AI explanation…">Why the top pick?</a>
     {% endif %}
   </div>
 </div>
@@ -44,7 +49,7 @@
                 <a class="text-decoration-none" href="{{ url_for('menu.detail', item_id=rec.menu_item.id) }}">{{ rec.menu_item.name }}</a>
               </h2>
               {# Price is read from the MenuItem row, never from the engine. #}
-              <span class="qj-price fw-semibold">{{ rec.menu_item.price }}</span>
+              <span class="qj-price fw-semibold">{{ rec.menu_item.price | money }}</span>
             </div>
             <p class="small text-secondary mb-2">{{ rec.menu_item.category.name }}</p>
 

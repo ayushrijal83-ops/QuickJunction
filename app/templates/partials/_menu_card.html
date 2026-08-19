@@ -8,7 +8,7 @@
       <h3 class="qj-card-title card-title mb-1">
         <a class="text-decoration-none" href="{{ url_for('menu.detail', item_id=item.id) }}">{{ item.name }}</a>
       </h3>
-      <span class="qj-price fw-semibold">{{ item.price }}</span>
+      <span class="qj-price fw-semibold">{{ item.price | money }}</span>
     </div>
 
     <p class="text-secondary small mb-2">{{ item.category.name }}</p>

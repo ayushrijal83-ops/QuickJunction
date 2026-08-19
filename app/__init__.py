@@ -13,6 +13,7 @@ from app.extensions import csrf, db, migrate
 from app.routes import register_blueprints
 from app.utils.authorization import get_current_user
 from app.utils.errors import register_error_handlers
+from app.utils.formatting import register_filters
 from app.utils.logging import configure_logging
 from config import BaseConfig, get_config
 
@@ -43,6 +44,7 @@ def create_app(config_name: str | None = None) -> Flask:
     from app import models  # noqa: F401
 
     register_error_handlers(app)
+    register_filters(app)
     register_blueprints(app)
 
     # So a template can show/hide admin-only controls without every route
@@ -64,5 +66,13 @@ def create_app(config_name: str | None = None) -> Flask:
         return {"current_user": get_current_user(), "cart_count": total}
 
     app.context_processor(_template_globals)
+
+    # Load the local model in the background so the first explanation request
+    # does not pay the ~15 s load cost while someone is watching. Returns
+    # immediately; see app/services/local_llm.py::warm_up for the safety
+    # argument and the multi-worker caveat.
+    from app.services.local_llm import warm_up
+
+    warm_up(app)
 
     return app

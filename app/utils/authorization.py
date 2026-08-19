@@ -23,11 +23,12 @@ import logging
 from functools import wraps
 from typing import Callable
 
-from flask import g, jsonify, session
+from flask import flash, g, jsonify, redirect, request, session, url_for
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import db
 from app.models.user import Role, User
+from app.utils.errors import render_error, wants_html
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +105,32 @@ def get_current_user() -> User | None:
 
 
 def _unauthorized():
+    """401 for API callers; a redirect to the login page for browsers.
+
+    A browser that follows a link to a protected page should land on the login
+    form with somewhere to go afterwards -- not on a JSON body. API clients
+    still get 401, because a 302 to an HTML form is useless to them and would
+    silently change the contract they already depend on.
+
+    ``next`` carries the original path so login can return the user to it.
+    ``request.full_path`` is a server-side value, and the login view validates
+    it again before redirecting (see auth.safe_next_target).
+    """
+    if wants_html():
+        flash("Please log in to continue.", "error")
+        target = request.full_path if request.query_string else request.path
+        return redirect(url_for("auth.login", next=target))
+
     response = jsonify(error={"status": 401, "message": "Authentication required."})
     return response, 401
 
 
 def _forbidden():
-    response = jsonify(error={"status": 403, "message": "You do not have access to this resource."})
+    message = "You do not have access to this resource."
+    if wants_html():
+        return render_error(403, message)
+
+    response = jsonify(error={"status": 403, "message": message})
     return response, 403
 
 

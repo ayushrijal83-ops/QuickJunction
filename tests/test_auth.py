@@ -31,6 +31,20 @@ def register(client, **overrides):
     return client.post("/register", data=_register_data(**overrides), follow_redirects=False)
 
 
+def anonymous_client(app):
+    """A second client that is definitely not signed in.
+
+    The ``app`` fixture holds one application context open for the whole test
+    and Flask reuses it, so ``g.current_user`` survives between requests and
+    across clients (known issue #29). Clearing it is what makes this client
+    genuinely anonymous rather than inheriting the previous one's identity.
+    """
+    from flask import g
+
+    g.pop("current_user", None)
+    return app.test_client()
+
+
 def login(client, username: str, password: str):
     return client.post("/login", data={"username": username, "password": password}, follow_redirects=False)
 
@@ -53,17 +67,20 @@ def test_1_registration_succeeds_with_valid_data(client, db):
     assert user.role == Role.CUSTOMER
 
 
-def test_2_duplicate_username_rejected(client, db):
+def test_2_duplicate_username_rejected(app, client, db):
     register(client)
-    response = register(client, email="other@example.com")
+    # Registration now signs the new account in, so the duplicate attempt must
+    # come from an anonymous visitor -- which is also the real scenario: a
+    # different person choosing a username that is already taken.
+    response = register(anonymous_client(app), email="other@example.com")
     assert response.status_code == 200  # re-rendered form, not a redirect
     assert b"already taken" in response.data
     assert db.session.query(User).filter_by(email="other@example.com").first() is None
 
 
-def test_3_duplicate_email_rejected(client, db):
+def test_3_duplicate_email_rejected(app, client, db):
     register(client)
-    response = register(client, username="someoneelse")
+    response = register(anonymous_client(app), username="someoneelse")
     assert response.status_code == 200
     assert b"already registered" in response.data
     assert db.session.query(User).filter_by(username="someoneelse").first() is None

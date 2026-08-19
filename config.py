@@ -99,6 +99,16 @@ class BaseConfig:
     )
     LLM_MAX_NEW_TOKENS: int = int(os.environ.get("LLM_MAX_NEW_TOKENS", "48"))
 
+    # Load the model on a background thread at startup instead of lazily on
+    # the first explanation request. Measured: 18.3 s for the first request
+    # cold, ~3.7 s warm -- so this moves a very visible wait off the user.
+    #
+    # Off by default here and switched on for development below, because each
+    # worker process warms its own copy: N gunicorn workers means N resident
+    # 1.2 GB models. That is an operator's decision, not a safe default, so
+    # production must opt in explicitly after checking the memory budget.
+    LLM_WARMUP: bool = _env_bool("LLM_WARMUP", False)
+
     # --- errors / logging -------------------------------------------------
     # Never re-raise handled exceptions to the client.
     PROPAGATE_EXCEPTIONS: bool = False
@@ -129,6 +139,9 @@ class DevelopmentConfig(BaseConfig):
     # Plain HTTP on localhost, so the Secure flag would drop the cookie.
     SESSION_COOKIE_SECURE = False
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "DEBUG")
+    # One process, one model: warming up here is free and removes the 18 s
+    # first-request wait that a demonstration would otherwise hit.
+    LLM_WARMUP: bool = _env_bool("LLM_WARMUP", True)
 
 
 class TestingConfig(BaseConfig):

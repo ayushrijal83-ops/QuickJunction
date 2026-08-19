@@ -69,6 +69,32 @@ ITEMS = [
     # Deliberately unavailable: proves availability filtering in a demo.
     ("Sold Out Biryani", "Mains", "329.00", Cuisine.INDIAN, SpiceLevel.HOT,
      DietaryType.NON_VEGETARIAN, False, "rice, spice"),
+
+    # --- Added for demonstration breadth -------------------------------
+    # The original nine items left Mexican and multi-cuisine unrepresented
+    # and clustered on hot/none, so several preference combinations all
+    # returned the same dish and the recommender looked less capable than it
+    # is. These fill the gaps in cuisine, dietary type and spice level so
+    # that changing a preference visibly changes the recommendation.
+    #
+    # Demo data only. This has nothing to do with the training dataset in
+    # data/, which is frozen at v4.
+    ("Black Bean Tacos", "Mains", "319.00", Cuisine.MEXICAN, SpiceLevel.MEDIUM,
+     DietaryType.VEGAN, True, "black bean, corn tortilla, coriander"),
+    ("Chicken Fajitas", "Mains", "389.00", Cuisine.MEXICAN, SpiceLevel.MILD,
+     DietaryType.NON_VEGETARIAN, True, "chicken, bell pepper, onion"),
+    ("Som Tam Salad", "Starters", "239.00", Cuisine.THAI, SpiceLevel.EXTRA_HOT,
+     DietaryType.VEGAN, True, "green papaya, peanut, lime"),
+    ("Mushroom Risotto", "Mains", "409.00", Cuisine.ITALIAN, SpiceLevel.NONE,
+     DietaryType.VEGETARIAN, True, "arborio rice, mushroom, parmesan"),
+    ("Shepherd's Pie", "Mains", "419.00", Cuisine.CONTINENTAL, SpiceLevel.MILD,
+     DietaryType.NON_VEGETARIAN, True, "lamb, potato, carrot"),
+    ("Falafel Wrap", "Starters", "229.00", Cuisine.OTHER, SpiceLevel.MEDIUM,
+     DietaryType.VEGAN, True, "chickpea, tahini, flatbread"),
+    ("Shakshuka", "Starters", "259.00", Cuisine.OTHER, SpiceLevel.MILD,
+     DietaryType.EGGETARIAN, True, "egg, tomato, pepper"),
+    ("Buddha Bowl", "Mains", "349.00", Cuisine.MULTI_CUISINE, SpiceLevel.NONE,
+     DietaryType.VEGAN, True, "quinoa, avocado, chickpea"),
 ]
 
 

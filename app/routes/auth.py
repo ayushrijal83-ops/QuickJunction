@@ -10,7 +10,9 @@ enumeration bug, and is documented as such in docs/SECURITY.md.
 
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, url_for
+from urllib.parse import urlparse
+
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.models.audit_log import AuditEvent
 from app.routes.forms import LoginForm, RegistrationForm
@@ -22,6 +24,30 @@ from app.utils.request_meta import client_ip as _client_ip
 from app.utils.request_meta import user_agent as _user_agent
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def safe_next_target() -> str | None:
+    """The ``?next=`` destination, but only if it is safe to follow.
+
+    ``next`` arrives from the query string, so it is attacker-controlled: a
+    crafted link such as ``/login?next=https://evil.example/`` would otherwise
+    turn this application's own login page into an open redirect, which is a
+    convincing phishing primitive precisely because the first hop is genuine.
+
+    Only a path on this site is accepted. Everything else is discarded and the
+    caller falls back to the default destination:
+
+    * must start with a single ``/``  -- rejects absolute URLs
+    * must not start with ``//``      -- rejects protocol-relative ``//evil``
+    * must not contain a backslash    -- some browsers normalise ``\\`` to ``/``
+    * must not be the login page      -- avoids a redirect loop
+    """
+    target = request.args.get("next", "")
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return None
+    if urlparse(target).path == url_for("auth.login"):
+        return None
+    return target
 
 
 @auth_bp.route("/register", methods=["GET", "POST"])
@@ -55,8 +81,16 @@ def register():
                 ip_address=_client_ip(),
                 user_agent=_user_agent(),
             )
-            flash("Account created. You can now log in.", "success")
-            return redirect(url_for("auth.login"))
+            # Sign the new account in rather than bouncing to the login form
+            # with credentials they typed ten seconds ago. This is the same
+            # login_user() the login view calls -- it clears any pre-existing
+            # session first (fixation protection) and stamps the session
+            # version, so the account is authenticated on exactly the same
+            # terms as a normal login. Nothing about authorization changes:
+            # register_user() assigns the role, and it is still CUSTOMER.
+            login_user(user)
+            flash("Welcome to Quick Junction. Tell us what you like.", "success")
+            return redirect(url_for("preferences.preferences"))
 
     return render_template("register.html", form=form)
 
@@ -106,7 +140,7 @@ def login():
                 ip_address=ip,
                 user_agent=_user_agent(),
             )
-            return redirect(url_for("account.index"))
+            return redirect(safe_next_target() or url_for("account.index"))
 
     return render_template("login.html", form=form)
 

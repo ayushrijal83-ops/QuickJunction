@@ -40,7 +40,7 @@
                 <span class="badge rounded-pill text-bg-light border">{{ item.dietary_type.value|replace("_", " ")|title }}</span>
                 <span class="badge rounded-pill text-bg-light border">{{ item.spice_level.value|replace("_", " ")|title }}</span>
               </td>
-              <td class="text-end qj-price">{{ item.price }}</td>
+              <td class="text-end qj-price">{{ item.price | money }}</td>
               <td>
                 {% if item.is_available %}
                   <span class="badge text-bg-success">Available</span>

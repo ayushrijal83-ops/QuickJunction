@@ -1,0 +1,9 @@
+{% extends "errors/_layout.html" %}
+{% block title %}Something went wrong &mdash; Quick Junction{% endblock %}
+{% block heading %}Something went wrong on our side{% endblock %}
+{# The message stays generic on purpose: the detail is in the server log,
+   never in the response. See app/utils/errors.py and docs/SECURITY.md. #}
+{% block explanation %}
+  The problem has been recorded. Nothing you did caused it, and your order
+  history and cart are unaffected. Please try again in a moment.
+{% endblock %}

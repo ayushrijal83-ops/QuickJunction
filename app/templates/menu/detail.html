@@ -15,7 +15,7 @@
       <div class="card-body p-4">
         <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
           <h1 class="h3 mb-0">{{ item.name }}</h1>
-          <span class="qj-price h4 mb-0">{{ item.price }}</span>
+          <span class="qj-price h4 mb-0">{{ item.price | money }}</span>
         </div>
         <p class="text-secondary">{{ item.category.name }}</p>
 
@@ -41,7 +41,7 @@
     <div class="card shadow-sm">
       <div class="card-body">
         <h2 class="h6 text-uppercase text-secondary">Order this</h2>
-        <p class="qj-price h4">{{ item.price }}</p>
+        <p class="qj-price h4">{{ item.price | money }}</p>
         <form method="post" action="{{ url_for('cart.add') }}">
           {{ add_form.csrf_token }}
           <input type="hidden" name="menu_item_id" value="{{ item.id }}">

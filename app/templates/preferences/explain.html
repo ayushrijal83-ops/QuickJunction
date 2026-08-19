@@ -15,7 +15,7 @@
       <h1 class="h3 mb-1">{{ top.menu_item.name }}</h1>
       <span class="text-secondary">{{ top.menu_item.category.name }}</span>
     </div>
-    <span class="qj-price h4 mb-0">{{ top.menu_item.price }}</span>
+    <span class="qj-price h4 mb-0">{{ top.menu_item.price | money }}</span>
   </div>
 
   <div class="row g-4">
@@ -37,7 +37,7 @@
               <tbody>
                 <tr>
                   <th scope="row" class="fw-normal text-secondary" style="width:40%">Price</th>
-                  <td class="qj-price fw-semibold">{{ top.menu_item.price }}</td>
+                  <td class="qj-price fw-semibold">{{ top.menu_item.price | money }}</td>
                 </tr>
                 <tr>
                   <th scope="row" class="fw-normal text-secondary">Cuisine</th>
@@ -104,7 +104,12 @@
           <strong>AI explanation</strong>
           <span class="badge text-bg-info">Advisory</span>
         </div>
-        <div class="card-body d-flex flex-column">
+        {# role="status" so assistive technology announces the sentence when
+           the page arrives. The page is rendered server-side, so generation
+           has already finished by this point -- the visible waiting state
+           lives on the button that navigates here (app/static/js/loading.js),
+           because that is when the wait actually happens. #}
+        <div class="card-body d-flex flex-column" role="status" aria-live="polite">
           {% if explanation %}
             <blockquote class="mb-3">
               <p class="mb-0 fst-italic">{{ explanation }}</p>

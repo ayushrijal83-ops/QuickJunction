@@ -35,7 +35,7 @@
               <td class="text-secondary">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</td>
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
               <td class="text-center">{{ order.items | length }}</td>
-              <td class="text-end qj-price">{{ order.total }}</td>
+              <td class="text-end qj-price">{{ order.total | money }}</td>
               <td class="text-end">
                 <a class="btn btn-sm btn-outline-primary"
                    href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open</a>
