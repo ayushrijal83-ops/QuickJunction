@@ -50,6 +50,7 @@ from app.services.local_llm import (  # noqa: E402
     DEFAULT_MAX_NEW_TOKENS,
     ExplanationRequest,
     _tidy,
+    apply_preference_safeguard,
     build_prompt,
 )
 from training.eval_scenarios_production import all_cases  # noqa: E402
@@ -61,15 +62,20 @@ SYSTEMS = {
     "v1": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora",
     "v2": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v2",
     "v3": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v3",
+    "v4": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v4",
 }
 
 # Every dataset surface a case could accidentally have been lifted from.
+# v4 is included because M07.6 evaluates a v4-trained adapter: if an
+# evaluation prompt were in v4's training data the comparison would be
+# scoring that system on data it memorised.
 CORPUS_FILES = [
     BASE_DIR / "data" / "raw" / "seed_examples.jsonl",
     BASE_DIR / "data" / "raw" / "seed_examples_v2.jsonl",
     BASE_DIR / "data" / "raw" / "seed_examples_v3.jsonl",
+    BASE_DIR / "data" / "raw" / "seed_examples_v4.jsonl",
 ]
-for version in ("v1", "v2", "v3"):
+for version in ("v1", "v2", "v3", "v4"):
     CORPUS_FILES += [
         BASE_DIR / "data" / "processed" / version / "train.jsonl",
         BASE_DIR / "data" / "processed" / version / "validation.jsonl",
@@ -181,8 +187,14 @@ def analyse(output: str, case: dict) -> dict:
         # Only an actual enumeration can wrongly omit a preference. A phrase
         # naming a single attribute ("you asked for only an Indian one") is
         # scoped to that dimension and omits nothing.
-        enumerated = sum(1 for v in (CUISINES | DIETARY | SPICES)
-                         if re.search(rf"\b{re.escape(word(v))}\b", listed))
+        #
+        # Count DIMENSIONS, not values: "extra hot" contains both "hot" and
+        # "extra hot", and counting values made a single spice mention look
+        # like a two-item enumeration -- which wrongly flagged the correct
+        # sentence "...carries no heat where you asked for extra hot".
+        enumerated = sum(
+            1 for values in (CUISINES, DIETARY, SPICES)
+            if any(re.search(rf"\b{re.escape(word(v))}\b", listed) for v in values))
         if enumerated < 2:
             listed = None
     if only_wanted and listed:
@@ -382,13 +394,18 @@ def v2_failure_classes(output: str, case: dict, verdict: dict) -> list[str]:
 # --------------------------------------------------------------------------
 
 def render(case: dict) -> str:
+    return build_prompt(explanation_request(case))
+
+
+def explanation_request(case: dict) -> ExplanationRequest:
+    """The structured facts for a case -- the same object production builds."""
     pc, pd, ps = case["pref"]
     name, ic, idt, isp = case["item"]
-    return build_prompt(ExplanationRequest(
+    return ExplanationRequest(
         item_name=name, item_cuisine=ic, item_dietary=idt, item_spice=isp,
         preferred_cuisine=pc, preferred_dietary=pd, preferred_spice=ps,
         match_label=case["label"],
-    ))
+    )
 
 
 def assert_held_out(cases: list[dict]) -> None:
@@ -447,6 +464,9 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=DEFAULT_MAX_NEW_TOKENS,
                         help="defaults to the production token limit")
     parser.add_argument("--json", default=None)
+    parser.add_argument("--safeguard", action="store_true",
+                        help="apply the production preference-safety guard to every "
+                             "generation, exactly as app/services/local_llm.py does")
     args = parser.parse_args()
 
     cases = all_cases()
@@ -467,6 +487,8 @@ def main() -> int:
         for case in cases:
             began = time.time()
             visible, raw = generate(tokenizer, model, render(case), args.max_new_tokens)
+            if args.safeguard:
+                visible = apply_preference_safeguard(visible, explanation_request(case)) or ""
             took = time.time() - began
             timings.append(took)
             verdict = analyse(visible, case)
@@ -521,6 +543,7 @@ def main() -> int:
                 "prompt": "app.services.local_llm.build_prompt (production)",
             },
             "case_count": len(cases),
+            "preference_safeguard": bool(args.safeguard),
             "systems": results,
         }
         Path(args.json).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

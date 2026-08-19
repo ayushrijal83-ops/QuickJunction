@@ -1385,32 +1385,263 @@ without regressing the other axes.
 
 ---
 
+## Milestone 07.5 — V4 LoRA training ✅ (**V4 trained, NOT promoted**)
+
+Training only: no evaluation, no promotion, no production change. The
+application still loads the **V2** adapter.
+
+### Device — CPU (Intel iGPU acceleration unavailable)
+
+A pre-flight audit checked whether this laptop's Intel Arc integrated GPU
+could accelerate training. The hardware and driver are healthy — Intel Arc
+(Meteor Lake, `PCI\VEN_8086&DEV_7DD5`), driver `32.0.101.8331` — but the
+installed PyTorch is `2.10.0+cpu`, built with **`USE_XPU=OFF`**:
+
+```
+torch.xpu.is_available()  -> False
+torch.randn(1, device="xpu") -> AssertionError: Torch not compiled with XPU enabled
+```
+
+Enabling XPU would mean force-reinstalling torch plus ~29 Intel SYCL/oneMKL
+packages, replacing `mkl` and `intel-openmp` underneath the currently verified
+CPU stack. That was judged too risky for an unproven gain on an iGPU with no
+dedicated VRAM, so **nothing was installed** and training proceeded on CPU.
+
+> **Intel iGPU acceleration unavailable in this environment. Training
+> proceeded on CPU.** No GPU usage is claimed.
+
+### Dataset
+
+240 raw | **195 train / 45 validation** | 15 categories | 20 contrastive
+groups, all entirely in training. Raw SHA-256 `be19d0fc…debd18`, unchanged
+from M07.4.
+
+### Command and result
+
+```
+python -u training/train_lora.py --dataset-version v4 --epochs 3
+```
+
+| | |
+| --- | --- |
+| Device | **CPU** (`device: "cpu"` in the metrics file) |
+| Duration | **3693.97 s (61.6 min)** |
+| Optimizer steps | **147** (195 × 3 ÷ grad-accum 4) |
+| Loss | 3.0529 at the first logged step → **0.5306** final mean |
+| Trainable | 5,046,272 / 601,096,192 (**0.8395 %**) |
+| LoRA | r=8, alpha=16, dropout=0.05, bias none, CAUSAL_LM, 7 target modules |
+| Optimiser | lr 2e-4, batch 1, grad-accum 4, seed 42 |
+
+Hyperparameters were **not changed**; the 0.840 % trainable figure is
+identical to V1, V2 and V3, which is the cheapest confirmation of that.
+
+Metrics were read from `models/qwen3-0.6b-quickjunction-lora-v4/training_metrics.json`,
+written by the script itself, not transcribed.
+
+### Adapter
+
+`models/qwen3-0.6b-quickjunction-lora-v4/` — 35 MB total, with a 20,236,472-byte
+`adapter_model.safetensors`, `adapter_config.json`, `training_metrics.json` and
+the tokenizer files. `checkpoints/` is empty, as `save_strategy="no"` intends.
+
+### Integrity
+
+V1, V2, V3 and the base model are **byte-identical** to their pre-training
+hashes (compared before and after; the weight-file SHA-256 prefixes and mtimes
+match exactly). Each earlier adapter's `training_metrics.json` still describes
+its own run — V1 39 steps/50 examples, V2 90/120, V3 123/161, V4 147/195.
+
+### Tests
+
+**317 passed** (315 → 317). One M07.4 test failed on the expected transition:
+`test_6_v4_is_a_dataset_only_and_nothing_is_promoted` asserted that no V4
+adapter existed, a guard against *unauthorised* training. M07.5 authorised it,
+so that premise expired. The guard was **re-pointed, not removed** — it now
+asserts V4 is **not promoted** (checking both the training default and the
+adapter the application actually loads), plus two new tests covering V4
+artefact well-formedness and the non-overwriting of V1/V2/V3. Both promotion
+paths were verified to fail the test when flipped.
+
+### Production status
+
+`DEFAULT_DATASET_VERSION = "v2"` · `LLM_ADAPTER_PATH` →
+`models/qwen3-0.6b-quickjunction-lora-v2` · **V4 trained, NOT promoted.**
+
+### Known limitations
+
+- **V4 is unevaluated.** Whether it fixes V3's not-set regression is unknown;
+  a lower training loss than V3 (0.5306 vs 0.5592) is *not* evidence of that,
+  since the datasets differ.
+- CPU-only training takes ~1 hour per run, which limits iteration speed.
+
+---
+
+## Milestone 07.6 — V4 evaluation and comparison ✅ (**V4 NOT promoted — V5 required**)
+
+Evaluation only: no training, no dataset change, no production change.
+
+**Verdict: the primary gate failed.** V4 improved on almost every axis, but it
+did **not** fix the not-set regression it was built to fix. Production stays on
+V2, and a V5 dataset iteration is required.
+
+### Method
+
+Same harness and same 25 held-out cases as M07.3, rendered by the real
+`build_prompt`, generated greedily at the production token limit and trimmed by
+production `_tidy` — identical treatment for every system, no per-system
+prompting or scoring.
+
+Two minimal changes to `training/evaluate_production.py`, neither touching
+scoring logic: registered `v4` in `SYSTEMS`, and added V4's raw and processed
+splits to the held-out corpus. The second closed a real gap — the guard
+previously covered v1/v2/v3 only, so V4, the system under test, was the one
+dataset never checked. It now verifies against **467** prompts (was 386) and
+still confirms all 25 cases are absent.
+
+`training/evaluate.py` and `training/eval_results_m07_3.json` were **not
+modified**. Results written to `training/eval_results_m07_6.json`.
+
+**Reproducibility:** base, v2 and v3 scored *identically* to M07.3
+(17/25, 16/25, 22/25 with matching coverage and taxonomy), so every V4
+difference is attributable to V4 alone.
+
+### Results
+
+| System | Passed | Difference coverage | Concise | Avg words |
+| --- | ---: | ---: | ---: | ---: |
+| base | 17/25 | 5/19 | 25/25 | 35.2 |
+| v2 | 16/25 | 13/19 | 25/25 | 30.0 |
+| v3 | 22/25 | 17/19 | 25/25 | 19.2 |
+| **v4** | **23/25** | **19/19** | 25/25 | **18.5** |
+
+| | base | v2 | v3 | **v4** |
+| --- | ---: | ---: | ---: | ---: |
+| HALLUCINATION | 6 | 4 | 0 | **0** |
+| OVERCLAIM | 0 | 3 | 0 | **0** |
+| LABEL_FACT_CONTRADICTION | 1 | 3 | 1 | **1** |
+| DIETARY_COMPATIBILITY_ERROR | 0 | 1 | 0 | **0** |
+| CROSS_DIMENSION_ERROR | 0 | 0 | 0 | **0** |
+| GARBLED_PROSE | 1 | 2 | 1 | **0** |
+| NOT_SET_ERROR | 0 | 0 | 2 | **1** |
+
+### Primary gates — 5 of 6 met
+
+```
+NOT_SET_ERROR = 0                FAIL (1)
+HALLUCINATION = 0                PASS
+OVERCLAIM = 0                    PASS
+DIETARY_COMPATIBILITY_ERROR = 0  PASS
+CROSS_DIMENSION_ERROR = 0        PASS
+contrastive tracking = 9/9       PASS
+```
+
+### The gate that failed
+
+**On the four not-set cases, V4 scores 2/4 — exactly what V3 scored.** The
+count moved 2 → 1 only because V4 fixed one case and broke a different one:
+
+- **Fixed** `suggested_low_signal`. V3 said *"It is an Indian dish"* about an
+  `other`-cuisine item; V4 says *"Fattoush Salad is not Indian and carries no
+  heat, so it is only a general suggestion."*
+- **Still broken** `unset_cuisine_and_spice`: *"…it is Mexican rather than **the
+  cuisine you chose**. It carries **the medium heat you set**."* Neither
+  preference was set — two invented preferences in one output.
+- **Newly broken** `unset_all`, which V3 passed: *"This is a general suggestion
+  as you have not chosen any preferences. It is Continental and vegetarian,
+  **matching those you set**."* — self-contradictory within one output.
+
+Counted by substance rather than by taxonomy label, **2 of V4's 3 failures are
+not-set failures**; the scorer files one as `LABEL_FACT_CONTRADICTION` because
+that rule matched first. They were not reclassified to flatter the result.
+
+### What V4 genuinely improved
+
+Difference coverage reached **19/19** — V4 names every real difference, which
+no earlier system did. Contrastive tracking is **9/9 with 9/9 coverage** (V3:
+9/9 with 8/9). Garbled prose fell to **zero**. The `other` cuisine defect from
+V3 is fixed — V4 now says "not Chinese"/"not Continental" instead of inventing
+a concrete cuisine. It is also the most concise system at 18.5 words.
+
+### Scorer correction
+
+Manual review of all 25 V4 outputs found one detector bug: the enumeration
+check counted attribute *values*, so "extra hot" registered as two items
+("hot" + "extra hot") and wrongly flagged the correct sentence *"…carries no
+heat where you asked for extra hot"*. It now counts *dimensions*. Applied
+uniformly to all four systems over the saved generations; it changed **only**
+that one V4 case (22 → 23) and left base/v2/v3 untouched. It does not change
+the gate outcome.
+
+### Production status
+
+`DEFAULT_DATASET_VERSION = "v2"` · `LLM_ADAPTER_PATH` →
+`models/qwen3-0.6b-quickjunction-lora-v2` · **V4 evaluated, NOT promoted.**
+All five model artefacts verified byte-identical before and after evaluation.
+
+**318 tests pass** (317 → 318).
+
+---
+
+## Milestone 07.7 — V4 production hardening ✅ (**V4 PROMOTED**)
+
+No training, no new dataset, no model weights touched. Detail in `docs/AI.md` §18.
+
+**Production now runs `models/qwen3-0.6b-quickjunction-lora-v4`.**
+
+### The problem and the change of approach
+
+M07.6 left V4 at 23/25 with one class outstanding: it credited customers with
+preferences they had never set. Three dataset iterations had failed to remove
+it, so M07.7 stopped teaching and started checking. The application already
+holds the answer -- `ExplanationRequest.preferred_*` is `None` exactly when a
+preference is unset -- so a deterministic guard in
+`app/services/local_llm.py` compares each generation against that truth,
+**rejects** an unsupported one and renders a grounded replacement built only
+from the prompt's own fields.
+
+### Results (25 held-out cases, identical methodology to M07.3/M07.6)
+
+| System | raw | **+ guard** | coverage | avg words |
+| --- | ---: | ---: | ---: | ---: |
+| base | 17/25 | 17/25 | 5/19 | 33.0 |
+| v2 | 16/25 | 19/25 | 14/19 | 27.1 |
+| v3 | 22/25 | 24/25 | 18/19 | 18.4 |
+| **v4** | 23/25 | **25/25** | **19/19** | **17.7** |
+
+Every failure class at zero for V4 + guard; contrastive 9/9. All primary gates
+met. V2 **with** the guard still scores 19/25 and keeps 3 hallucinations, 3
+overclaims and a dietary error, so V4 is what makes production safe -- the
+guard alone would not have been enough.
+
+### Real application testing found what the harness did not
+
+Twelve scenarios through the live app on MySQL 8.0.46 exposed a defect the
+25-case harness never produced: the model paraphrases the placeholder as the
+single word `unset` ("its heat is hot rather than unset"). The guard was
+corrected to judge placeholder usage per sentence -- attribute position versus
+a statement about the customer -- and all twelve scenarios are now clean.
+
+### Tests
+
+**318 before → 378 after**, all passing. `tests/test_preference_safeguard.py`
+adds 60. Three pre-existing guards asserted "V4 not promoted"; that premise
+expired with the authorised promotion, so they were **re-pointed, not
+removed** -- V4 is now pinned as production *together with* the safeguard,
+since promotion was conditional on it.
+
+### Integrity
+
+V1, V2, V3, V4 and the base model byte-identical throughout; datasets
+unchanged; `training/evaluate.py` and the M07.1/M07.3/M07.6 result files
+preserved.
+
+---
+
 ## Next milestone
 
-**Train V4 and re-run the M07.3 evaluation.** That is the only remaining step
-in this line of work, and the hypothesis is falsifiable:
-
-```
-python training/train_lora.py --dataset-version v4 --epochs 3
-python training/evaluate_production.py --systems base v2 v3 v4     --json training/eval_results_m07_5.json
-```
-
-Requirements before training:
-
-- `v4` must be registered in `training/train_lora.py::DATASET_VERSIONS`
-  (currently v1/v2/v3 only, so `--dataset-version v4` will be rejected by
-  argparse -- the same blocker M07.4's predecessor hit).
-- Expect ~150 optimizer steps (195 examples x 3 epochs / grad-accum 4) and
-  roughly 75-80 minutes on CPU, extrapolating from V3's 123 steps in 61.4 min.
-- The adapter must go to `models/qwen3-0.6b-quickjunction-lora-v4/`, never over
-  V1, V2 or V3. The existing overwrite guard covers this once registered.
-
-Success criterion, decided in advance: **NOT_SET_ERROR drops to 0** while
-HALLUCINATION, OVERCLAIM, DIETARY_COMPATIBILITY_ERROR and CROSS_DIMENSION_ERROR
-stay at 0 and contrastive tracking stays at 9/9. If not-set clears without
-regressions, promoting becomes a supportable decision for the first time.
-
-Two smaller items, unchanged:
+The AI line of work is complete: V4 is trained, evaluated, hardened and in
+production behind a deterministic guard. No V5 is planned, and the remaining
+items are unrelated to it:
 
 - `training/evaluate.py` still contains four scenarios the application cannot
   produce; retiring or re-pointing them is deferred work, not a blocker.

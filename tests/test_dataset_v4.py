@@ -367,17 +367,84 @@ def test_5e_manifest_matches_the_files():
         assert manifest["sha256"][key] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-# --- 6. Nothing was trained or promoted --------------------------------------
+# --- 6. V4 is trained but NOT promoted ----------------------------------------
+#
+# In M07.4 this asserted that *no* V4 adapter existed -- a guard against
+# training happening unauthorised while that milestone was dataset-only. M07.5
+# authorised exactly that training, so the adapter now exists and the original
+# assertion expired by design.
+#
+# The guard is re-pointed rather than removed: the boundary that still matters
+# has moved one step downstream. V4 is trained, but it must not become the
+# adapter the application loads until it has been evaluated and approved.
 
 
-def test_6_v4_is_a_dataset_only_and_nothing_is_promoted():
+def test_6_v4_is_the_production_adapter_and_is_guarded():
+    """V4 was promoted in M07.7 after scoring 25/25 on the held-out evaluation.
+
+    Promotion was conditional: V4 alone scored 23/25 and still credited the
+    customer with preferences they had not set. It reached 25/25 only with the
+    deterministic guard in ``app/services/local_llm.py``. Shipping V4 without
+    that guard would reinstate the defect, so the two are pinned together.
+    """
     import config
+    from app.services import local_llm
 
-    assert not (BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v4").exists(), \
-        "a V4 adapter exists but M07.4 authored a dataset only"
-    source = (BASE_DIR / "training" / "train_lora.py").read_text(encoding="utf-8")
-    assert 'DEFAULT_DATASET_VERSION = "v2"' in source
-    assert Path(config.BaseConfig.LLM_ADAPTER_PATH).name == "qwen3-0.6b-quickjunction-lora-v2"
+    adapter = Path(config.BaseConfig.LLM_ADAPTER_PATH)
+    assert adapter.name == "qwen3-0.6b-quickjunction-lora-v4", \
+        f"LLM_ADAPTER_PATH points at {adapter.name}, not the promoted V4 adapter"
+
+    import inspect
+    assert "apply_preference_safeguard" in inspect.getsource(local_llm.generate_explanation), \
+        "V4 is in production but the preference safeguard is no longer applied"
+
+
+def test_6a_v4_adapter_artefact_is_well_formed():
+    """If the V4 adapter is present it must be a real, complete artefact
+    trained on v4 at the approved hyperparameters.
+
+    Skipped where models/ is absent, since it is git-ignored.
+    """
+    v4 = BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v4"
+    if not v4.is_dir():
+        pytest.skip("V4 adapter not present in this checkout (models/ is git-ignored)")
+
+    assert (v4 / "adapter_model.safetensors").is_file()
+    assert (v4 / "adapter_config.json").is_file()
+
+    metrics = json.loads((v4 / "training_metrics.json").read_text(encoding="utf-8"))
+    assert metrics["dataset_version"] == "v4"
+    assert metrics["train_examples"] == 195
+    assert metrics["validation_examples"] == 45
+    assert metrics["lora_rank"] == 8
+    assert metrics["learning_rate"] == 2e-4
+    assert metrics["batch_size"] == 1
+    assert metrics["grad_accum"] == 4
+    assert metrics["smoke_run"] is False
+
+    config_json = json.loads((v4 / "adapter_config.json").read_text(encoding="utf-8"))
+    assert config_json["r"] == 8
+    assert config_json["lora_alpha"] == 16
+    assert config_json["lora_dropout"] == 0.05
+    assert config_json["bias"] == "none"
+    assert config_json["task_type"] == "CAUSAL_LM"
+    assert set(config_json["target_modules"]) == {
+        "q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"}
+
+
+def test_6b_earlier_adapters_were_not_overwritten():
+    """A retrain must never clobber an earlier experiment's evidence."""
+    for name, steps, examples in (
+        ("qwen3-0.6b-quickjunction-lora", 39, 50),
+        ("qwen3-0.6b-quickjunction-lora-v2", 90, 120),
+        ("qwen3-0.6b-quickjunction-lora-v3", 123, 161),
+    ):
+        adapter = BASE_DIR / "models" / name
+        if not adapter.is_dir():
+            pytest.skip(f"{name} not present in this checkout (models/ is git-ignored)")
+        metrics = json.loads((adapter / "training_metrics.json").read_text(encoding="utf-8"))
+        assert metrics["steps"] == steps, f"{name} was overwritten"
+        assert metrics["train_examples"] == examples, f"{name} was overwritten"
 
 
 def test_6b_earlier_datasets_are_untouched():

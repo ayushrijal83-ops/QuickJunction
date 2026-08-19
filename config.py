@@ -80,14 +80,22 @@ class BaseConfig:
     LLM_MODEL_PATH: str = os.environ.get("LLM_MODEL_PATH", str(BASE_DIR / "models" / "Qwen3-0.6B-Base"))
     # LoRA adapter produced by training/train_lora.py.
     #
-    # Defaults to the M07.1 (v2) adapter, promoted after evaluation showed it
-    # fixing the M07 sycophancy defect (v1 5/8 -> v2 8/8 on held-out
-    # scenarios; see docs/AI.md). The M07 v1 adapter is retained on disk at
-    # models/qwen3-0.6b-quickjunction-lora and can be selected by setting this
-    # variable. If the configured directory is absent, local_llm falls back to
-    # the base model rather than failing.
+    # Defaults to the M07.5 (v4) adapter, promoted in M07.7 after it scored
+    # 25/25 on the held-out production evaluation with every failure class at
+    # zero -- against v2's 19/25, which still carried 3 hallucinations, 3
+    # overclaims and a dietary-compatibility error under the same conditions
+    # (see docs/AI.md §18).
+    #
+    # Promotion depended on the deterministic preference-safety guard in
+    # app/services/local_llm.py: v4 alone scored 23/25 and still credited the
+    # customer with preferences they had not set. The guard closes that class
+    # outright, so it is not optional for this adapter.
+    #
+    # The v1, v2 and v3 adapters are retained on disk and can be selected by
+    # setting this variable. If the configured directory is absent, local_llm
+    # falls back to the base model rather than failing.
     LLM_ADAPTER_PATH: str | None = os.environ.get(
-        "LLM_ADAPTER_PATH", str(BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v2")
+        "LLM_ADAPTER_PATH", str(BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v4")
     )
     LLM_MAX_NEW_TOKENS: int = int(os.environ.get("LLM_MAX_NEW_TOKENS", "48"))
 

@@ -881,9 +881,10 @@ output of any system (19.2 words average vs V2's 30.0).
 
 # 15. Milestone 07.4 — dataset V4 (authored and validated; **not trained**)
 
-> **Scope: dataset only.** No model was trained, no V4 adapter exists, and no
-> production configuration changed. `LLM_ADAPTER_PATH` still resolves to the
-> V2 adapter. `tests/test_dataset_v4.py::test_6` fails if that changes.
+> **M07.4 scope was dataset only.** V4 was subsequently **trained in M07.5**
+> (see §16); it remains **unevaluated and not promoted**, and
+> `LLM_ADAPTER_PATH` still resolves to the V2 adapter.
+> `tests/test_dataset_v4.py::test_6` fails if V4 is promoted.
 
 ## 15.1 The defect V4 targets
 
@@ -995,3 +996,313 @@ The hypothesis is specific and falsifiable: retrain on v4 and re-run
 regressing grounding, contrastive tracking, dietary compatibility or
 label/fact consistency. Until that run happens, no claim about V4 quality is
 supportable.
+
+---
+
+# 16. Milestone 07.5 — V4 LoRA training (**trained, not promoted**)
+
+> Training only. No evaluation was run, nothing was promoted, and the
+> application still loads the V2 adapter.
+
+## 16.1 Device — CPU; Intel iGPU acceleration unavailable
+
+A pre-flight audit tested whether this laptop's Intel Arc integrated GPU could
+accelerate training. Hardware and driver are healthy — Intel Arc (Meteor Lake,
+`PCI\VEN_8086&DEV_7DD5`), driver `32.0.101.8331`, Level Zero loader present —
+but the installed PyTorch is `2.10.0+cpu`, built with **`USE_XPU=OFF`**:
+
+```
+torch.xpu.is_available()      -> False
+torch.xpu.device_count()      -> 0
+torch.randn(1, device="xpu")  -> AssertionError: Torch not compiled with XPU enabled
+```
+
+A same-version XPU wheel (`torch==2.10.0+xpu`, cp310/win_amd64) does exist, but
+installing it pulls ~29 packages and replaces `mkl` and `intel-openmp`
+underneath the CPU stack that produced every existing adapter. On an iGPU with
+no dedicated VRAM and 6.1 GB of free shared RAM, the speedup was unproven and
+the OOM risk real. **Nothing was installed.**
+
+> **Intel iGPU acceleration unavailable in this environment. Training proceeded
+> on CPU.** No GPU usage is claimed anywhere in this project.
+
+## 16.2 Run
+
+```
+python -u training/train_lora.py --dataset-version v4 --epochs 3
+```
+
+| | V3 (M07.2) | **V4 (M07.5)** |
+| --- | --- | --- |
+| Dataset | v3 — 161 train / 39 val | **v4 — 195 train / 45 val** |
+| Steps | 123 | **147** |
+| Duration | 3686.5 s (61.4 min) | **3694.0 s (61.6 min)** |
+| Final loss | 0.5592 | **0.5306** |
+| Device | CPU | **CPU** |
+| Trainable | 0.8395 % | **0.8395 %** |
+
+LoRA r=8, alpha=16, dropout=0.05, bias none, CAUSAL_LM, target modules
+`[q,k,v,o,gate,up,down]_proj`; lr 2e-4, batch 1, grad-accum 4, seed 42 —
+**unchanged from the approved configuration**, confirmed by the identical
+0.8395 % trainable fraction across V1–V4.
+
+Adapter: `models/qwen3-0.6b-quickjunction-lora-v4/` (35 MB; 20,236,472-byte
+`adapter_model.safetensors`). V1, V2, V3 and the base model verified
+byte-identical before and after.
+
+## 16.3 Evaluated in M07.6 — the primary gate failed
+
+V4 was evaluated in §17. It improved on almost every axis but **did not fix
+the not-set regression it was built to fix**, so it was not promoted.
+
+## 16.4 The loss number proves nothing about quality
+
+V4's final loss (0.5306) is lower than V3's (0.5592), and that is **not**
+evidence V4 is better. The two models were trained on different datasets, so
+their losses are not comparable, and M07.3 already established that loss did
+not predict behaviour. Whether V4 fixes V3's not-set regression is **unknown
+until the M07.3 harness is re-run** — which is the next milestone, deliberately
+not started here.
+
+---
+
+# 17. Milestone 07.6 — V4 evaluation (**not promoted; V5 required**)
+
+> Same harness and same 25 held-out cases as §14, so the numbers are directly
+> comparable. `training/evaluate.py` and `eval_results_m07_1.json` remain
+> untouched; `eval_results_m07_3.json` was preserved and a new
+> `eval_results_m07_6.json` written.
+
+## 17.1 Harness changes — registry and corpus only
+
+Two minimal edits to `training/evaluate_production.py`, neither touching
+scoring: `v4` registered in `SYSTEMS`, and V4's raw and processed splits added
+to `CORPUS_FILES`. The second closed a real gap — the held-out guard covered
+v1/v2/v3 only, so V4, the system under test, was the one dataset never checked
+for leakage. It now verifies against **467** prompts (was 386) and still finds
+all 25 cases absent.
+
+**Reproducibility check:** base, v2 and v3 re-scored *identically* to M07.3
+(17/25, 16/25, 22/25, matching coverage and taxonomy). Greedy decoding is
+deterministic, so every V4 difference is attributable to V4.
+
+## 17.2 Results
+
+| System | Passed | Difference coverage | Concise | Avg words |
+| --- | ---: | ---: | ---: | ---: |
+| base | 17/25 | 5/19 | 25/25 | 35.2 |
+| v2 | 16/25 | 13/19 | 25/25 | 30.0 |
+| v3 | 22/25 | 17/19 | 25/25 | 19.2 |
+| **v4** | **23/25** | **19/19** | 25/25 | **18.5** |
+
+| | base | v2 | v3 | **v4** |
+| --- | ---: | ---: | ---: | ---: |
+| HALLUCINATION | 6 | 4 | 0 | **0** |
+| OVERCLAIM | 0 | 3 | 0 | **0** |
+| LABEL_FACT_CONTRADICTION | 1 | 3 | 1 | **1** |
+| DIETARY_COMPATIBILITY_ERROR | 0 | 1 | 0 | **0** |
+| CROSS_DIMENSION_ERROR | 0 | 0 | 0 | **0** |
+| GARBLED_PROSE | 1 | 2 | 1 | **0** |
+| NOT_SET_ERROR | 0 | 0 | 2 | **1** |
+
+Contrastive: base 4/9, v2 6/9, v3 9/9 (coverage 8/9), **v4 9/9 (coverage 9/9)**.
+
+## 17.3 The gate that failed, stated precisely
+
+The success criteria were fixed before training. Five of six were met; the one
+that mattered most was not:
+
+```
+NOT_SET_ERROR = 0   ->  FAIL (1)
+```
+
+And the headline count understates it. **On the four not-set cases V4 scores
+2/4 — exactly what V3 scored.** The taxonomy count fell 2 → 1 only because V4
+fixed one case and broke a different one:
+
+| Case | V3 | V4 |
+| --- | --- | --- |
+| `suggested_low_signal` | fail — *"It is an Indian dish"* (item is `other`) | **fixed** |
+| `unset_cuisine_and_spice` | fail | **still fails** |
+| `unset_all` | pass | **newly fails** |
+
+The two survivors:
+
+> *"…it is Mexican rather than **the cuisine you chose**. It carries **the
+> medium heat you set**."* — neither preference was set.
+
+> *"This is a general suggestion as you have not chosen any preferences. It is
+> Continental and vegetarian, **matching those you set**."* — contradicts its
+> own first sentence.
+
+By substance, 2 of V4's 3 failures are not-set failures; the scorer files one
+as `LABEL_FACT_CONTRADICTION` because that rule matched first. They were not
+reclassified.
+
+## 17.4 What V4 did fix
+
+Difference coverage reached **19/19** — V4 names every real difference, which no
+earlier system managed. Contrastive tracking is perfect on both pass rate and
+coverage. Garbled prose fell to zero. The `other`-cuisine defect from V3 is
+gone: V4 says "not Chinese", "not Continental", "not Thai" instead of inventing
+a concrete cuisine. It is also the most concise system at 18.5 words.
+
+Those gains are real and were the *secondary* objectives of the V4 dataset.
+
+## 17.5 Scorer correction, disclosed
+
+Reading all 25 V4 outputs by hand found one detector bug: the enumeration check
+counted attribute *values*, so "extra hot" registered as two items ("hot" +
+"extra hot") and wrongly flagged the correct sentence *"…carries no heat where
+you asked for extra hot"*. It now counts *dimensions*. Applied uniformly to all
+four systems over the saved generations, it changed **only** that one V4 case
+(22 → 23) and left base/v2/v3 unchanged. It does not affect the gate outcome.
+
+## 17.6 What this says about the approach
+
+Three dataset iterations have now tried to make a 0.6B model reliably track the
+*absence* of a preference, and none has succeeded. V4's intervention was large
+and specific — 30 silent-omission examples, 16 partial-match, and a hard rule
+that the literal `not set` never appears in any output — and it relocated the
+failure rather than removing it.
+
+The surviving errors share one shape: the model invents a *referring phrase*
+for a preference that does not exist ("the cuisine you chose", "the medium heat
+you set", "matching those you set"). That is a plausible target for a V5
+contrastive set. But it is also a strong argument that the reliable fix is
+**deterministic post-processing** — reject or strip preference-referring
+phrases for dimensions the request marked unset — since the architecture
+already treats the model as advisory and the deterministic panel as
+authoritative.
+
+---
+
+# 18. Milestone 07.7 — V4 production hardening (**V4 PROMOTED**)
+
+> **Production now runs `models/qwen3-0.6b-quickjunction-lora-v4`.** Promotion
+> was conditional on the deterministic preference-safety guard described below;
+> the two ship together and are pinned together by
+> `tests/test_dataset_v4.py::test_6`.
+
+## 18.1 Why a guard instead of a fifth dataset
+
+M07.6 left V4 at 23/25 with one failure class outstanding: it credited the
+customer with preferences they had never set.
+
+    "...it is Mexican rather than the cuisine you chose."       (none chosen)
+    "It carries the medium heat you set."                       (none set)
+    "It is Continental and vegetarian, matching those you set." (none set)
+
+Three dataset iterations had tried to teach this and none removed it. The
+application, however, already holds the authoritative answer:
+``ExplanationRequest.preferred_*`` is ``None`` exactly when a preference is
+unset. So M07.7 stopped teaching and started checking.
+
+## 18.2 Design
+
+`app/services/local_llm.py` gains a guard that runs unconditionally inside
+`generate_explanation`, after production's `_tidy`:
+
+1. Compare the generated sentence against the structured preferences.
+2. If it credits an unset dimension -- or leaks the `not set` placeholder as
+   an item attribute -- **discard it**.
+3. Render a deterministic explanation from the same request fields instead.
+
+Three constraints shaped it:
+
+- **Reject and replace, never edit.** Deleting a clause from generated prose
+  produces broken English and can invert meaning.
+- **Dimension-scoped detection.** A pattern fires only when it names the
+  dimension, or that dimension's value, whose preference is unset. A generic
+  "matching what you asked for" is left alone, because the dimensions that
+  *are* set make it true.
+- **The fallback can invent nothing.** It is built from request fields only,
+  and `ExplanationRequest` has no price, ingredient, availability or history.
+
+## 18.3 Results — 25 held-out cases, identical methodology to §14/§17
+
+| System | raw | **+ guard** | coverage | concise | avg words |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| base | 17/25 | 17/25 | 5/19 | 25/25 | 33.0 |
+| v2 | 16/25 | 19/25 | 14/19 | 25/25 | 27.1 |
+| v3 | 22/25 | 24/25 | 18/19 | 25/25 | 18.4 |
+| **v4** | 23/25 | **25/25** | **19/19** | 25/25 | **17.7** |
+
+Failure taxonomy with the guard applied:
+
+| | base | v2 | v3 | **v4** |
+| --- | ---: | ---: | ---: | ---: |
+| HALLUCINATION | 6 | 3 | 0 | **0** |
+| OVERCLAIM | 0 | 3 | 0 | **0** |
+| LABEL_FACT_CONTRADICTION | 1 | 1 | 0 | **0** |
+| DIETARY_COMPATIBILITY_ERROR | 0 | 1 | 0 | **0** |
+| CROSS_DIMENSION_ERROR | 0 | 0 | 0 | **0** |
+| GARBLED_PROSE | 1 | 1 | 0 | **0** |
+| NOT_SET_ERROR | 0 | 0 | 1 | **0** |
+
+Contrastive tracking: **v4 9/9**. All primary gates met.
+
+The guard is model-agnostic and improves every adapter (v2 16→19, v3 22→24).
+It fired on only **2 of 25** v4 generations, so it is a narrow correction
+rather than a blanket rewrite. Critically, **v2 with the guard still scores
+19/25** and retains 3 hallucinations, 3 overclaims and a dietary error --
+defects the guard does not address. That is why V4, not the guard alone, is
+what makes production safe.
+
+## 18.4 The live application found what the harness missed
+
+Twelve scenarios were driven through the real app on MySQL 8.0.46 -- real
+login, real `POST /preferences`, real `GET /recommendations/explain`. The
+first pass surfaced a defect the 25-case harness never produced:
+
+> *"Paneer Tikka is Indian and vegetarian as you prefer; its heat is hot
+> rather than **unset**."*
+
+The model paraphrases the placeholder as the single word `unset`, which the
+guard's two-word `not set` pattern missed. A first fix using a fixed-width
+lookback for a "you" subject also failed, because *"as you prefer"* sat just
+inside the window. The working version judges **per sentence** whether the
+placeholder occupies attribute position or belongs to a statement about the
+customer, so these are separated correctly:
+
+    "its heat is hot rather than unset"   -> rejected
+    "you left the spice level unset"      -> kept
+    "cuisine was left unset"              -> kept
+
+After the fix all twelve live scenarios are clean, including the all-unset
+case, which renders the deterministic fallback:
+
+> *"Butter Chicken is a non-vegetarian Indian dish with a medium spice level.
+> It is shown as a general suggestion."*
+
+## 18.5 Validation
+
+| Check | Result |
+| --- | --- |
+| False positives on v4's 240 hand-authored outputs | **0** |
+| False positives on v3's 200 | **0** |
+| Known failures from M07.3/M07.6 across v2/v3/v4 | **all caught** |
+| Fallback safe under its own check (756 combinations) | **0 unsafe** |
+| Fallback within 400 chars and 1-2 sentences | **0 violations** |
+| Guard firing rate on v4 | 2/25 |
+
+`tests/test_preference_safeguard.py` adds **60 permanent tests**: unset
+cuisine/dietary/spice/all-unset with both rejection *and* survival cases,
+placeholder paraphrases, every partial preference combination, an exhaustive
+fallback sweep, and a test pinning that `generate_explanation` still routes
+through the guard.
+
+## 18.6 Honest limits
+
+- The guard is regex-based. It is precise on the phrasings four model
+  generations actually produce, and provably clean on 440 authored outputs,
+  but it is pattern matching and a novel paraphrase could slip past. The live
+  test finding `unset` is the proof of that, and the reason the fallback is
+  the safety net rather than the detector.
+- Two soft quality issues remain in v4 output, neither a gate failure: it can
+  describe a Fair match with two differing dimensions as "only slightly
+  different", and it once wrote "It is vegetarian, which is what you asked
+  for" to a customer who asked for non-vegetarian (a set dimension, so outside
+  the guard's remit).
+- 25 held-out cases plus 12 live scenarios is a behavioural probe, not a
+  statistic.

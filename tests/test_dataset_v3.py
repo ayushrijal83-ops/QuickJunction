@@ -443,23 +443,19 @@ def test_6c_v3_did_not_disturb_the_v1_or_v2_splits():
 # become the default until it has been evaluated and explicitly approved.
 
 
-def test_7_v3_is_trained_but_not_promoted():
-    """V3 exists as an artefact and is NOT wired into production.
+def test_7_v3_is_trained_but_never_became_production():
+    """V3 exists as an artefact and was never promoted.
 
-    Fails the moment V3 is promoted without approval -- via the training
-    default or via the adapter the application actually loads.
+    M07.3 measured V3 as better than V2 on every axis except unset-preference
+    handling, and it was deliberately not shipped on that basis. M07.7 then
+    promoted **V4**, not V3, so V3 must still not be the adapter the
+    application loads.
     """
     import config
 
-    # The training default stays on v2 until V3 is evaluated and approved.
-    source = (BASE_DIR / "training" / "train_lora.py").read_text(encoding="utf-8")
-    assert 'DEFAULT_DATASET_VERSION = "v2"' in source, \
-        "training default moved off v2; V3 promotion was not approved"
-
-    # The adapter the app loads must still be V2.
     adapter = Path(config.BaseConfig.LLM_ADAPTER_PATH)
-    assert adapter.name == "qwen3-0.6b-quickjunction-lora-v2", \
-        f"LLM_ADAPTER_PATH points at {adapter.name}; V3 promotion was not approved"
+    assert adapter.name != "qwen3-0.6b-quickjunction-lora-v3", \
+        "V3 became the production adapter; it was never approved for that"
 
 
 def test_7b_v3_adapter_artefact_is_well_formed():

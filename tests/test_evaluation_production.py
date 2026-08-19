@@ -136,14 +136,30 @@ def test_3b_scorer_does_not_flag_correct_outputs(case_name, text):
     assert verdict["passed"], verdict["detail"]
 
 
-# --- 4. All four systems are registered --------------------------------------
+# --- 4. Every adapter generation is registered --------------------------------
 
 
-def test_4_all_four_systems_are_distinct_and_registered():
-    assert set(SYSTEMS) == {"base", "v1", "v2", "v3"}
+def test_4_all_systems_are_distinct_and_registered():
+    """M07.6 added v4. Each adapter must be its own directory so no comparison
+    can silently score two generations against the same weights."""
+    assert set(SYSTEMS) == {"base", "v1", "v2", "v3", "v4"}
     assert SYSTEMS["base"] is None
-    paths = [SYSTEMS[k] for k in ("v1", "v2", "v3")]
-    assert len({str(p) for p in paths}) == 3, "adapters must be distinct directories"
+    paths = [SYSTEMS[k] for k in ("v1", "v2", "v3", "v4")]
+    assert len({str(p) for p in paths}) == 4, "adapters must be distinct directories"
+
+
+def test_4b_held_out_corpus_covers_every_trained_dataset():
+    """The held-out guarantee is only as good as the corpus it checks against.
+    A dataset missing here would let a memorised prompt score as a success."""
+    from training.evaluate_production import CORPUS_FILES
+
+    joined = " ".join(str(p) for p in CORPUS_FILES)
+    for version in ("seed_examples.jsonl", "seed_examples_v2.jsonl",
+                    "seed_examples_v3.jsonl", "seed_examples_v4.jsonl"):
+        assert version in joined, f"{version} missing from the held-out corpus"
+    for version in ("v1", "v2", "v3", "v4"):
+        assert str(Path("processed") / version / "train.jsonl") in joined, version
+        assert str(Path("processed") / version / "validation.jsonl") in joined, version
 
 
 # --- 5. The historical M07.1 evaluation is preserved --------------------------
@@ -168,9 +184,15 @@ def test_5_m07_1_results_and_harness_are_untouched():
 # --- 6. V3 remains unpromoted -------------------------------------------------
 
 
-def test_6_evaluation_did_not_promote_v3():
+def test_6_production_runs_the_promoted_adapter():
+    """Production and the training default must agree on the shipped version.
+
+    Originally this asserted V2 and no promotion. M07.7 promoted V4 on the
+    strength of a 25/25 held-out result, so the invariant is now that the two
+    settings do not drift apart.
+    """
     import config
 
     source = (BASE_DIR / "training" / "train_lora.py").read_text(encoding="utf-8")
-    assert 'DEFAULT_DATASET_VERSION = "v2"' in source
-    assert Path(config.BaseConfig.LLM_ADAPTER_PATH).name == "qwen3-0.6b-quickjunction-lora-v2"
+    assert 'DEFAULT_DATASET_VERSION = "v4"' in source
+    assert Path(config.BaseConfig.LLM_ADAPTER_PATH).name == "qwen3-0.6b-quickjunction-lora-v4"

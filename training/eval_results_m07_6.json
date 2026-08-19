@@ -1,0 +1,2902 @@
+{
+  "harness": "training/evaluate_production.py",
+  "milestone": "M07.3",
+  "generation": {
+    "decoding": "greedy (do_sample=False)",
+    "max_new_tokens": 48,
+    "post_processing": "app.services.local_llm._tidy (production)",
+    "prompt": "app.services.local_llm.build_prompt (production)"
+  },
+  "case_count": 25,
+  "systems": {
+    "base": {
+      "passed": 17,
+      "total": 25,
+      "error_counts": {
+        "HALLUCINATION": 6,
+        "GARBLED_PROSE": 1,
+        "LABEL_FACT_CONTRADICTION": 1
+      },
+      "difference_coverage": {
+        "named": 5,
+        "expected": 19
+      },
+      "concise": 25,
+      "avg_seconds": 7.17,
+      "total_seconds": 179.1,
+      "cases": [
+        {
+          "name": "full_match_indian",
+          "category": "A_full_match",
+          "group": null,
+          "output": "The Methi Malai Mutter is a vegetarian dish that is a good match for the customer's preference for Indian cuisine, medium spice, and a strong match.",
+          "raw": "The Methi Malai Mutter is a vegetarian dish that is a good match for the customer's preference for Indian cuisine, medium spice, and a strong match.",
+          "seconds": 6.37,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "full_match_thai",
+          "category": "A_full_match",
+          "group": null,
+          "output": "The recommended item, Gaeng Som, is a Thai vegan dish that is spicy and flavorful, making it a perfect match for the customer's preference for a spicy, flavorful meal.",
+          "raw": "The recommended item, Gaeng Som, is a Thai vegan dish that is spicy and flavorful, making it a perfect match for the customer's preference for a spicy, flavorful meal.",
+          "seconds": 6.89,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "unset_dietary",
+          "category": "B_not_set",
+          "group": null,
+          "output": "The customer prefers Italian cuisine and is not set on a specific diet, so the recommended item is the Risotto Milanese, which is a mild-spiced dish that aligns with their taste preferences and dietary restrictions.",
+          "raw": "The customer prefers Italian cuisine and is not set on a specific diet, so the recommended item is the Risotto Milanese, which is a mild-spiced dish that aligns with their taste preferences and dietary restrictions.",
+          "seconds": 6.8,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "unset_cuisine_and_spice",
+          "category": "B_not_set",
+          "group": null,
+          "output": "The Nopales Salad is recommended because it is a vegan option that aligns with the customer's preference for a Mexican cuisine, which is not set, and is suitable for those following a vegan diet, which is also not set. Additionally.",
+          "raw": "The Nopales Salad is recommended because it is a vegan option that aligns with the customer's preference for a Mexican cuisine, which is not set, and is suitable for those following a vegan diet, which is also not set. Additionally",
+          "seconds": 7.91,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "unset_all",
+          "category": "B_not_set",
+          "group": null,
+          "output": "The recommended item, Potato Rosti, is a vegetarian dish from the continental cuisine category, which aligns with the customer's preference for vegetarian options. The dish does not contain any spices, making it suitable for those with dietary restrictions or preferences.",
+          "raw": "The recommended item, Potato Rosti, is a vegetarian dish from the continental cuisine category, which aligns with the customer's preference for vegetarian options. The dish does not contain any spices, making it suitable for those with dietary restrictions or preferences",
+          "seconds": 7.7,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "dietary",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "cuisine_only_italian",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "The Panzanella dish is a popular Italian vegetarian dish that is made with a combination of fresh vegetables, garlic, and olive oil. It is a mild and flavorful option that is suitable for vegans and those with a mild spice preference.",
+          "raw": "The Panzanella dish is a popular Italian vegetarian dish that is made with a combination of fresh vegetables, garlic, and olive oil. It is a mild and flavorful option that is suitable for vegans and those with a mild spice preference.",
+          "seconds": 7.62,
+          "v2_failure_classes": [],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated ingredients: 'made with'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "cuisine_only_thai",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "The recommended item, Yam Woon Sen, is a Thai vegetarian dish that aligns with the customer's preference for a medium-spice, Thai cuisine. Its vegetarian dietary requirement further supports its suitability for the customer's dietary needs.",
+          "raw": "The recommended item, Yam Woon Sen, is a Thai vegetarian dish that aligns with the customer's preference for a medium-spice, Thai cuisine. Its vegetarian dietary requirement further supports its suitability for the customer's dietary needs.",
+          "seconds": 7.56,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_milder",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "The recommended item, Ker Sangri, is a vegetarian dish from the Indian cuisine that is known for its mild spice and good match with the customer's preference for a vegetarian diet and a moderate level of spice.",
+          "raw": "The recommended item, Ker Sangri, is a vegetarian dish from the Indian cuisine that is known for its mild spice and good match with the customer's preference for a vegetarian diet and a moderate level of spice.",
+          "seconds": 6.87,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_hotter",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "The recommended item, Salt and Pepper Tofu, is a vegan-friendly Chinese dish that is both flavorful and suitable for those with a hot spice preference. Its simplicity and neutral taste make it a great choice for those who enjoy a balanced and.",
+          "raw": "The recommended item, Salt and Pepper Tofu, is a vegan-friendly Chinese dish that is both flavorful and suitable for those with a hot spice preference. Its simplicity and neutral taste make it a great choice for those who enjoy a balanced and",
+          "seconds": 7.61,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_vegan_for_vegetarian",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "The recommended item, Beetroot Carpaccio, is a vegetarian dish that aligns with the customer's preference for continental cuisine and vegan dietary requirements, making it a suitable choice for their needs.",
+          "raw": "The recommended item, Beetroot Carpaccio, is a vegetarian dish that aligns with the customer's preference for continental cuisine and vegan dietary requirements, making it a suitable choice for their needs.",
+          "seconds": 6.35,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_veg_for_nonveg",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "The recommended item, Orecchiette Broccoli, is a vegetarian dish that aligns with the customer's preference for Italian cuisine and a non-vegetarian diet. It has a medium spice level, which matches the customer's preference.",
+          "raw": "The recommended item, Orecchiette Broccoli, is a vegetarian dish that aligns with the customer's preference for Italian cuisine and a non-vegetarian diet. It has a medium spice level, which matches the customer's preference",
+          "seconds": 8.22,
+          "v2_failure_classes": [],
+          "errors": [
+            "GARBLED_PROSE"
+          ],
+          "passed": false,
+          "detail": [
+            "repeated 4-gram: 'the customer s preference'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_mexican_thai",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "The Mango Sticky Rice is a vegetarian option that is both flavorful and spicy, making it a great choice for those who prefer a spicy dish without adding extra heat.",
+          "raw": "The Mango Sticky Rice is a vegetarian option that is both flavorful and spicy, making it a great choice for those who prefer a spicy dish without adding extra heat.",
+          "seconds": 6.04,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_thai_other",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "The Moutabal Plate is a vegan Thai dish that is neither spicy nor hot, making it a suitable choice for those seeking a balanced and non-irritating meal.",
+          "raw": "The Moutabal Plate is a vegan Thai dish that is neither spicy nor hot, making it a suitable choice for those seeking a balanced and non-irritating meal.",
+          "seconds": 6.38,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "suggested_low_signal",
+          "category": "G_suggested",
+          "group": null,
+          "output": "The Fattoush Salad is a recommended item because it is a vegan option that aligns with the customer's preference for Indian cuisine and does not contain any spicy ingredients, making it suitable for those with a hot spice preference.",
+          "raw": "The Fattoush Salad is a recommended item because it is a vegan option that aligns with the customer's preference for Indian cuisine and does not contain any spicy ingredients, making it suitable for those with a hot spice preference.",
+          "seconds": 8.14,
+          "v2_failure_classes": [],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated ingredients: 'ingredients'"
+          ],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "grounding_premium_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Osso Buco is a recommended item because it is a classic Italian dish that is both flavorful and suitable for a non-vegetarian diet, with a mild spice profile that complements the dish without overpowering it.",
+          "raw": "Osso Buco is a recommended item because it is a classic Italian dish that is both flavorful and suitable for a non-vegetarian diet, with a mild spice profile that complements the dish without overpowering it.",
+          "seconds": 7.44,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "grounding_ingredient_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "The recommended item, Manakish Zaatar, is a vegan-friendly, mild-spiced dish that aligns with the customer's preference for other cuisine and a vegan diet, making it a suitable choice for their dietary needs.",
+          "raw": "The recommended item, Manakish Zaatar, is a vegan-friendly, mild-spiced dish that aligns with the customer's preference for other cuisine and a vegan diet, making it a suitable choice for their dietary needs.",
+          "seconds": 7.5,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Undhiyu dish is recommended because it is a vegetarian option that is spicy and suitable for a hot meal, aligning with the customer's preference for Indian cuisine and a vegetarian diet.",
+          "raw": "The Undhiyu dish is recommended because it is a vegetarian option that is spicy and suitable for a hot meal, aligning with the customer's preference for Indian cuisine and a vegetarian diet.",
+          "seconds": 6.4,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Harvest Grain Plate is a vegetarian dish that is hot in flavor, making it a good match for the customer's preference for a hot, flavorful meal.",
+          "raw": "The Harvest Grain Plate is a vegetarian dish that is hot in flavor, making it a good match for the customer's preference for a hot, flavorful meal.",
+          "seconds": 5.33,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Soba Sesame Bowl is a vegetarian dish that is a mix of Indian cuisine and a fair match, making it a suitable choice for a customer who prefers Indian cuisine and is looking for a dish that is both flavorful and easy to pair.",
+          "raw": "The Soba Sesame Bowl is a vegetarian dish that is a mix of Indian cuisine and a fair match, making it a suitable choice for a customer who prefers Indian cuisine and is looking for a dish that is both flavorful and easy to pair",
+          "seconds": 7.8,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "The Jade Vegetable Stir Fry is recommended because it is a flavorful and nutritious dish that aligns with the customer's preference for Chinese cuisine and vegan dietary needs, while also offering a medium-spice option that complements the strong match.",
+          "raw": "The Jade Vegetable Stir Fry is recommended because it is a flavorful and nutritious dish that aligns with the customer's preference for Chinese cuisine and vegan dietary needs, while also offering a medium-spice option that complements the strong match.",
+          "seconds": 7.65,
+          "v2_failure_classes": [],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated health: 'nutritious'"
+          ],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_b_spice_differs",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "The Lotus Root Stir Fry is a vegan-friendly dish that complements the Chinese cuisine well, offering a balanced mix of flavors and textures, making it a suitable choice for those seeking a flavorful and nutritious meal.",
+          "raw": "The Lotus Root Stir Fry is a vegan-friendly dish that complements the Chinese cuisine well, offering a balanced mix of flavors and textures, making it a suitable choice for those seeking a flavorful and nutritious meal.",
+          "seconds": 7.03,
+          "v2_failure_classes": [],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated health: 'nutritious'"
+          ],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "The Koshari Bowl is a recommended item because it is a popular and flavorful dish from the Chinese cuisine, which aligns with the customer's preference for Chinese cuisine. Additionally, it is vegan-friendly, meeting the dietary requirement, and has.",
+          "raw": "The Koshari Bowl is a recommended item because it is a popular and flavorful dish from the Chinese cuisine, which aligns with the customer's preference for Chinese cuisine. Additionally, it is vegan-friendly, meeting the dietary requirement, and has",
+          "seconds": 7.77,
+          "v2_failure_classes": [],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated popularity: 'popular'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The Spinach Frittata is a recommended item because it is a classic continental dish that aligns with the customer's preference for a mild, non-spicy option, making it suitable for an eggetarian diet.",
+          "raw": "The Spinach Frittata is a recommended item because it is a classic continental dish that aligns with the customer's preference for a mild, non-spicy option, making it suitable for an eggetarian diet.",
+          "seconds": 7.35,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The Menemen Skillet is a good match for an eggetarian diet because it is a continental cuisine item that is mild-spiced, making it a suitable choice for those who prefer a less spicy option while still enjoying the flavors of the.",
+          "raw": "The Menemen Skillet is a good match for an eggetarian diet because it is a continental cuisine item that is mild-spiced, making it a suitable choice for those who prefer a less spicy option while still enjoying the flavors of the",
+          "seconds": 7.76,
+          "v2_failure_classes": [],
+          "errors": [
+            "LABEL_FACT_CONTRADICTION"
+          ],
+          "passed": false,
+          "detail": [
+            "says the item is continental but it is other"
+          ],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The Poke Style Bowl is recommended because it is a multi-cuisine dish that aligns with the customer's preference for continental cuisine, which is a popular choice among eggetarians. The dish is also mild in spice, making it suitable for.",
+          "raw": "The Poke Style Bowl is recommended because it is a multi-cuisine dish that aligns with the customer's preference for continental cuisine, which is a popular choice among eggetarians. The dish is also mild in spice, making it suitable for",
+          "seconds": 6.65,
+          "v2_failure_classes": [],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated popularity: 'popular'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        }
+      ]
+    },
+    "v2": {
+      "passed": 16,
+      "total": 25,
+      "error_counts": {
+        "GARBLED_PROSE": 2,
+        "HALLUCINATION": 4,
+        "LABEL_FACT_CONTRADICTION": 3,
+        "OVERCLAIM": 3,
+        "DIETARY_COMPATIBILITY_ERROR": 1
+      },
+      "difference_coverage": {
+        "named": 13,
+        "expected": 19
+      },
+      "concise": 25,
+      "avg_seconds": 7.7,
+      "total_seconds": 192.6,
+      "cases": [
+        {
+          "name": "full_match_indian",
+          "category": "A_full_match",
+          "group": null,
+          "output": "Methi Malai Mutter is Indian, vegetarian and medium spiced, matching all three preferences. It is also a good choice for a warm meal.",
+          "raw": "Methi Malai Mutter is Indian, vegetarian and medium spiced, matching all three preferences. It is also a good choice for a warm meal.",
+          "seconds": 7.16,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "full_match_thai",
+          "category": "A_full_match",
+          "group": null,
+          "output": "Gaeng Som is Thai, vegan and hot, matching all three preferences you set. It is also a good choice for a hot meal.",
+          "raw": "Gaeng Som is Thai, vegan and hot, matching all three preferences you set. It is also a good choice for a hot meal.",
+          "seconds": 6.24,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "unset_dietary",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Risotto Milanese is Italian and vegetarian, matching both your vegetarian requirement and your mild spice level. It is not set as a strong match because it is not an Indian dish.",
+          "raw": "Risotto Milanese is Italian and vegetarian, matching both your vegetarian requirement and your mild spice level. It is not set as a strong match because it is not an Indian dish.",
+          "seconds": 7.82,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "unset_cuisine_and_spice",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Nopales Salad is vegan and Mexican rather than Thai, but it is medium spiced rather than hot, so it is a good choice for you. It is not the best option for cuisine or spice level you asked for, but it.",
+          "raw": "Nopales Salad is vegan and Mexican rather than Thai, but it is medium spiced rather than hot, so it is a good choice for you. It is not the best option for cuisine or spice level you asked for, but it",
+          "seconds": 9.93,
+          "v2_failure_classes": [],
+          "errors": [
+            "GARBLED_PROSE"
+          ],
+          "passed": false,
+          "detail": [
+            "output ends mid-clause"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "unset_all",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Potato Rosti is continental and vegetarian, matching your vegetarian requirement, but it is not a hot dish and has no spice heat. It is the closest match available.",
+          "raw": "Potato Rosti is continental and vegetarian, matching your vegetarian requirement, but it is not a hot dish and has no spice heat. It is the closest match available.",
+          "seconds": 6.84,
+          "v2_failure_classes": [
+            "false_availability_wording"
+          ],
+          "errors": [
+            "HALLUCINATION",
+            "LABEL_FACT_CONTRADICTION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated availability: 'available'",
+            "label is 'Suggested' but the text asserts a match"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "dietary",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "cuisine_only_italian",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "Panzanella is vegan and Italian rather than Indian, but it is mild and matches your mild spice requirement. It is not the best choice for an Indian diet, but it is a good alternative.",
+          "raw": "Panzanella is vegan and Italian rather than Indian, but it is mild and matches your mild spice requirement. It is not the best choice for an Indian diet, but it is a good alternative.",
+          "seconds": 8.48,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "cuisine_only_thai",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "Yam Woon Sen is vegetarian and Thai rather than Chinese, but it is medium spiced, matching your preference. It is not the best choice for you, but it is a good alternative.",
+          "raw": "Yam Woon Sen is vegetarian and Thai rather than Chinese, but it is medium spiced, matching your preference. It is not the best choice for you, but it is a good alternative.",
+          "seconds": 8.16,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_milder",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "Ker Sangri is Indian and vegetarian, matching two of your preferences, but it is only mildly spiced rather than extra hot. It is a good choice if you prefer a vegetarian option rather than a hot one.",
+          "raw": "Ker Sangri is Indian and vegetarian, matching two of your preferences, but it is only mildly spiced rather than extra hot. It is a good choice if you prefer a vegetarian option rather than a hot one.",
+          "seconds": 8.76,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_hotter",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "Salt and Pepper Tofu is Chinese and vegan, matching both your vegan and Chinese preferences, though it is hot rather than the none you asked for.",
+          "raw": "Salt and Pepper Tofu is Chinese and vegan, matching both your vegan and Chinese preferences, though it is hot rather than the none you asked for.",
+          "seconds": 7.22,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_vegan_for_vegetarian",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "Beetroot Carpaccio is Continental and vegan, matching both your vegetarian and continental preferences, even though it has no spice. It is the only item on the menu that fits all three criteria.",
+          "raw": "Beetroot Carpaccio is Continental and vegan, matching both your vegetarian and continental preferences, even though it has no spice. It is the only item on the menu that fits all three criteria.",
+          "seconds": 8.56,
+          "v2_failure_classes": [
+            "invented_only_item_on_menu"
+          ],
+          "errors": [
+            "HALLUCINATION",
+            "OVERCLAIM"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated menu_scope: 'the only item'",
+            "claims a total match that is not literally true"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_veg_for_nonveg",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "Orecchiette Broccoli is Italian, vegetarian and medium spiced, matching all three of your preferences. It is not a non-vegetarian dish, so it is not a good fit for you.",
+          "raw": "Orecchiette Broccoli is Italian, vegetarian and medium spiced, matching all three of your preferences. It is not a non-vegetarian dish, so it is not a good fit for you.",
+          "seconds": 9.05,
+          "v2_failure_classes": [],
+          "errors": [
+            "GARBLED_PROSE",
+            "OVERCLAIM"
+          ],
+          "passed": false,
+          "detail": [
+            "claims a total match that is not literally true",
+            "repeated 4-gram: 'it is not a'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_mexican_thai",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "Mango Sticky Rice is vegetarian and Thai rather than Mexican, but it is extra hot rather than the hot food you asked for. It is a good alternative to the dishes you have suggested.",
+          "raw": "Mango Sticky Rice is vegetarian and Thai rather than Mexican, but it is extra hot rather than the hot food you asked for. It is a good alternative to the dishes you have suggested.",
+          "seconds": 7.75,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_thai_other",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "Moutabal Plate is vegan and Thai, matching two preferences, but it is not extra hot and is from another cuisine, so it is only a fair match. It is the only item on the menu that meets all three preferences.",
+          "raw": "Moutabal Plate is vegan and Thai, matching two preferences, but it is not extra hot and is from another cuisine, so it is only a fair match. It is the only item on the menu that meets all three preferences.",
+          "seconds": 9.59,
+          "v2_failure_classes": [
+            "invented_only_item_on_menu"
+          ],
+          "errors": [
+            "HALLUCINATION",
+            "OVERCLAIM"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated menu_scope: 'the only item'",
+            "claims a total match that is not literally true"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "suggested_low_signal",
+          "category": "G_suggested",
+          "group": null,
+          "output": "Fattoush Salad is vegan and not hot, matching your vegetarian diet and being an Indian dish rather than a cuisine outside your preferences. It is not suggested.",
+          "raw": "Fattoush Salad is vegan and not hot, matching your vegetarian diet and being an Indian dish rather than a cuisine outside your preferences. It is not suggested.",
+          "seconds": 6.94,
+          "v2_failure_classes": [],
+          "errors": [
+            "LABEL_FACT_CONTRADICTION"
+          ],
+          "passed": false,
+          "detail": [
+            "label is 'Suggested' but the text asserts a match",
+            "says the item is indian but it is other"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "grounding_premium_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Osso Buco is Continental, non-vegetarian and mild, matching all three preferences. It is a good choice for you.",
+          "raw": "Osso Buco is Continental, non-vegetarian and mild, matching all three preferences. It is a good choice for you.",
+          "seconds": 6.35,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "grounding_ingredient_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Manakish Zaatar is vegan and served in an other cuisine, matching both your vegan and non-cuisine preferences. It is also mild, which is what you asked for.",
+          "raw": "Manakish Zaatar is vegan and served in an other cuisine, matching both your vegan and non-cuisine preferences. It is also mild, which is what you asked for.",
+          "seconds": 7.82,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "Undhiyu is Indian, vegetarian and hot, matching all three preferences. It is also the only item on the menu that fits all three.",
+          "raw": "Undhiyu is Indian, vegetarian and hot, matching all three preferences. It is also the only item on the menu that fits all three.",
+          "seconds": 6.2,
+          "v2_failure_classes": [
+            "invented_only_item_on_menu"
+          ],
+          "errors": [
+            "HALLUCINATION"
+          ],
+          "passed": false,
+          "detail": [
+            "hallucinated menu_scope: 'the only item'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "Harvest Grain Plate is vegetarian and hot, matching both your vegetarian and hot dietary preferences, though it is a multi-cuisine dish rather than Indian.",
+          "raw": "Harvest Grain Plate is vegetarian and hot, matching both your vegetarian and hot dietary preferences, though it is a multi-cuisine dish rather than Indian.",
+          "seconds": 6.03,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "Soba Sesame Bowl is vegetarian and Indian, matching two of your three preferences, but it is a multi-cuisine dish rather than a hot one. It is not a good fit for your hot spice requirement.",
+          "raw": "Soba Sesame Bowl is vegetarian and Indian, matching two of your three preferences, but it is a multi-cuisine dish rather than a hot one. It is not a good fit for your hot spice requirement.",
+          "seconds": 8.73,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Jade Vegetable Stir Fry is Chinese and vegan, matching both your vegan and cuisine preferences, though it is medium spiced rather than the medium you asked for. It is a good choice.",
+          "raw": "Jade Vegetable Stir Fry is Chinese and vegan, matching both your vegan and cuisine preferences, though it is medium spiced rather than the medium you asked for. It is a good choice.",
+          "seconds": 7.54,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_b_spice_differs",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Lotus Root Stir Fry is Chinese and vegan, matching both your vegan and Chinese preferences, though it is extra hot rather than medium.",
+          "raw": "Lotus Root Stir Fry is Chinese and vegan, matching both your vegan and Chinese preferences, though it is extra hot rather than medium.",
+          "seconds": 5.53,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Koshari Bowl is vegan and Chinese, matching two of your three preferences, but it is not medium spiced and is from another cuisine. It is a good choice if you only care about vegan food.",
+          "raw": "Koshari Bowl is vegan and Chinese, matching two of your three preferences, but it is not medium spiced and is from another cuisine. It is a good choice if you only care about vegan food.",
+          "seconds": 5.75,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "Spinach Frittata is Continental, eggetarian and mild, matching all three preferences. It is not vegan, however, so it is not a good fit for a vegan diet.",
+          "raw": "Spinach Frittata is Continental, eggetarian and mild, matching all three preferences. It is not vegan, however, so it is not a good fit for a vegan diet.",
+          "seconds": 8.7,
+          "v2_failure_classes": [
+            "dietary_mismatch_where_compatible"
+          ],
+          "errors": [
+            "DIETARY_COMPATIBILITY_ERROR"
+          ],
+          "passed": false,
+          "detail": [
+            "claims a dietary problem ('not vegan') but eggetarian is compatible with eggetarian"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "Menemen Skillet is eggetarian and mild, matching both your dietary and cuisine preferences. It is an Indian dish rather than Continental, so it is not a good fit for Continental cuisine.",
+          "raw": "Menemen Skillet is eggetarian and mild, matching both your dietary and cuisine preferences. It is an Indian dish rather than Continental, so it is not a good fit for Continental cuisine.",
+          "seconds": 8.24,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "Poke Style Bowl is eggetarian and fits your diet, but it is a continental dish rather than a continental one, so it is only a fair match. It is extra hot rather than the mild heat you prefer.",
+          "raw": "Poke Style Bowl is eggetarian and fits your diet, but it is a continental dish rather than a continental one, so it is only a fair match. It is extra hot rather than the mild heat you prefer.",
+          "seconds": 9.22,
+          "v2_failure_classes": [],
+          "errors": [
+            "LABEL_FACT_CONTRADICTION"
+          ],
+          "passed": false,
+          "detail": [
+            "says the item is continental but it is multi_cuisine"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        }
+      ]
+    },
+    "v3": {
+      "passed": 22,
+      "total": 25,
+      "error_counts": {
+        "NOT_SET_ERROR": 2,
+        "GARBLED_PROSE": 1,
+        "LABEL_FACT_CONTRADICTION": 1
+      },
+      "difference_coverage": {
+        "named": 17,
+        "expected": 19
+      },
+      "concise": 25,
+      "avg_seconds": 5.47,
+      "total_seconds": 136.8,
+      "cases": [
+        {
+          "name": "full_match_indian",
+          "category": "A_full_match",
+          "group": null,
+          "output": "Methi Malai Mutter is Indian, vegetarian and medium spiced, matching every preference you set.",
+          "raw": "Methi Malai Mutter is Indian, vegetarian and medium spiced, matching every preference you set.",
+          "seconds": 3.83,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "full_match_thai",
+          "category": "A_full_match",
+          "group": null,
+          "output": "Gaeng Som is Thai, vegan and hot, matching each preference you set.",
+          "raw": "Gaeng Som is Thai, vegan and hot, matching each preference you set.",
+          "seconds": 2.56,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "unset_dietary",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Risotto Milanese is Italian and mild, matching both preferences you set. It is vegetarian, which is not recorded.",
+          "raw": "Risotto Milanese is Italian and mild, matching both preferences you set. It is vegetarian, which is not recorded.",
+          "seconds": 5.5,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "unset_cuisine_and_spice",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Nopales Salad is vegan as you asked, but it is Mexican rather than the cuisine you set. You left spice unset, so this is only a match.",
+          "raw": "Nopales Salad is vegan as you asked, but it is Mexican rather than the cuisine you set. You left spice unset, so this is only a match.",
+          "seconds": 7.05,
+          "v2_failure_classes": [
+            "false_preference_claim_when_not_set"
+          ],
+          "errors": [
+            "NOT_SET_ERROR"
+          ],
+          "passed": false,
+          "detail": [
+            "cuisine is not set but text claims it: 'the cuisine you (?:set|chose|asked for|recorded|wanted)'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "unset_all",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Potato Rosti is vegetarian and has no heat, matching neither of your preferences. You left the cuisine and spice choices unset.",
+          "raw": "Potato Rosti is vegetarian and has no heat, matching neither of your preferences. You left the cuisine and spice choices unset.",
+          "seconds": 5.07,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "dietary",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "cuisine_only_italian",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "Panzanella is vegan and mild as you asked, though it is Italian rather than Indian. You only wanted vegan and mild preferences.",
+          "raw": "Panzanella is vegan and mild as you asked, though it is Italian rather than Indian. You only wanted vegan and mild preferences.",
+          "seconds": 5.74,
+          "v2_failure_classes": [
+            "false_preference_claim_when_not_set"
+          ],
+          "errors": [
+            "NOT_SET_ERROR"
+          ],
+          "passed": false,
+          "detail": [
+            "enumerates the customer's preferences but omits cuisine=indian"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "cuisine_only_thai",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "Yam Woon Sen is vegetarian and medium spiced, matching two of your preferences. It is Thai rather than Chinese.",
+          "raw": "Yam Woon Sen is vegetarian and medium spiced, matching two of your preferences. It is Thai rather than Chinese.",
+          "seconds": 4.61,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_milder",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "Ker Sangri is Indian and vegetarian as you asked, though it is mild rather than extra hot. You prefer extra hot.",
+          "raw": "Ker Sangri is Indian and vegetarian as you asked, though it is mild rather than extra hot. You prefer extra hot.",
+          "seconds": 5.37,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_hotter",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "Salt and Pepper Tofu is Chinese and vegan as you asked, though it is hot rather than unspiced.",
+          "raw": "Salt and Pepper Tofu is Chinese and vegan as you asked, though it is hot rather than unspiced.",
+          "seconds": 5.2,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_vegan_for_vegetarian",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "Beetroot Carpaccio is Continental and unspiced, matching both preferences you set. It is vegan as you asked.",
+          "raw": "Beetroot Carpaccio is Continental and unspiced, matching both preferences you set. It is vegan as you asked.",
+          "seconds": 5.33,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_veg_for_nonveg",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "Orecchiette Broccoli is Italian and medium spiced, matching both preferences you set. It is vegetarian rather than non-vegetarian.",
+          "raw": "Orecchiette Broccoli is Italian and medium spiced, matching both preferences you set. It is vegetarian rather than non-vegetarian.",
+          "seconds": 6.3,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_mexican_thai",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "Mango Sticky Rice is vegetarian as you prefer, but it is Thai rather than Mexican and carries no heat. It only matches your vegetarian preference.",
+          "raw": "Mango Sticky Rice is vegetarian as you prefer, but it is Thai rather than Mexican and carries no heat. It only matches your vegetarian preference.",
+          "seconds": 5.93,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_thai_other",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "This is vegan as you asked, but it is not Thai and has no heat. It only matches as a vegan dish.",
+          "raw": "This is vegan as you asked, but it is not Thai and has no heat. It only matches as a vegan dish. You asked for a Thai one and this is not that.",
+          "seconds": 7.52,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "suggested_low_signal",
+          "category": "G_suggested",
+          "group": null,
+          "output": "Fattoush Salad is not set and has no heat, matching neither preference you recorded. It is an Indian dish.",
+          "raw": "Fattoush Salad is not set and has no heat, matching neither preference you recorded. It is an Indian dish.",
+          "seconds": 5.38,
+          "v2_failure_classes": [],
+          "errors": [
+            "GARBLED_PROSE",
+            "LABEL_FACT_CONTRADICTION"
+          ],
+          "passed": false,
+          "detail": [
+            "says the item is indian but it is other",
+            "emits the 'not set' placeholder as an item attribute"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "grounding_premium_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Osso Buco is Continental, non-vegetarian and mild, matching all three preferences you set.",
+          "raw": "Osso Buco is Continental, non-vegetarian and mild, matching all three preferences you set.",
+          "seconds": 4.9,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "grounding_ingredient_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Manakish Zaatar is other, vegan and mild, matching all three preferences you set.",
+          "raw": "Manakish Zaatar is other, vegan and mild, matching all three preferences you set.",
+          "seconds": 4.36,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "Undhiyu is Indian, vegetarian and hot, matching all three preferences you set.",
+          "raw": "Undhiyu is Indian, vegetarian and hot, matching all three preferences you set.",
+          "seconds": 3.85,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Harvest Grain Plate is vegetarian and hot, matching two of your preferences. It is a multi-cuisine dish, though you asked for only an Indian one.",
+          "raw": "The Harvest Grain Plate is vegetarian and hot, matching two of your preferences. It is a multi-cuisine dish, though you asked for only an Indian one.",
+          "seconds": 6.65,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Soba Sesame Bowl is vegetarian as you prefer, but it is multi-cuisine rather than Indian and carries no heat. It only matches your vegetarian preference.",
+          "raw": "The Soba Sesame Bowl is vegetarian as you prefer, but it is multi-cuisine rather than Indian and carries no heat. It only matches your vegetarian preference.",
+          "seconds": 7.05,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Jade Vegetable Stir Fry is Chinese, vegan and medium spiced, matching every preference you set.",
+          "raw": "Jade Vegetable Stir Fry is Chinese, vegan and medium spiced, matching every preference you set.",
+          "seconds": 4.06,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_b_spice_differs",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Lotus Root Stir Fry is Chinese and vegan as you asked, though it is extra hot rather than medium.",
+          "raw": "Lotus Root Stir Fry is Chinese and vegan as you asked, though it is extra hot rather than medium.",
+          "seconds": 4.87,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "The Koshari Bowl is vegan as you asked, but it is not Chinese and carries no heat. It only matches your vegan preference.",
+          "raw": "The Koshari Bowl is vegan as you asked, but it is not Chinese and carries no heat. It only matches your vegan preference.",
+          "seconds": 6.31,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The Spinach Frittata is Continental, eggetarian and mild, matching all three of your preferences.",
+          "raw": "The Spinach Frittata is Continental, eggetarian and mild, matching all three of your preferences.",
+          "seconds": 5.04,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "Menemen Skillet is eggetarian and mild, matching both preferences you set. It is an other cuisine rather than Continental.",
+          "raw": "Menemen Skillet is eggetarian and mild, matching both preferences you set. It is an other cuisine rather than Continental.",
+          "seconds": 5.8,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The dish is eggetarian as you asked, but it is multi-cuisine rather than continental and hot rather than mild. It only matches to a fair degree.",
+          "raw": "The dish is eggetarian as you asked, but it is multi-cuisine rather than continental and hot rather than mild. It only matches to a fair degree. You asked for only two preferences.",
+          "seconds": 8.51,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        }
+      ]
+    },
+    "v4": {
+      "passed": 23,
+      "total": 25,
+      "error_counts": {
+        "NOT_SET_ERROR": 1,
+        "LABEL_FACT_CONTRADICTION": 1
+      },
+      "difference_coverage": {
+        "named": 19,
+        "expected": 19
+      },
+      "concise": 25,
+      "avg_seconds": 5.19,
+      "total_seconds": 129.6,
+      "cases": [
+        {
+          "name": "full_match_indian",
+          "category": "A_full_match",
+          "group": null,
+          "output": "Methi Malai Mutter is Indian, vegetarian and medium spiced, matching all three of your preferences.",
+          "raw": "Methi Malai Mutter is Indian, vegetarian and medium spiced, matching all three of your preferences.",
+          "seconds": 5.07,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "full_match_thai",
+          "category": "A_full_match",
+          "group": null,
+          "output": "Gaeng Som is Thai, vegan and hot, matching all three preferences you set.",
+          "raw": "Gaeng Som is Thai, vegan and hot, matching all three preferences you set.",
+          "seconds": 3.93,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "unset_dietary",
+          "category": "B_not_set",
+          "group": null,
+          "output": "Risotto Milanese is Italian and mild, matching both preferences you set. It is vegetarian, which is only a general preference.",
+          "raw": "Risotto Milanese is Italian and mild, matching both preferences you set. It is vegetarian, which is only a general preference.",
+          "seconds": 5.25,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "unset_cuisine_and_spice",
+          "category": "B_not_set",
+          "group": null,
+          "output": "The Nopales Salad is vegan as you prefer, though it is Mexican rather than the cuisine you chose. It carries the medium heat you set.",
+          "raw": "The Nopales Salad is vegan as you prefer, though it is Mexican rather than the cuisine you chose. It carries the medium heat you set.",
+          "seconds": 6.37,
+          "v2_failure_classes": [
+            "false_preference_claim_when_not_set"
+          ],
+          "errors": [
+            "NOT_SET_ERROR"
+          ],
+          "passed": false,
+          "detail": [
+            "cuisine is not set but text claims it: 'the cuisine you (?:set|chose|asked for|recorded|wanted)'"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "unset_all",
+          "category": "B_not_set",
+          "group": null,
+          "output": "This is a general suggestion as you have not chosen any preferences. It is Continental and vegetarian, matching those you set.",
+          "raw": "This is a general suggestion as you have not chosen any preferences. It is Continental and vegetarian, matching those you set.",
+          "seconds": 5.21,
+          "v2_failure_classes": [],
+          "errors": [
+            "LABEL_FACT_CONTRADICTION"
+          ],
+          "passed": false,
+          "detail": [
+            "label is 'Suggested' but the text asserts a match"
+          ],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "cuisine",
+              "dietary",
+              "spice"
+            ]
+          }
+        },
+        {
+          "name": "cuisine_only_italian",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "Panzanella is vegan and mild as you prefer, though it is Italian rather than Indian.",
+          "raw": "Panzanella is vegan and mild as you prefer, though it is Italian rather than Indian.",
+          "seconds": 4.3,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "cuisine_only_thai",
+          "category": "C_cuisine_only",
+          "group": null,
+          "output": "Yam Woon Sen is vegetarian and medium spiced, matching your preferences. It is Thai rather than Chinese.",
+          "raw": "Yam Woon Sen is vegetarian and medium spiced, matching your preferences. It is Thai rather than Chinese.",
+          "seconds": 4.8,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_milder",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "Ker Sangri is Indian and vegetarian as you prefer, though it is mild rather than extra hot.",
+          "raw": "Ker Sangri is Indian and vegetarian as you prefer, though it is mild rather than extra hot.",
+          "seconds": 4.48,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "spice_only_hotter",
+          "category": "D_spice_only",
+          "group": null,
+          "output": "Salt and Pepper Tofu is Chinese and vegan as you prefer, though it is hot rather than unspiced.",
+          "raw": "Salt and Pepper Tofu is Chinese and vegan as you prefer, though it is hot rather than unspiced.",
+          "seconds": 5.22,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_vegan_for_vegetarian",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "Beetroot Carpaccio is Continental and unspiced, matching what you asked for. It is vegan as you prefer.",
+          "raw": "Beetroot Carpaccio is Continental and unspiced, matching what you asked for. It is vegan as you prefer.",
+          "seconds": 5.4,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "dietary_veg_for_nonveg",
+          "category": "E_dietary_compat",
+          "group": null,
+          "output": "Orecchiette Broccoli is Italian and medium spiced, matching both your cuisine and spice preferences. It is vegetarian, which is what you asked for.",
+          "raw": "Orecchiette Broccoli is Italian and medium spiced, matching both your cuisine and spice preferences. It is vegetarian, which is what you asked for.",
+          "seconds": 7.08,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_mexican_thai",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "Mango Sticky Rice is vegetarian as you prefer, but it is Thai rather than Mexican and carries no heat.",
+          "raw": "Mango Sticky Rice is vegetarian as you prefer, but it is Thai rather than Mexican and carries no heat.",
+          "seconds": 4.82,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "two_dim_thai_other",
+          "category": "F_two_dim",
+          "group": null,
+          "output": "The Moutabal Plate is vegan as you prefer, but it is not Thai and carries no heat where you asked for extra hot.",
+          "raw": "The Moutabal Plate is vegan as you prefer, but it is not Thai and carries no heat where you asked for extra hot.",
+          "seconds": 5.92,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "suggested_low_signal",
+          "category": "G_suggested",
+          "group": null,
+          "output": "Fattoush Salad is not Indian and carries no heat, so it is only a general suggestion.",
+          "raw": "Fattoush Salad is not Indian and carries no heat, so it is only a general suggestion.",
+          "seconds": 4.77,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": false,
+            "dietary_compatible": true,
+            "unset": [
+              "dietary"
+            ]
+          }
+        },
+        {
+          "name": "grounding_premium_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Osso Buco is Continental, non-vegetarian and mild, matching all three preferences you set.",
+          "raw": "Osso Buco is Continental, non-vegetarian and mild, matching all three preferences you set.",
+          "seconds": 4.82,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "grounding_ingredient_name",
+          "category": "H_grounding",
+          "group": null,
+          "output": "Manakish Zaatar is other, vegan and mild, matching each preference you set.",
+          "raw": "Manakish Zaatar is other, vegan and mild, matching each preference you set.",
+          "seconds": 4.22,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "Undhiyu is Indian, vegetarian and hot, matching all three preferences you set.",
+          "raw": "Undhiyu is Indian, vegetarian and hot, matching all three preferences you set.",
+          "seconds": 4.01,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Harvest Grain Plate is vegetarian and hot, matching your preferences. It is a multi-cuisine dish rather than an Indian one.",
+          "raw": "The Harvest Grain Plate is vegetarian and hot, matching your preferences. It is a multi-cuisine dish rather than an Indian one.",
+          "seconds": 5.7,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g1_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_1_indian_veg_hot",
+          "output": "The Soba Sesame Bowl is vegetarian as you prefer, but it is multi-cuisine rather than Indian and carries no heat where you asked for hot.",
+          "raw": "The Soba Sesame Bowl is vegetarian as you prefer, but it is multi-cuisine rather than Indian and carries no heat where you asked for hot.",
+          "seconds": 6.67,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Jade Vegetable Stir Fry is Chinese, vegan and medium spiced, matching every preference you set.",
+          "raw": "Jade Vegetable Stir Fry is Chinese, vegan and medium spiced, matching every preference you set.",
+          "seconds": 4.37,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_b_spice_differs",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "Lotus Root Stir Fry is Chinese and vegan as you prefer, though it is extra hot rather than medium.",
+          "raw": "Lotus Root Stir Fry is Chinese and vegan as you prefer, though it is extra hot rather than medium.",
+          "seconds": 4.81,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g2_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_2_chinese_vegan_medium",
+          "output": "The Koshari Bowl is vegan as you prefer, but it is not Chinese and carries no heat. It is only slightly different from what you asked for.",
+          "raw": "The Koshari Bowl is vegan as you prefer, but it is not Chinese and carries no heat. It is only slightly different from what you asked for.",
+          "seconds": 7.06,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_a_all_align",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The Spinach Frittata is Continental, eggetarian and mild, matching all three preferences you set.",
+          "raw": "The Spinach Frittata is Continental, eggetarian and mild, matching all three preferences you set.",
+          "seconds": 4.84,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 0,
+          "diff_total": 0,
+          "facts": {
+            "cuisine_matches": true,
+            "cuisine_differs": false,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_b_cuisine_differs",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The Menemen Skillet is eggetarian and mild as you prefer, though it is not Continental.",
+          "raw": "The Menemen Skillet is eggetarian and mild as you prefer, though it is not Continental.",
+          "seconds": 4.81,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 1,
+          "concise": true,
+          "diff_covered": 1,
+          "diff_total": 1,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": true,
+            "spice_differs": false,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        },
+        {
+          "name": "g3_c_cuisine_and_spice",
+          "category": "P8_contrastive",
+          "group": "group_3_continental_egg_mild",
+          "output": "The dish is eggetarian as you prefer, but it is multi-cuisine rather than Continental and extra hot rather than mild. It is only slightly different from what you asked for.",
+          "raw": "The dish is eggetarian as you prefer, but it is multi-cuisine rather than Continental and extra hot rather than mild. It is only slightly different from what you asked for.",
+          "seconds": 5.71,
+          "v2_failure_classes": [],
+          "errors": [
+            "PASS"
+          ],
+          "passed": true,
+          "detail": [],
+          "sentences": 2,
+          "concise": true,
+          "diff_covered": 2,
+          "diff_total": 2,
+          "facts": {
+            "cuisine_matches": false,
+            "cuisine_differs": true,
+            "spice_matches": false,
+            "spice_differs": true,
+            "dietary_identical": true,
+            "dietary_compatible": true,
+            "unset": []
+          }
+        }
+      ]
+    }
+  },
+  "scoring_note": "Re-scored after one detector correction found during the M07.6 manual review: the enumeration check counted attribute VALUES, so 'extra hot' registered as two items ('hot' + 'extra hot') and wrongly flagged a correct sentence. It now counts DIMENSIONS. Applied uniformly to all four systems over the saved generations; nothing was regenerated, so system-to-system comparison stays exact."
+}

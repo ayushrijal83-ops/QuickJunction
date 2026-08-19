@@ -54,7 +54,8 @@ DATASET_VERSIONS = {
         "output": BASE_DIR / "models" / "qwen3-0.6b-quickjunction-lora-v4",
     },
 }
-DEFAULT_DATASET_VERSION = "v2"
+# v4 since M07.7, matching the adapter the application now loads.
+DEFAULT_DATASET_VERSION = "v4"
 
 MAX_LENGTH = 320
 
