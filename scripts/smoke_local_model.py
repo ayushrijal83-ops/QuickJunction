@@ -1,3 +1,23 @@
+"""Standalone smoke test for the local base model.
+
+    python scripts/smoke_local_model.py
+
+Loads models/Qwen3-0.6B-Base and generates once, to prove the weights and the
+AI dependency stack are present on this machine. It exercises the *base*
+model only -- it does not attach the V4 adapter and is not part of the
+application's inference path (see app/services/local_llm.py for that).
+
+The model path resolves the same way the application resolves it: the
+LLM_MODEL_PATH environment variable if set, otherwise models/Qwen3-0.6B-Base
+relative to the repository root. Nothing here is machine-specific.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
@@ -5,7 +25,19 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 # Configuration
 # ============================================================
 
-MODEL_PATH = r"D:\QuickJunction\models\Qwen3-0.6B-Base"
+# Repository root, derived from this file's own location so the script works
+# from any working directory and on any machine.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Same variable and same default the application uses (config.py::BaseConfig).
+MODEL_PATH = os.environ.get("LLM_MODEL_PATH", str(BASE_DIR / "models" / "Qwen3-0.6B-Base"))
+
+if not Path(MODEL_PATH).is_dir():
+    print(f"Base model not found at: {MODEL_PATH}")
+    print("The models/ directory is git-ignored and must be copied separately;")
+    print("see the 'New machine / handoff setup' section of README.md.")
+    print("Override the location with the LLM_MODEL_PATH environment variable.")
+    sys.exit(1)
 
 # ============================================================
 # Device

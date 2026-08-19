@@ -1,7 +1,19 @@
 """Build train/validation JSONL from a hand-authored seed file.
 
-    python scripts/build_dataset.py            # v2 (current)
-    python scripts/build_dataset.py --version v1
+    python scripts/build_dataset.py                 # v2 -- the historical default
+    python scripts/build_dataset.py --version v4    # the production dataset
+    python scripts/build_dataset.py --all           # every version
+
+**The production model is trained on v4**, not on this script's default.
+``DEFAULT_VERSION`` below is deliberately left at ``v2``: it is the value M07.1
+shipped, nothing in the running application depends on it, and changing it
+would silently alter what a bare invocation rebuilds. Pass ``--version``
+explicitly. (``training/train_lora.py`` is separate and *does* default to v4,
+matching the adapter in production.)
+
+Note that running this script is **not** part of setting the project up --
+the processed splits are committed, and the production adapter is a finished
+artifact that is copied in rather than rebuilt.
 
 Reads  data/raw/seed_examples[_v2].jsonl   (manually written, one JSON object per line)
 Writes data/processed/<version>/train.jsonl

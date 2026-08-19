@@ -1,6 +1,27 @@
-# AI — local Qwen integration (Milestones 07, 07.1, 08 and 07.2)
+# AI — local Qwen integration (Milestones 07 through 07.7)
 
-> **M07.1 status:** the dataset was rebalanced (60 → 150 examples) and a
+> ## Current production status
+>
+> **The production adapter is v4** — `models/qwen3-0.6b-quickjunction-lora-v4`
+> — promoted in M07.7 and the **final selected model**. No further training is
+> planned.
+>
+> v4 ships together with the **deterministic preference safeguard** in
+> `app/services/local_llm.py`, which is part of production behaviour, not an
+> optional extra: v4 alone scored 23/25 on the held-out production evaluation
+> and **25/25 with the safeguard**, with every failure class at zero and
+> contrastive tracking at 9/9. See §17 and §18.
+>
+> **v1, v2 and v3 are historical comparison models.** They remain on disk for
+> reproducibility and are not used in production.
+>
+> Everything below is a milestone-by-milestone record. Status lines inside a
+> milestone section describe what was true **at that milestone** and are left
+> intact deliberately; this banner is the authority on the current state.
+
+---
+
+> **M07.1 status (historical):** the dataset was rebalanced (60 → 150 examples) and a
 > second LoRA adapter was trained. Evaluation on held-out scenarios showed
 > **v1 5/8 → v2 8/8**, so **V2 replaced V1 as the default adapter**. The M07
 > adapter is retained on disk and is still selectable. See §11.
@@ -92,20 +113,24 @@ Fully documented in [`data/README.md`](../data/README.md). Summary:
 | --- | --- |
 | Source | **hand-authored for this project** — not scraped, not downloaded, not LLM-generated |
 | Raw (v1) | `data/raw/seed_examples.jsonl` — 60 examples |
-| Raw (v2, **trained, in use**) | `data/raw/seed_examples_v2.jsonl` — 150 examples — see §11 |
-| Raw (v3, **authored, not trained**) | `data/raw/seed_examples_v3.jsonl` — 200 examples — see §13 |
+| Raw (v2, trained; historical) | `data/raw/seed_examples_v2.jsonl` — 150 examples — see §11 |
+| Raw (v3, trained; historical) | `data/raw/seed_examples_v3.jsonl` — 200 examples — see §13 |
+| Raw (v4, **trained — PRODUCTION**) | `data/raw/seed_examples_v4.jsonl` — 240 examples — see §15 |
 | Train / validation (v1) | 50 / 10 |
 | Train / validation (v2) | 120 / 30 |
 | Train / validation (v3) | 161 / 39 |
-| Categories | 10 in v1, 15 in v2, 13 in v3 |
-| Format | JSONL: `category`, `instruction`, `input`, `output` (+ optional `group_id` in v3) |
+| Train / validation (v4) | **195 / 45** |
+| Categories | 10 in v1, 15 in v2, 13 in v3, 15 in v4 |
+| Format | JSONL: `category`, `instruction`, `input`, `output` (+ optional `group_id` in v3/v4) |
 | Split | deterministic, content-addressed (SHA-256), no RNG |
 
-Regenerate with `python scripts/build_dataset.py [--version v1|v2|v3]` —
+Regenerate with `python scripts/build_dataset.py [--version v1|v2|v3|v4]` —
 byte-reproducible.
 
-> **V3 is a dataset only.** No V3 adapter exists, no V3 training run has been
-> performed, and `LLM_ADAPTER_PATH` still points at the V2 adapter.
+> **Note (historical):** when §13 was written, v3 was a dataset only. It was
+> subsequently trained (§16-equivalent work in M07.2/M07.5) and evaluated, and
+> **v4 is now the production adapter** — see the banner at the top of this
+> file and §18.
 
 ## 4. Training
 
@@ -529,10 +554,11 @@ makes the generations byte-identical between runs:
 | --- | --- | --- |
 | Base Qwen3-0.6B | 8/8 | 10/32 |
 | M07 adapter (v1) | 5/8 | 12/32 |
-| **M07.1 adapter (v2, in use)** | **8/8** | **16/32** |
+| **M07.1 adapter (v2, in use at M08)** | **8/8** | **16/32** |
 
 No regression, so **no retraining was performed**. Both adapters remain on
-disk; `LLM_ADAPTER_PATH` defaults to v2.
+disk; `LLM_ADAPTER_PATH` defaulted to v2 **at this milestone**. It now
+defaults to v4 (see §18).
 
 ## 12.2 Fallback behaviour verified live
 
