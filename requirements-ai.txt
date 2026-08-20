@@ -14,11 +14,40 @@
 #
 # ---------------------------------------------------------------------
 # Corrected in M07. The previous version of this file did not describe the
-# installed environment: it claimed torch==2.13.0 and transformers==5.15.0
-# (neither version exists), and transformers/accelerate/safetensors were in
-# fact not installed at all, so the "verified to load on CPU" claim could
-# not be reproduced. Every pin below was verified against the actually
-# installed, working environment -- see docs/AI.md.
+# installed environment: it claimed torch==2.13.0 and transformers==5.15.0,
+# and transformers/accelerate/safetensors were in fact not installed at all,
+# so the "verified to load on CPU" claim could not be reproduced. Every pin
+# below was verified against the actually installed, working environment --
+# see docs/AI.md.
+#
+# (Correction to that correction: the M07 note claimed those two versions did
+# not exist. They do -- both are published on PyPI. What was wrong was that
+# they did not describe this project's environment, which is the part that
+# mattered. The pins below are the ones V4 was trained and evaluated on.)
+# ---------------------------------------------------------------------
+#
+# VERSION COMPATIBILITY -- READ BEFORE CHANGING ANY PIN BELOW
+#
+# These pins are mutually consistent and were re-verified end to end on
+# 2026-08-20 in a clean virtual environment: `pip check` reports no broken
+# requirements, the V4 LoRA adapter loads through app/services/local_llm.py,
+# and the full suite passes 420/420.
+#
+# There is exactly one combination known to break, and this file does not
+# produce it:
+#
+#     peft==0.17.1  +  transformers 5.x
+#       -> ImportError: cannot import name 'HybridCache' from 'transformers'
+#
+# peft 0.17.1 imports HybridCache from transformers at peft/peft_model.py;
+# that symbol was removed in transformers 5.0. The failure therefore only
+# appears on a machine whose transformers has drifted ABOVE the 4.57.1
+# pinned here -- installing this file as written never hits it.
+#
+# The symptom is quiet rather than loud: local_llm catches the ImportError,
+# logs "Could not load LoRA adapter; continuing with base model", and serves
+# the untuned base model. If you see that line, your environment has drifted
+# from these pins. The fix is to restore them, not to bump peft.
 # ---------------------------------------------------------------------
 
 # CPU build. No GPU is required or assumed anywhere in this project.
