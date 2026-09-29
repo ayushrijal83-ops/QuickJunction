@@ -28,7 +28,7 @@ from app.services.menu import (
     list_public_menu_items,
     sync_menu_item_ingredients,
 )
-from tests.conftest import make_category, make_menu_item, make_user
+from tests.conftest import rejected_by_check_constraint, make_category, make_menu_item, make_user
 
 ADMIN_PASSWORD = "correct-horse-1"
 
@@ -159,7 +159,7 @@ def test_7b_invalid_enum_value_rejected_at_the_database_too(client, db):
     Python-side Enum validation, so this only passes if the database
     itself enforces the constraint."""
     category = make_category()
-    with pytest.raises(IntegrityError):
+    with rejected_by_check_constraint():
         db.session.execute(
             sa.text(
                 "INSERT INTO menu_items "

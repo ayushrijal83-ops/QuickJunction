@@ -38,9 +38,15 @@ def test_testing_configuration(app: Flask) -> None:
     assert app.config["TESTING"] is True
     assert app.config["DEBUG"] is False
     assert app.config["ENV_NAME"] == "testing"
-    # Tests must never write to a log file or hit a real database.
+    # Tests must never write to a log file or hit a real database. SQLite by
+    # default; an opt-in MySQL run (TEST_DATABASE_URL, M10 verification) must
+    # use a disposable *_test database, never the application's own.
     assert app.config["LOG_TO_FILE"] is False
-    assert "mysql" not in app.config["SQLALCHEMY_DATABASE_URI"]
+    from tests.conftest import assert_disposable_test_database
+
+    assert_disposable_test_database(app.config["SQLALCHEMY_DATABASE_URI"])
+    if "TEST_DATABASE_URL" not in os.environ:
+        assert "mysql" not in app.config["SQLALCHEMY_DATABASE_URI"]
 
 
 # 3. Health endpoint works -------------------------------------------------

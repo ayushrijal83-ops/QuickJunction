@@ -6,9 +6,12 @@ suite runs with no MySQL server and touches no real data.
 
 from __future__ import annotations
 
+import os
 import re
 
 import pytest
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError, OperationalError
 from flask import Flask
 from flask.testing import FlaskClient
 
@@ -26,9 +29,49 @@ _CSRF_TAG_RE = re.compile(r'<input[^>]*name="csrf_token"[^>]*>')
 _VALUE_RE = re.compile(r'value="([^"]+)"')
 
 
+def assert_disposable_test_database(uri: str) -> None:
+    """Every test drop_all()s its database. An opt-in MySQL run
+    (TEST_DATABASE_URL) must therefore target a dedicated ``*_test`` database
+    and never the application's own DATABASE_URL."""
+    url = make_url(uri)
+    if url.get_backend_name() == "sqlite":
+        return
+    app_db = make_url(os.environ["DATABASE_URL"]).database if os.environ.get("DATABASE_URL") else None
+    assert url.database and url.database.endswith("_test") and url.database != app_db, (
+        f"refusing to run tests against database {url.database!r}")
+
+
+def rejected_by_check_constraint():
+    """A CHECK violation surfaces as IntegrityError on SQLite but as
+    OperationalError (errno 3819) through PyMySQL. The message match keeps a
+    genuine operational failure (e.g. a lost connection) from passing."""
+    return pytest.raises((IntegrityError, OperationalError), match=r"(?i)check constraint")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_schema_for_mysql_migration_tests(request):
+    """Migration tests assume an empty database. On SQLite each gets a fresh
+    in-memory one for free; an opt-in MySQL run shares one ``*_test``
+    database, so wipe it first or one test's leftovers break the next."""
+    uri = os.environ.get("TEST_DATABASE_URL", "")
+    if "migration" in request.module.__name__ and uri.startswith("mysql"):
+        import sqlalchemy as sa
+
+        assert_disposable_test_database(uri)
+        engine = sa.create_engine(uri)
+        with engine.begin() as conn:
+            conn.execute(sa.text("SET FOREIGN_KEY_CHECKS = 0"))
+            for table in sa.inspect(conn).get_table_names():
+                conn.execute(sa.text(f"DROP TABLE `{table}`"))  # names come from the server, not input
+            conn.execute(sa.text("SET FOREIGN_KEY_CHECKS = 1"))
+        engine.dispose()
+    yield
+
+
 @pytest.fixture
 def app() -> Flask:
     application = create_app("testing")
+    assert_disposable_test_database(application.config["SQLALCHEMY_DATABASE_URI"])
     with application.app_context():
         _db.create_all()
         yield application

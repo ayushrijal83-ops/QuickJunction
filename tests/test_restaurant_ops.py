@@ -25,7 +25,7 @@ from app.services.orders import (
     update_order_status,
 )
 from app.services.tables import TableError, change_table_status, create_table
-from tests.conftest import csrf_token, make_category, make_menu_item, make_user
+from tests.conftest import csrf_token, rejected_by_check_constraint, make_category, make_menu_item, make_user
 
 PASSWORD = "correct-horse-1"
 
@@ -291,12 +291,12 @@ def test_capacity_validated(db, capacity):
 
 
 def test_database_enforces_capacity_and_status(db):
-    with pytest.raises(sa.exc.IntegrityError):
+    with rejected_by_check_constraint():
         _db.session.execute(sa.text(
             "INSERT INTO restaurant_tables (name, capacity, status, created_at, updated_at)"
             " VALUES ('X', 0, 'available', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
     _db.session.rollback()
-    with pytest.raises(sa.exc.IntegrityError):
+    with rejected_by_check_constraint():
         _db.session.execute(sa.text(
             "INSERT INTO restaurant_tables (name, capacity, status, created_at, updated_at)"
             " VALUES ('Y', 2, 'haunted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
@@ -349,7 +349,7 @@ def test_invalid_source_and_unseatable_table_rejected(db):
 
 def test_database_enforces_source_table_rule(db):
     order = place(customer())
-    with pytest.raises(sa.exc.IntegrityError):
+    with rejected_by_check_constraint():
         _db.session.execute(sa.text("UPDATE orders SET source = 'dine_in' WHERE id = :i"), {"i": order.id})
         _db.session.flush()
     _db.session.rollback()

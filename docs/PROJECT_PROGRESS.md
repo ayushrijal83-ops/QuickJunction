@@ -40,7 +40,7 @@ customer cancellation and sales reporting.**
 | 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete |
 | — | Payment capture/refunds, tax/discounts, production deployment | ⬜ Not started |
 
-**Test suite: 587 passing, 0 failing** (as of M10; `pytest`; in-memory SQLite for
+**Test suite: 588 passing, 2 skipped (MySQL-only), 0 failing on SQLite; 589 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M10; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1156,7 +1156,8 @@ No schema change was made in M08; no migration was added.
 | 26a | Logout revokes **all** of that user's sessions, not just the current device — a deliberate consequence of using one counter instead of per-session state | logging out on a phone signs the account out on a laptop too |
 | 29 | **Test-harness weakness**: the pytest `app` fixture holds one application context open, so `g.current_user` persists across requests and clients within a test. Production is unaffected (one context per request), but identity-switching tests can pass for the wrong reason unless they clear it | older suites not yet audited for this |
 | 27 | AI explanation takes ~9 s per request on CPU after the model is loaded (23 s including first load) | acceptable on its own route; would not be acceptable inline |
-| 30 | Migration `b5e2f8c41a07` verified on SQLite and its MySQL DDL reviewed offline, but **not yet applied to the live MySQL server** | run `flask db upgrade` on MySQL before relying on M10 there |
+| 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
+| 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
 | 31 | No payment/tax/discount/refund records; sales treat `completed` as paid and report those three figures as 0.00 ("not recorded") | reports are revenue-accurate but cannot show real tax or refunds |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
@@ -1183,8 +1184,9 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | **587 passing, 0 failing, 0 skipped**, 24 warnings (all the pre-existing `env.py` deprecation) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1 |
+| Tests | SQLite **588 passed, 2 skipped**; MySQL **589 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 2 (MySQL-only) |
+| Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
 | Migrations | **7 revisions, head = `b5e2f8c41a07`** (Phase 3 `7c4e1a9b52d3` staff approval; M10 tables/reservations/orders) |
 | Tables | 11: previous 9 + `restaurant_tables`, `reservations` |
 | Models | 11 modules in `app/models/` |
@@ -1202,7 +1204,7 @@ email verification · staff queue pagination/filtering.
 | Recommendation engine | deterministic TF-IDF + cosine similarity, in-process; **no LLM** |
 | Frontend | Bootstrap 5.3.3, vendored locally (no CDN); 1 base layout + 3 partials + 19 pages |
 | Database (tests) | in-memory SQLite; migration tests use temporary on-disk SQLite |
-| Database (target) | **MySQL 8.0.46 — verified end to end in M08** |
+| Database (target) | **MySQL 8.0.46 — verified end to end in M08; head `b5e2f8c41a07` applied and verified in M10** |
 | Runtime deps | pinned in `requirements.txt`; now includes scikit-learn/scipy/numpy |
 
 ---
@@ -1857,9 +1859,8 @@ policy as earlier revisions) and drops everything; no order row is lost.
 Verified: `tests/test_migrations.py` (migrated schema == models across all 11
 tables, round trip) and `tests/test_ops_migration.py` (pre-existing orders
 backfilled `online`/NULL, DB rejects dine-in without table, `served`
-accepted, downgrade keeps both orders). MySQL DDL rendered offline
-(`flask db upgrade --sql`) and reviewed. **Not yet applied to a live MySQL
-server** — see known issue #30.
+accepted, downgrade keeps both orders). **Applied to live MySQL 8.0.46 and
+verified** — see "M10 final verification" below.
 
 ### Indexes
 
@@ -1917,6 +1918,103 @@ views; no new secrets, debug code or dependencies.
 - `scripts/seed_demo.py` does not seed tables yet (an edit was declined during
   the milestone); an admin adds them at `/admin/tables/new`.
 
+### M10 final verification — real MySQL (2026-09-29) ✅ production-verified
+
+Performed against the project's live **MySQL 8.0.46** database
+(`quickjunctiondb`, REPEATABLE-READ, server clock UTC+05:45), not SQLite.
+
+**Migration.** Live DB was at `7c4e1a9b52d3` (5 users, 2 orders, 18 menu
+items). A `mysqldump --single-transaction` backup was taken first (kept
+outside the repo). `flask db upgrade` applied `b5e2f8c41a07` with **no
+error** — including `ck_orders_source_table` alongside the `table_id`
+`ON DELETE RESTRICT` foreign key, the combination previously only reviewed
+offline. `flask db current` → **`b5e2f8c41a07 (head)`**. `flask db check`
+reports only the long-standing enum-CHECK autogenerate false positive
+(documented since M03/M04) — no column, table, index or FK drift. Existing
+data intact: both orders backfilled `online`/no table, counts and
+`order_items` price snapshots unchanged.
+
+**Schema (from `information_schema`).** `restaurant_tables` and
+`reservations` present, InnoDB; every M10 column with the expected type and
+default; CHECKs `ck_restaurant_tables_capacity_range`, `…_status`,
+`ck_reservations_guest_count_positive`, `ck_reservations_status`,
+`ck_orders_source`, `ck_orders_cancellation_actor`, `ck_orders_source_table`,
+`ck_orders_status` (now includes `served`); FKs all `RESTRICT`; indexes
+`uq_reservations_table_slot` (unique), `ix_reservations_user_id`,
+`ix_reservations_date_time`, `ix_orders_table_id`, `ix_orders_created_at`.
+
+**Direct constraint probes — 21/21 as expected**, inside one transaction
+that was rolled back (0 rows left): rejected dine-in without table,
+takeaway/delivery/online with table, capacity 0 and 51, duplicate table
+name, invalid table/order status, unknown source, nonexistent table (FK),
+guest count 0, deleting a table referenced by orders, and a **duplicate live
+reservation for the same slot (1062)**; accepted valid rows, `served`, and
+**two cancelled (`holds_slot` NULL) rows for the same slot** — confirming
+MySQL treats NULLs as distinct in the unique slot index.
+
+**Full suite on MySQL** (`TEST_DATABASE_URL` → a disposable
+`quickjunction_test` database; the live DB is never used by tests):
+**589 passed, 1 skipped, 0 failed**, 18 warnings, 248 s. SQLite:
+**588 passed, 2 skipped** (the MySQL-only race tests), 24 warnings. All
+warnings are the pre-existing `migrations/env.py` deprecation (#13).
+
+The first MySQL run had 7 failures, fixed by category:
+
+| Category | Failure | Fix |
+| --- | --- | --- |
+| **A — real bug** | `b5e2f8c41a07.downgrade()` dropped `ix_orders_table_id` and `ix_reservations_user_id` while foreign keys still needed them → MySQL 1553; a real `flask db downgrade` would have stopped half-way (MySQL DDL is non-transactional) | drop FKs before indexes; drop `reservations` without dropping its indexes first. Upgrade path unchanged, so the live DB (upgraded before the fix) is identical. |
+| B — MySQL-specific | PyMySQL reports CHECK violations (3819) as `OperationalError`, SQLite as `IntegrityError` (`test_menu::test_7b`, 2 M10 tests, `test_ops_migration`) | `rejected_by_check_constraint()` in `tests/conftest.py`: accepts either class **only** if the message is a CHECK violation, so a lost connection cannot pass |
+| C — test infra | `test_foundation` asserted tests never use MySQL | now asserts the stronger rule: a MySQL test DB must be a `*_test` database and never the app's `DATABASE_URL` — also enforced in the `app` fixture, so `drop_all()` can never reach the live DB |
+| C — test infra | migration tests share one MySQL database (each gets a fresh in-memory DB on SQLite), so one test's leftovers broke the next | autouse fixture wipes the disposable test DB before migration tests on MySQL |
+| pre-existing | full downgrade-to-base fails on MySQL in **pre-M10** revisions (see #32) | not changed (historical migrations); `test_downgrade_and_reupgrade_are_reversible` skips on MySQL only, with the reason; still runs on SQLite. M10's own round trip is tested on MySQL by `test_ops_migration` |
+
+**Concurrency on MySQL** (`tests/test_mysql_concurrency.py`, runs only
+against MySQL): two threads, two pooled connections, barrier-synchronised,
+15 rounds per test, stable over 5 consecutive runs (75 + 75 contested races):
+- customer cancel vs staff start-preparing — **exactly one wins every
+  round**, final row is either `cancelled` with metadata or `preparing` with
+  none; never both. Non-vacuity: with the status condition removed from the
+  UPDATE, both succeeded (`['cancel', 'prepare']`) and the test failed.
+- same table/date/slot booking — **exactly one `ok`, one clean
+  `ReservationError` conflict**, exactly one live reservation.
+- Finding (test-only): a MySQL REPEATABLE-READ session that has already read
+  keeps its snapshot, so verification reads must end their transaction first
+  (`expire_all()` is not enough). The application is unaffected — the
+  conditional UPDATE and unique index use InnoDB's locking current read, and
+  services commit before refreshing.
+
+**End-to-end** (`tests/test_m10_end_to_end.py`, passes on MySQL and SQLite):
+customer logs in → lands on `/account/` dashboard → sees free tables →
+slot-aware search → books T01 (a forged `user_id` for another customer is
+ignored) → confirmation shows owner + `reserved_at` → listed under My
+reservations → another customer's reservation is 404 → dine-in order at T02
+with correct source/table → cancels while pending (actor/by/reason/time
+recorded) → staff board shows the active order, reservations list shows
+usernames only (no email) → staff start preparing another order → customer
+cancel of it is **409** and the order stays `preparing` → valid table
+transitions succeed, `available → cleaning` is refused → staff get 403 on
+reports → admin report for today: 2 completed sales = ₹1540.00, 3 placed,
+1 cancelled excluded, by source (dine-in 1, takeaway 1), by table (T01 1,
+T02 0), daily and hourly rows correct. Historical safety: menu repriced
+385 → 999 leaves the completed order at ₹770.00 with its 385.00 snapshot and
+table T01; cancellation metadata intact; a cancelled reservation keeps its
+row but frees its slot, which is then rebooked.
+
+**Security review.** Every M10 route carries `require_role` /
+`customer_required` / `login_required`; no route reads a user id or role from
+form, args, JSON or headers (grep-verified; spoofing tested); IDOR returns
+404 for orders and reservations; customer cancel is ownership-scoped inside
+the UPDATE; staff views show username only; all SQL is ORM or bound
+`sa.text` parameters (the one f-string, in the test wipe fixture, interpolates
+table names read from the server); no `|safe`; no secrets in source (the
+backup and DB password never printed or committed); state transitions are
+single conditional UPDATEs committed atomically. `.env` runs
+`APP_ENV=development` as MySQL `root` — acceptable locally, refused by
+`ProductionConfig` (see `docs/MYSQL_SETUP_HANDOFF.md` §5).
+
+**Verdict: M10 is production-verified on MySQL**, with the limitations
+listed under the M10 section and known issues #31–#32.
+
 ---
 
 ## Next milestone
@@ -1924,7 +2022,7 @@ views; no new secrets, debug code or dependencies.
 Recommended: **Payments** — a `Payment` record (method, amount, captured_at,
 refunded_amount) attached to orders, so "paid", refunds, tax and discounts
 become real figures in the existing reports instead of zeros; then auto-free
-tables on order completion and apply `b5e2f8c41a07` to the live MySQL server.
+tables on order completion.
 
 Carried over:
 

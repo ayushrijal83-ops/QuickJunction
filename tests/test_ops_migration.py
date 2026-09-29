@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 import sqlalchemy as sa
 from flask_migrate import downgrade, upgrade
 
 from app import create_app
 from app.extensions import db
+from tests.conftest import rejected_by_check_constraint
 
 
 def test_existing_orders_backfilled_and_downgrade_keeps_them(tmp_path):
@@ -32,7 +32,7 @@ def test_existing_orders_backfilled_and_downgrade_keeps_them(tmp_path):
             assert [tuple(r) for r in rows] == [
                 ("completed", "online", None, None, 250), ("cancelled", "online", None, None, 250)]
             # The database itself now refuses a dine-in order without a table.
-            with pytest.raises(sa.exc.IntegrityError):
+            with rejected_by_check_constraint():
                 conn.execute(sa.text("UPDATE orders SET source = 'dine_in' WHERE id = 1"))
         with db.engine.begin() as conn:
             conn.execute(sa.text("UPDATE orders SET status = 'served' WHERE id = 1"))  # new status accepted

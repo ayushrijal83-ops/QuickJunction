@@ -152,10 +152,13 @@ def downgrade():
         batch_op.drop_constraint('ck_orders_source_table', type_='check')
         batch_op.drop_constraint('ck_orders_cancellation_actor', type_='check')
         batch_op.drop_constraint('ck_orders_source', type_='check')
-        batch_op.drop_index('ix_orders_created_at')
-        batch_op.drop_index('ix_orders_table_id')
+        # Foreign keys before indexes: MySQL refuses to drop an index a
+        # foreign key still depends on (error 1553) -- found by running this
+        # downgrade against MySQL 8.0.46; SQLite's batch rebuild never noticed.
         batch_op.drop_constraint('fk_orders_cancelled_by_id_users', type_='foreignkey')
         batch_op.drop_constraint('fk_orders_table_id_restaurant_tables', type_='foreignkey')
+        batch_op.drop_index('ix_orders_created_at')
+        batch_op.drop_index('ix_orders_table_id')
         batch_op.drop_column('cancellation_reason')
         batch_op.drop_column('cancellation_actor')
         batch_op.drop_column('cancelled_by_id')
@@ -168,8 +171,8 @@ def downgrade():
         batch_op.drop_constraint('ck_orders_status', type_='check')
         batch_op.create_check_constraint('ck_orders_status', _in('status', _STATUSES_BEFORE))
 
-    with op.batch_alter_table('reservations', schema=None) as batch_op:
-        batch_op.drop_index('ix_reservations_date_time')
-        batch_op.drop_index('ix_reservations_user_id')
+    # drop_table removes the table's indexes with it; dropping
+    # ix_reservations_user_id first fails on MySQL (error 1553: the user_id
+    # foreign key still needs it).
     op.drop_table('reservations')
     op.drop_table('restaurant_tables')
