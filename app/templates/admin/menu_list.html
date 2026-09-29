@@ -52,6 +52,8 @@
                 {% if current_user and current_user.role.value == "admin" %}
                   <a class="btn btn-sm btn-outline-primary"
                      href="{{ url_for('admin_menu.menu_edit', item_id=item.id) }}">Edit</a>
+                  <a class="btn btn-sm btn-outline-secondary"
+                     href="{{ url_for('inventory.recipe', item_id=item.id) }}">Recipe</a>
                 {% endif %}
               </td>
             </tr>

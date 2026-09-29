@@ -82,6 +82,13 @@ class AuditEvent(str, enum.Enum):
     ORDER_DISCOUNT_APPLIED = "order_discount_applied"
     PRICING_SETTINGS_CHANGED = "pricing_settings_changed"
 
+    # Inventory (M13). user_id is the acting staff/admin member. Automatic
+    # sale deductions are not audited separately: each is a stock_movements
+    # row carrying its order id, and the order completion itself is audited.
+    STOCK_ITEM_SAVED = "stock_item_saved"
+    STOCK_MOVEMENT_RECORDED = "stock_movement_recorded"
+    RECIPE_UPDATED = "recipe_updated"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

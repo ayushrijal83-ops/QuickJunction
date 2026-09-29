@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ ingredient.name }} &mdash; Inventory{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('inventory.stock') }}">Inventory</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ ingredient.name }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h3 mb-1">{{ ingredient.name }}</h1>
+    <p class="mb-0">
+      <strong>{{ ingredient.current_quantity | round(3) }} {{ ingredient.unit.value }}</strong> in stock
+      &middot; low at {{ ingredient.minimum_quantity | round(3) }}
+      {% if ingredient.current_quantity < 0 %}<span class="badge text-bg-danger">short</span>
+      {% elif ingredient.is_low %}<span class="badge text-bg-warning">low</span>{% endif %}
+      {% if not ingredient.is_active %}<span class="badge text-bg-light border">not tracked</span>{% endif %}
+    </p>
+  </div>
+  {% if current_user.role.value == "admin" %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('inventory.edit', ingredient_id=ingredient.id) }}">Edit</a>
+  {% endif %}
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Record a movement</strong></div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('inventory.movement', ingredient_id=ingredient.id) }}" novalidate>
+          {{ form.csrf_token }}
+          <div class="mb-2">
+            <label class="form-label small" for="movement_type">Type</label>
+            <select class="form-select form-select-sm" id="movement_type" name="movement_type">
+              {% for t in movement_types %}<option value="{{ t.value }}">{{ t.value | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small" for="quantity">Quantity ({{ ingredient.unit.value }})</label>
+            <input class="form-control form-control-sm" id="quantity" name="quantity" inputmode="decimal">
+            <div class="form-text">Purchase, restock and waste take a positive amount; an adjustment may be negative.</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small" for="note">Note</label>
+            <input class="form-control form-control-sm" id="note" name="note" maxlength="255">
+            <div class="form-text">Required for waste and adjustments.</div>
+          </div>
+          <button class="btn btn-sm btn-primary w-100" type="submit">Record</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Movement history</strong></div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr><th scope="col">When</th><th scope="col">Type</th><th scope="col" class="text-end">Change</th><th scope="col" class="text-end">After</th><th scope="col">By</th><th scope="col">Note</th></tr>
+          </thead>
+          <tbody>
+            {% for m in movements %}
+              <tr>
+                <td class="small text-secondary">{{ m.created_at.strftime("%d %b %Y, %H:%M") }}</td>
+                <td>{{ m.movement_type.value }}</td>
+                <td class="text-end {{ 'text-danger' if m.quantity_change < 0 else 'text-success' }}">{{ "%+.3f" | format(m.quantity_change) }}</td>
+                <td class="text-end">{{ m.quantity_after | round(3) }}</td>
+                <td>{{ m.actor.username if m.actor else "system" }}</td>
+                <td class="small">{{ m.note or "" }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" class="text-secondary">No movements yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

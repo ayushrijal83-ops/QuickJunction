@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, checkbox, submit %}
+{% block title %}{{ "Edit" if ingredient else "New" }} ingredient &mdash; Inventory{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('inventory.stock') }}">Inventory</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ "Edit" if ingredient else "New" }}</li>
+  </ol>
+</nav>
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <h1 class="h3 mb-3">{{ "Edit " ~ ingredient.name if ingredient else "New ingredient" }}</h1>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.name, autofocus=true) }}
+          <div class="mb-3">
+            <label class="form-label" for="unit">Unit</label>
+            <select class="form-select" id="unit" name="unit">
+              {% for u in units %}<option value="{{ u.value }}" {% if form.unit.data == u.value %}selected{% endif %}>{{ u.value }}</option>{% endfor %}
+            </select>
+          </div>
+          {{ field(form.minimum_quantity, inputmode="decimal", help="Flagged as low stock at or below this amount.") }}
+          {{ checkbox(form.is_active, help="Untracked ingredients stay on menus but are not checked at checkout or deducted on sale.") }}
+          <p class="small text-secondary">Opening stock is entered as a <em>purchase</em> on the ingredient page, so it appears in the movement history.</p>
+          <div class="d-flex gap-2">
+            {{ submit("Save ingredient") }}
+            <a class="btn btn-outline-secondary" href="{{ url_for('inventory.stock') }}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

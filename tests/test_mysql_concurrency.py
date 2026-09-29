@@ -261,3 +261,54 @@ def test_discount_vs_payment_payment_always_matches_final_total(app, db):
         assert payment.amount == order.total, (payment.amount, order.total, results)
         assert (order.discount_amount > 0) == ("discounted" in results)
     assert outcomes <= {("discount-refused", "paid"), ("discounted", "paid")}
+
+
+# --- Milestone 13: inventory -------------------------------------------------------
+
+
+def test_concurrent_movements_and_sale_deductions_never_lose_an_update(app, db):
+    """Atomic ``current_quantity = current_quantity + delta`` on a real server:
+    a purchase and two order completions hitting the same ingredient at once
+    must land exactly, and each change must have its ledger row."""
+    from decimal import Decimal
+
+    from app.models.ingredient import Ingredient
+    from app.models.stock_movement import StockMovement
+    from app.services.inventory import add_to_recipe, record_movement, save_ingredient
+    from tests.conftest import make_category, make_menu_item
+    from tests.test_restaurant_ops import set_status
+
+    boss_id = make_user(username="stockboss", email="sb@example.com", role=Role.ADMIN).id
+    buyer = make_user(username="stockbuyer", email="sbuy@example.com")
+    boss = _db.session.get(User, boss_id)
+    item = make_menu_item(category=make_category(name="Race Mains"), name="Race Burger", price="100.00")
+    bun = save_ingredient(None, "race bun", "piece", "0", True)
+    record_movement(bun, "purchase", "1000", "opening", boss)
+    add_to_recipe(item, bun, "1")
+    bun_id, item_id = bun.id, item.id
+
+    expected = Decimal("1000")
+    for _ in range(ROUNDS):
+        from app.services.orders import checkout
+        orders = [checkout(buyer.id, {str(item_id): 2}).id for _ in range(2)]
+        for oid in orders:
+            set_status(_db.session.get(Order, oid), OrderStatus.READY)
+
+        def complete(oid):
+            def act():
+                update_order_status(_db.session.get(Order, oid), OrderStatus.COMPLETED,
+                                    actor=_db.session.get(User, boss_id))
+                return "done"
+            return act
+
+        def purchase():
+            record_movement(_db.session.get(Ingredient, bun_id), "purchase", "5", "race", _db.session.get(User, boss_id))
+            return "bought"
+
+        results = _race(app, complete(orders[0]), complete(orders[1]), purchase)
+        assert sorted(map(str, results)) == ["bought", "done", "done"], results
+        expected += Decimal("5") - Decimal("4")
+        _db.session.rollback()
+        assert _db.session.get(Ingredient, bun_id).current_quantity == expected
+        ledger = sum(m.quantity_change for m in _db.session.query(StockMovement).filter_by(ingredient_id=bun_id))
+        assert ledger == expected  # every change is on the ledger

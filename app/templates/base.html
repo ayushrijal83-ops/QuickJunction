@@ -44,6 +44,7 @@
             <li class="nav-item"><a class="nav-link" href="{{ url_for('staff_orders.order_list') }}">Order queue</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('tables.board') }}">Tables</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('reservations.staff_list') }}">Reservations</a></li>
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('inventory.stock') }}">Inventory</a></li>
           {% endif %}
           {% if current_user.role.value == "admin" %}
             <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_menu.menu_list') }}">Manage menu</a></li>

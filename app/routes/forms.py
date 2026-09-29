@@ -166,6 +166,30 @@ class PricingSettingsForm(FlaskForm):
     submit = SubmitField("Save settings")
 
 
+class IngredientForm(FlaskForm):
+    """Definition only -- quantities change through movements, never here."""
+
+    name = StringField("Name", validators=[DataRequired(), Length(max=80)])
+    unit = StringField("Unit", validators=[DataRequired(), Length(max=16)])
+    minimum_quantity = StringField("Low-stock level", validators=[DataRequired(), Length(max=16)])
+    is_active = BooleanField("Tracked in inventory", default=True)
+    submit = SubmitField("Save ingredient")
+
+
+class StockMovementForm(FlaskForm):
+    movement_type = StringField(validators=[DataRequired(), Length(max=16)])
+    quantity = StringField("Quantity", validators=[DataRequired(), Length(max=16)])
+    note = StringField("Note", validators=[Optional(), Length(max=255)])
+    submit = SubmitField("Record")
+
+
+class RecipeForm(FlaskForm):
+    """CSRF carrier: the per-ingredient ``q_<id>`` quantities and the optional
+    add-ingredient pair are parsed and validated by app/services/inventory.py."""
+
+    submit = SubmitField("Save recipe")
+
+
 class RefundForm(FlaskForm):
     amount = StringField("Refund amount", validators=[DataRequired(), Length(max=12)])
     reason = StringField("Reason", validators=[Optional(), Length(max=255)])

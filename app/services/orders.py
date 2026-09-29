@@ -36,6 +36,7 @@ from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import Role, User
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available_menu_item
 from app.services.errors import ValidationError
+from app.services.inventory import deduct_for_order, shortages
 from app.services.pricing import current_settings, price
 from app.services.tables import UNSEATABLE_STATUSES, release_table_if_idle
 
@@ -134,6 +135,10 @@ def checkout(
 
     if problems:
         raise CheckoutError({"cart": problems})
+
+    short = shortages({line.menu_item_id: line.quantity for line, _ in resolved})
+    if short:
+        raise CheckoutError({"cart": [f"Sorry, we are out of {', '.join(short)} for this order right now."]})
 
     # Re-validated here, not only in the route: the channel rule is a
     # business rule, and callers other than the checkout route exist.
@@ -298,6 +303,10 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
         won = db.session.execute(stmt).rowcount == 1
         if won and order.table_id is not None and new_status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
             release_table_if_idle(order.table_id)
+        if won and new_status == OrderStatus.COMPLETED:
+            # The sale's stock deduction commits with the completion or not at
+            # all; idempotent (M13, app/services/inventory.py).
+            deduct_for_order(order.id, actor.id if actor else None)
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()

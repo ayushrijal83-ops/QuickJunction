@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Inventory &mdash; Quick Junction Staff{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Inventory</h1>
+    <p class="text-secondary mb-0">Quantities change only through recorded movements. Stock counts, not valuation &mdash; no cost data is stored.</p>
+  </div>
+  <div class="d-flex gap-2 align-items-end">
+    <form method="get" class="d-flex gap-2 align-items-end">
+      <div>
+        <label class="form-label small mb-0" for="days">Activity window</label>
+        <select class="form-select form-select-sm" id="days" name="days" onchange="this.form.submit()">
+          {% for d in windows %}<option value="{{ d }}" {% if d == days %}selected{% endif %}>Last {{ d }} days</option>{% endfor %}
+        </select>
+      </div>
+      <noscript><button class="btn btn-sm btn-outline-secondary" type="submit">Show</button></noscript>
+    </form>
+    {% if current_user.role.value == "admin" %}
+      <a class="btn btn-sm btn-primary" href="{{ url_for('inventory.new') }}">Add ingredient</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if low %}
+  <div class="alert alert-warning">
+    <strong>Low stock:</strong>
+    {% for i in low %}<a class="alert-link" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">{{ i.name }}</a> ({{ i.current_quantity | round(3) }} {{ i.unit.value }}){% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+{% endif %}
+
+{% if ingredients %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Ingredient</th>
+            <th scope="col" class="text-end">In stock</th>
+            <th scope="col" class="text-end">Low at</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="text-end">Used</th>
+            <th scope="col" class="text-end">Wasted</th>
+            <th scope="col" class="text-end">Bought / restocked</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i in ingredients %}
+            {% set t = totals.get(i.id, {}) %}
+            <tr {% if not i.is_active %}class="text-secondary"{% endif %}>
+              <td>{{ i.name }} <span class="small text-secondary">({{ i.unit.value }})</span></td>
+              <td class="text-end">{{ i.current_quantity | round(3) }}</td>
+              <td class="text-end">{{ i.minimum_quantity | round(3) }}</td>
+              <td>
+                {% if not i.is_active %}<span class="badge text-bg-light border">not tracked</span>
+                {% elif i.current_quantity < 0 %}<span class="badge text-bg-danger">short</span>
+                {% elif i.is_low %}<span class="badge text-bg-warning">low</span>
+                {% else %}<span class="badge text-bg-success">ok</span>{% endif %}
+              </td>
+              <td class="text-end">{{ (-(t.get(MovementType.SALE, 0))) | round(3) }}</td>
+              <td class="text-end">{{ (-(t.get(MovementType.WASTE, 0))) | round(3) }}</td>
+              <td class="text-end">{{ (t.get(MovementType.PURCHASE, 0) + t.get(MovementType.RESTOCK, 0)) | round(3) }}</td>
+              <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">Open</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white"><p class="mb-0">No ingredients yet.</p></div>
+{% endif %}
+{% endblock %}

@@ -4,10 +4,10 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-30 (end of Milestone 12)
-Current state: **Milestone 12 complete — tax and discount pricing on top of
-M11 payments/refunds and M10 restaurant operations, reservations,
-cancellation and sales reporting.**
+Last updated: 2026-09-30 (end of Milestone 13)
+Current state: **Milestone 13 complete — inventory and stock management on
+top of M12 tax/discounts, M11 payments/refunds and M10 restaurant
+operations, reservations, cancellation and sales reporting.**
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
 > Operations, Customer Dashboard, Table Reservation, Customer Order
@@ -41,9 +41,10 @@ cancellation and sales reporting.**
 | 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete (MySQL-verified) |
 | 11 | Payments, admin refunds, paid-order cancellation rule, automatic table release | ✅ Complete (live MySQL-verified) |
 | 12 | Tax (configurable, snapshotted) + staff/admin discounts | ✅ Complete (not yet applied to live DB) |
-| 13–16 | Inventory, kitchen operations, UI overhaul, final audit | ⬜ Planned |
+| 13 | Inventory: stock, recipes, movement ledger, sale deduction | ✅ Complete (not yet applied to live DB) |
+| 14–16 | Kitchen operations, UI overhaul, final audit | ⬜ Planned |
 
-**Test suite: 640 passing, 6 skipped (MySQL-only), 0 failing on SQLite; 645 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M12; `pytest`; in-memory SQLite by default for
+**Test suite: 665 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 671 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M13; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1162,7 +1163,9 @@ No schema change was made in M08; no migration was added.
 | 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
 | 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
 | 31 | ~~No payment/refund/tax/discount records~~ — **payments and refunds closed in M11; tax and discounts closed in M12** | — |
-| 34 | Migration `d7f1e3a9c2b4` (M12 pricing) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12 there |
+| 34 | Migrations `d7f1e3a9c2b4` (M12 pricing) and `e5b8c1d4f7a2` (M13 inventory) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12/M13 there |
+| 35 | Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative (shown "short"). Recipes are read at completion time, not snapshotted per order | deliberate — a served order is never blocked; staff correct counts with an adjustment |
+| 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
@@ -1189,15 +1192,15 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | SQLite **640 passed, 6 skipped**; MySQL **645 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 6 (MySQL-only, incl. M11/M12 races); M11 added payments 20; M12 added pricing 32 |
+| Tests | SQLite **665 passed, 7 skipped**; MySQL **671 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
-| Migrations | **9 revisions, head = `d7f1e3a9c2b4`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 pricing). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
-| Tables | 13: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings` |
-| Models | 13 modules in `app/models/` |
-| Services | 14 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`) |
+| Migrations | **10 revisions, head = `e5b8c1d4f7a2`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 `d7f1e3a9c2b4`; M13 inventory). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
+| Tables | 14: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings`, `stock_movements` |
+| Models | 14 modules in `app/models/` |
+| Services | 15 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`) |
 | Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
-| Audit events | 28 |
+| Audit events | 31 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
 | Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
 | Order statuses | 7 (`pending`, `confirmed`, `preparing`, `ready`, `served`, `completed`, `cancelled`) — `served` added in M10 |
@@ -2354,10 +2357,135 @@ race. No raw/f-string SQL, no `|safe`, no debug output, no secrets.
 
 ---
 
+## Milestone 13 — Inventory / stock management ✅
+
+Baseline: SQLite **640 passed, 6 skipped**; MySQL test DB **645 passed, 1
+skipped**. A practical restaurant inventory, not an ERP.
+
+### Architecture — extends, does not duplicate
+
+The M03 `Ingredient` and `MenuItemIngredient` tables were **extended** rather
+than a parallel inventory model added:
+
+- **`Ingredient`** + `unit` (`g`/`kg`/`ml`/`l`/`piece`), `current_quantity`,
+  `minimum_quantity` (CHECK ≥ 0), `is_active` ("tracked in inventory"),
+  `updated_at`. Quantities `Numeric(12,3)`.
+- **`MenuItemIngredient.quantity`** = the **recipe** amount per portion.
+  0 (server default) means "listed for recommendations, not stock-tracked"
+  — every link the menu form's comma list creates — so the menu form and
+  recommendations are unchanged, and editing a menu item's ingredient list
+  never erases a recipe amount (SQLAlchemy only inserts/deletes changed
+  association rows; tested).
+- **`StockMovement`** (`stock_movements`, new): the ledger — `movement_type`
+  (`purchase`, `restock`, `sale`, `waste`, `adjustment`), signed
+  `quantity_change`, `quantity_after`, `order_id` (sales only; CHECK),
+  `actor_id`, `note`, `created_at`.
+
+### Rules (`app/services/inventory.py`)
+
+- **Quantity never changes without a ledger row.** One private writer,
+  `_move`, applies `UPDATE … SET current_quantity = current_quantity +
+  :delta` (atomic under concurrency) and records the resulting level in the
+  same transaction. Creating/editing an ingredient never touches quantity;
+  opening stock is a PURCHASE.
+- **Sale deduction** happens inside the existing atomic `→ COMPLETED`
+  transition, in the same transaction (a failure rolls back both — tested
+  by injecting a failure after the deduction). Quantity = Σ portions ×
+  recipe amount over tracked recipe lines. **Idempotent twice over**: the
+  function skips ingredients already deducted for that order, and UNIQUE
+  `(order_id, ingredient_id)` rejects a second SALE row at the database.
+  Cancelled orders never deduct; a completed order cannot be cancelled.
+- **Insufficient stock** is refused **at checkout** ("Sorry, we are out of
+  bun, patty…"). Completion is never blocked — a served order must be able
+  to close — so concurrent orders can take stock negative; it shows as
+  **short** (#35).
+- **Low stock**: tracked and `current ≤ minimum` (with a minimum set) or
+  negative.
+- WASTE and ADJUSTMENT require a note. Quantities are Decimal, finite,
+  bounded (≤ 1,000,000), non-zero; WASTE is entered positive and stored
+  negative; ADJUSTMENT is signed.
+
+### Authorization
+
+| Action | Customer | STAFF | ADMIN |
+| --- | --- | --- | --- |
+| View stock, history, usage | ✗ 403 | ✓ | ✓ |
+| Record purchase / restock / waste | ✗ | ✓ | ✓ |
+| Record adjustment (count correction) | ✗ | ✗ (route + service) | ✓ |
+| Create/edit ingredients, recipes | ✗ | ✗ 403 | ✓ |
+
+Every manual change has an actor (the movement row) and an audit event;
+sales carry the completing staff member and the order id.
+
+### Routes / UI
+
+| Route | Role |
+| --- | --- |
+| `GET /staff/inventory?days=7\|30\|90` — stock list, status (ok / low / short / not tracked), low-stock banner, usage / wastage / purchases+restocks in the window | STAFF, ADMIN |
+| `GET /staff/inventory/<id>` — movement history (ledger with running level, actor, note) + record form | STAFF, ADMIN |
+| `POST /staff/inventory/<id>/movement` | STAFF, ADMIN (adjustment ADMIN only) |
+| `GET/POST /admin/inventory/new`, `/admin/inventory/<id>/edit` | ADMIN |
+| `GET/POST /admin/menu/<item_id>/recipe` — per-portion amounts, add an ingredient | ADMIN |
+
+Nav: **Inventory** for staff/admin; **Recipe** button on the admin menu list.
+Reports show quantities only — no cost is stored, so no valuation is claimed
+(#36).
+
+Audit events added: `stock_item_saved`, `stock_movement_recorded`,
+`recipe_updated` (31 total).
+
+### Migration
+
+**`e5b8c1d4f7a2`** (`down_revision = d7f1e3a9c2b4`): 5 ingredient columns +
+2 CHECKs; `menu_item_ingredients.quantity` + CHECK; `stock_movements` with 3
+FKs (RESTRICT), 3 CHECKs, the unique idempotency key and
+`ix_stock_movements_ingredient_created`; audit allow-list +3. Existing
+ingredients start at 0 and existing links at recipe 0 — no behaviour change
+until an admin enters stock and recipes. MySQL-safe downgrade (drop_table /
+column drops only). **Not applied to live `quickjunctiondb` yet (#34).**
+
+### Tests
+
+- `tests/test_inventory.py` (**25**): ingredient creation + validation (no
+  movement from a definition); purchase / restock / waste / adjustment
+  ledgered with correct running levels and actors; 9 invalid movements
+  (zero, negative, text, NaN, oversize, missing note for waste/adjustment,
+  manual "sale", unknown type); staff cannot adjust; recipe amounts survive
+  the menu form; exact deduction on completion, none before it; retried
+  processing deducts nothing; DB rejects a second SALE row; cancelled /
+  unfinished orders deduct nothing; untracked ingredients skipped; failed
+  completion rolls back the deduction; checkout refuses what cannot be made
+  (service + customer-facing message); served order completes even when
+  stock goes short; low-stock detection; RBAC (customer 403 ×5, staff view +
+  purchase allowed, admin pages 403, staff adjustment refused) + audit;
+  admin ingredient + recipe management + audit + low banner; CSRF.
+- `tests/test_mysql_concurrency.py` (+1, MySQL only): two order completions
+  and a purchase hit one ingredient simultaneously, 15 rounds — the level is
+  exact every round and always equals the ledger sum; stable over 3 runs.
+
+**Non-vacuity:** removing the idempotency skip → the DB unique key still
+refuses the duplicate (test fails loudly); removing the deduction call → 6
+tests fail; removing the checkout stock check → 2 fail. All restored.
+
+**Results:** SQLite **665 passed, 7 skipped** (640 + 25; +1 MySQL-only
+skip), 24 warnings. MySQL test DB **671 passed, 1 skipped** (#32), 18
+warnings, 736 s (run overlapped the SQLite run). 0 failures. No existing test
+needed changing (only the pinned table list gained `stock_movements`).
+
+### Security review
+
+All six routes `require_role`-gated as tabled; POSTs CSRF-protected; the
+service re-checks the ADJUSTMENT role; recipe form reads only `q_<int>` keys
+and refuses ingredients not linked to the item; all SQL via ORM/bound
+parameters; no `|safe`; no secrets or debug output. Customers see only an
+"out of …" message at checkout — never stock levels.
+
+---
+
 ## Next milestone
 
-**M13 — Inventory / stock** (per the fast-track plan). Also apply
-`d7f1e3a9c2b4` to the live database after a backup (#34).
+**M14 — Kitchen operations** (per the fast-track plan). Also apply
+`d7f1e3a9c2b4` and `e5b8c1d4f7a2` to the live database after a backup (#34).
 
 Carried over:
 

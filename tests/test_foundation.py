@@ -72,7 +72,7 @@ def test_database_configuration_loads(app: Flask) -> None:
         # Milestone 02 added auth/audit; Milestone 03 added the menu data
         # layer; Milestone 04 added cart/order placement/order history;
         # Milestone 10 added restaurant tables and reservations; Milestone 11
-        # payments; Milestone 12 pricing settings.
+        # payments; Milestone 12 pricing settings; Milestone 13 stock movements.
         assert set(db.metadata.tables) == {
             "users",
             "audit_logs",
@@ -87,6 +87,7 @@ def test_database_configuration_loads(app: Flask) -> None:
             "reservations",
             "payments",
             "pricing_settings",
+            "stock_movements",
         }
 
 

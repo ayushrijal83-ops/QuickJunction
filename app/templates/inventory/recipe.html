@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Recipe: {{ item.name }} &mdash; Quick Junction Admin{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('admin_menu.menu_list') }}">Menu</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Recipe: {{ item.name }}</li>
+  </ol>
+</nav>
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <h1 class="h3 mb-1">Recipe: {{ item.name }}</h1>
+    <p class="text-secondary">Amount used per portion. 0 keeps an ingredient listed on the menu without tracking its stock.
+      Stock is deducted when an order completes and checked at checkout.</p>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" novalidate>
+          {{ form.csrf_token }}
+          <table class="table align-middle">
+            <thead><tr><th scope="col">Ingredient</th><th scope="col" style="width:40%">Per portion</th></tr></thead>
+            <tbody>
+              {% for line in lines %}
+                <tr>
+                  <td><label for="q_{{ line.ingredient_id }}">{{ line.ingredient.name }}</label>
+                    {% if not line.ingredient.is_active %}<span class="badge text-bg-light border">not tracked</span>{% endif %}</td>
+                  <td><div class="input-group input-group-sm">
+                    <input class="form-control" id="q_{{ line.ingredient_id }}" name="q_{{ line.ingredient_id }}" inputmode="decimal" value="{{ line.quantity | round(3) }}">
+                    <span class="input-group-text">{{ line.ingredient.unit.value }}</span></div></td>
+                </tr>
+              {% else %}
+                <tr><td colspan="2" class="text-secondary">No ingredients linked yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% if addable %}
+            <div class="row g-2 align-items-end mb-3">
+              <div class="col-7">
+                <label class="form-label small" for="add_ingredient_id">Add ingredient</label>
+                <select class="form-select form-select-sm" id="add_ingredient_id" name="add_ingredient_id">
+                  <option value="">&mdash;</option>
+                  {% for i in addable %}<option value="{{ i.id }}">{{ i.name }} ({{ i.unit.value }})</option>{% endfor %}
+                </select>
+              </div>
+              <div class="col-5">
+                <label class="form-label small" for="add_quantity">Per portion</label>
+                <input class="form-control form-control-sm" id="add_quantity" name="add_quantity" inputmode="decimal">
+              </div>
+            </div>
+          {% endif %}
+          <button class="btn btn-primary" type="submit">Save recipe</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

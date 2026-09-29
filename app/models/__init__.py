@@ -10,7 +10,7 @@ class is referenced by another (e.g. ``MenuItem`` needs ``Ingredient`` and
 from app.models.audit_log import AuditEvent, AuditLog
 from app.models.category import Category
 from app.models.customer_preference import CustomerPreference
-from app.models.ingredient import Ingredient
+from app.models.ingredient import Ingredient, StockUnit
 from app.models.menu_item_ingredient import MenuItemIngredient
 from app.models.menu_item import MenuItem
 from app.models.restaurant_table import RestaurantTable, TableStatus
@@ -18,6 +18,7 @@ from app.models.order import CancellationActor, DiscountType, Order, OrderItem, 
 from app.models.payment import Payment, PaymentMethod
 from app.models.pricing_settings import PricingSettings
 from app.models.reservation import Reservation, ReservationStatus
+from app.models.stock_movement import MovementType, StockMovement
 from app.models.user import Role, User
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "Ingredient",
     "MenuItem",
     "MenuItemIngredient",
+    "MovementType",
     "Order",
     "OrderItem",
     "OrderSource",
@@ -41,6 +43,8 @@ __all__ = [
     "ReservationStatus",
     "RestaurantTable",
     "Role",
+    "StockMovement",
+    "StockUnit",
     "TableStatus",
     "User",
 ]
