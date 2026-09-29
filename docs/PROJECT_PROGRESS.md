@@ -1160,7 +1160,7 @@ No schema change was made in M08; no migration was added.
 | 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
 | 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
 | 31 | ~~No payment/refund records~~ — **payments and refunds closed in M11**; **tax and discounts are still not recorded** (0.00 "not recorded") pending a decision on the rules | reports cannot show tax or discounts |
-| 33 | Migration `c3a9d7e21f58` (payments) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | run `flask db upgrade` (after a backup) before using payments there |
+| 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
@@ -1189,7 +1189,7 @@ email verification · staff queue pagination/filtering.
 | Tests | SQLite **608 passed, 5 skipped**; MySQL **612 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
 | Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 5 (MySQL-only); M11 added payments 20 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
-| Migrations | **8 revisions, head = `c3a9d7e21f58`** (M10 `b5e2f8c41a07`; M11 payments). Live DB at `b5e2f8c41a07` (#33) |
+| Migrations | **8 revisions, head = `c3a9d7e21f58`** (M10 `b5e2f8c41a07`; M11 payments). Live `quickjunctiondb` also at `c3a9d7e21f58` |
 | Tables | 12: previous 9 + `restaurant_tables`, `reservations`, `payments` |
 | Models | 12 modules in `app/models/` |
 | Services | 13 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`) |
@@ -2104,7 +2104,7 @@ widens `ck_audit_logs_event_type` by 2 events. Downgrade: deletes the 2 new
 audit event rows, restores the constraint, `drop_table('payments')` only
 (MySQL-safe — no index dropped before its foreign key; see #32). No existing
 row touched. Schema-match and round-trip tests pass on SQLite and MySQL.
-**Not applied to the live `quickjunctiondb` yet** (#33).
+**Applied to the live `quickjunctiondb` and verified** — see "M11 live MySQL verification" below.
 
 **Results:** SQLite **608 passed, 5 skipped** (the MySQL-only races); MySQL
 test database **612 passed, 1 skipped** (#32), 0 failed.
@@ -2129,6 +2129,87 @@ test database **612 passed, 1 skipped** (#32), 0 failed.
 UPDATE fails both paid-cancel tests on SQLite and the payment-vs-cancel race
 on MySQL (`['cancelled', 'paid']`). Restored.
 
+### M11 live MySQL verification (2026-09-29) ✅ production-verified
+
+Against the live **`quickjunctiondb`** (MySQL 8.0.46), commit `b3b6e89`.
+
+**Backup.** `mysqldump --single-transaction` → `quickjunctiondb_pre_m11.sql`
+(exit 0, 27,418 bytes, dump-completed footer present, 12 tables + data; kept
+outside the repo; the M10 backup untouched).
+
+**Migration.** Live DB was at `b5e2f8c41a07`. `flask db upgrade` applied
+`c3a9d7e21f58` with no error. `flask db current` → **`c3a9d7e21f58
+(head)`**, equal to the repository head. `flask db check` shows only the
+documented enum-CHECK autogenerate false positive (now also listing the new
+`ck_payments_method`); no table/column/index/FK drift.
+
+**Schema (`information_schema`).** `payments` InnoDB; columns and types as
+modelled (`decimal(10,2)` money, `refunded_amount` default 0.00,
+`captured_at`/`updated_at` default now()); PK; UNIQUE `order_id`; FKs
+`order_id → orders` and `recorded_by_id → users`, both RESTRICT; CHECKs
+`ck_payments_amount_positive`, `ck_payments_refund_within_amount`,
+`ck_payments_method`. `orders` unchanged by M11 (its M10 CHECKs intact).
+Audit CHECK: all **26** `AuditEvent` values accepted by direct insert and an
+unknown value rejected (3819) — in a rolled-back transaction.
+
+**Existing data survived.** Before and after: users 5, orders 2, order_items
+2, menu_items 18, audit_logs 17 (max id 17), payments 0; both orders
+unchanged (`pending`, `online`, ₹229.00).
+
+**Behaviour on the live DB — 44/44 checks, zero residue.** Run through the
+real routes and services on one connection inside an outer transaction
+rolled back at the end (the scoped session was swapped, for that process
+only, for a plain `Session` with `join_transaction_mode="create_savepoint"`,
+so every service commit released a savepoint). Covered:
+
+- payments: staff record **cash, card, wallet**; amount = server total, a
+  forged `amount`/`total` of 1.00 ignored (₹498.00 recorded); duplicate
+  refused; customer 403; cancelled order cannot be paid;
+- refunds: admin partial (1.00 + reason) and full; over-refund refused both
+  after full and as a single oversized request; DB CHECK blocks overdraw
+  (3819); a stale second full refund refused; **staff 403, customer 403**;
+- cancellation: unpaid pending order cancels; paid order refused for customer
+  (409) and staff; partially refunded refused; fully refunded cancels (actor
+  `staff`); a stale cancel that never saw the payment refused by the guard
+  inside the UPDATE;
+- tables: dine-in occupies; completing A leaves the table OCCUPIED while B is
+  active; cancelling B → **CLEANING**; historical `table_id` kept; a table
+  staff had moved to AVAILABLE is not forced to CLEANING;
+- report (today): completed 2, gross 996.00, **refunds 5.00, net 991.00**,
+  paid 1, collected 493.00, completed-but-unpaid 1, paid-in-advance 995.00,
+  cancelled 3 (never sales), **tax 0.00 / discounts 0.00 "not recorded"**,
+  by source dine-in 2, by table T1 493.00 / T2 498.00; admin page renders;
+  exactly 4 `payment_recorded` + 4 `payment_refunded` audit rows written.
+
+After rollback every live row count equalled the baseline and no
+verification user remained. Two side effects outside the tables, both
+harmless: the app's file logger wrote 35 lines for the throwaway users
+(ids 6–8) to the git-ignored `logs/security.log`; and InnoDB does not roll
+back AUTO_INCREMENT, so the next ids skip ahead (users 12, orders 21,
+payments 9, audit 98) — nothing is reused.
+
+**Concurrency** (needs several committing connections, so run on the
+disposable `quickjunction_test` on the same server, via the suite): two
+cashiers → one payment; payment vs cancel → never both; two full refunds →
+one — 15 rounds each, all passing.
+
+**Full suites.** SQLite **608 passed, 5 skipped** (MySQL-only races), 24
+warnings, 128 s. MySQL `quickjunction_test` **612 passed, 1 skipped** (#32),
+18 warnings, 439 s (both run concurrently, hence the durations). Counts equal
+the M11 baseline; 0 failures. Warnings are the pre-existing `env.py`
+deprecation (#13).
+
+**Security (read-only review).** Payment route takes only `method` from the
+client; order from the URL id + DB, amount from the locked order row. Refund
+route is `require_role(ADMIN)` and acts on `order.payment`, never a
+client-supplied payment id; amount parsed to `Decimal` and bounded by the
+conditional UPDATE + CHECK. Duplicate payment: UNIQUE `order_id`. Races:
+row lock + in-UPDATE guards. No raw/f-string SQL, no `|safe`, no debug
+output, no secrets in the repo.
+
+**Verdict: M11 is production-verified on live MySQL.** Remaining: tax and
+discounts not recorded (#31); full downgrade-to-base on MySQL (#32).
+
 ---
 
 ## Next milestone
@@ -2137,8 +2218,7 @@ Recommended: **Tax & discounts** — decide the rules first (VAT rate and
 whether prices are tax-inclusive, service charge, who may apply a discount
 and how much), then store them on the order at checkout as snapshots
 alongside `subtotal`, so `total` diverges from `subtotal` for the first time
-and the report's tax/discount rows become real. Also apply `c3a9d7e21f58` to
-the live database (#33).
+and the report's tax/discount rows become real.
 
 Carried over:
 
