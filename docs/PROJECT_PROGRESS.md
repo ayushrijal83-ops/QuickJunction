@@ -4,9 +4,9 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-29 (end of Milestone 10)
-Current state: **Milestone 10 complete — restaurant operations, reservations,
-customer cancellation and sales reporting.**
+Last updated: 2026-09-29 (end of Milestone 11)
+Current state: **Milestone 11 complete — payments and refunds on top of M10's
+restaurant operations, reservations, cancellation and sales reporting.**
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
 > Operations, Customer Dashboard, Table Reservation, Customer Order
@@ -37,10 +37,11 @@ customer cancellation and sales reporting.**
 | 07.1 | Dataset rebalance (60→150) + V2 retrain + 3-way evaluation | ✅ Complete |
 | 08 | Finalization: Bootstrap UI, MySQL E2E, security audit, demo readiness | ✅ Complete |
 | 09 | Security hardening: server-side session revocation | ✅ Complete |
-| 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete |
-| — | Payment capture/refunds, tax/discounts, production deployment | ⬜ Not started |
+| 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete (MySQL-verified) |
+| 11 | Payments, admin refunds, paid-order cancellation rule, automatic table release | ✅ Complete |
+| — | Tax/discounts, payment gateway, production deployment | ⬜ Not started |
 
-**Test suite: 588 passing, 2 skipped (MySQL-only), 0 failing on SQLite; 589 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M10; `pytest`; in-memory SQLite by default for
+**Test suite: 608 passing, 5 skipped (MySQL-only), 0 failing on SQLite; 612 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M11; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1158,7 +1159,8 @@ No schema change was made in M08; no migration was added.
 | 27 | AI explanation takes ~9 s per request on CPU after the model is loaded (23 s including first load) | acceptable on its own route; would not be acceptable inline |
 | 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
 | 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
-| 31 | No payment/tax/discount/refund records; sales treat `completed` as paid and report those three figures as 0.00 ("not recorded") | reports are revenue-accurate but cannot show real tax or refunds |
+| 31 | ~~No payment/refund records~~ — **payments and refunds closed in M11**; **tax and discounts are still not recorded** (0.00 "not recorded") pending a decision on the rules | reports cannot show tax or discounts |
+| 33 | Migration `c3a9d7e21f58` (payments) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | run `flask db upgrade` (after a backup) before using payments there |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
@@ -1184,15 +1186,15 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | SQLite **588 passed, 2 skipped**; MySQL **589 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 2 (MySQL-only) |
+| Tests | SQLite **608 passed, 5 skipped**; MySQL **612 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 5 (MySQL-only); M11 added payments 20 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
-| Migrations | **7 revisions, head = `b5e2f8c41a07`** (Phase 3 `7c4e1a9b52d3` staff approval; M10 tables/reservations/orders) |
-| Tables | 11: previous 9 + `restaurant_tables`, `reservations` |
-| Models | 11 modules in `app/models/` |
-| Services | 12 modules in `app/services/` (M10: `tables`, `sales`, `reservations`) |
+| Migrations | **8 revisions, head = `c3a9d7e21f58`** (M10 `b5e2f8c41a07`; M11 payments). Live DB at `b5e2f8c41a07` (#33) |
+| Tables | 12: previous 9 + `restaurant_tables`, `reservations`, `payments` |
+| Models | 12 modules in `app/models/` |
+| Services | 13 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`) |
 | Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
-| Audit events | 24 |
+| Audit events | 26 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
 | Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
 | Order statuses | 7 (`pending`, `confirmed`, `preparing`, `ready`, `served`, `completed`, `cancelled`) — `served` added in M10 |
@@ -2017,12 +2019,126 @@ listed under the M10 section and known issues #31–#32.
 
 ---
 
+## Milestone 11 — Payments, refunds, automatic table release ✅
+
+Baseline before changes: **588 passed, 2 skipped** (SQLite). Built on the
+existing order, audit, RBAC and reporting code — no second order or sales
+system; the report still derives every figure from `orders` + `payments`.
+
+### Payment model
+
+`Payment` (`payments`): `order_id` (FK orders, RESTRICT, **UNIQUE** — one
+payment per order), `method` (`cash`/`card`/`wallet`, CHECK), `amount`
+(`Numeric(10,2)`, CHECK > 0), `refunded_amount` (default 0, CHECK
+`0 ≤ refunded_amount ≤ amount`), `captured_at` (DB clock), `recorded_by_id`
+(FK users), `refunded_at`, `refund_reason` (≤ 255; latest), `updated_at`.
+Every refund is also an audit row carrying its own amount, so the history
+is complete even though the row keeps one cumulative total.
+
+**Scope decisions.** Payment is taken at the counter by staff — there is no
+card gateway (offline-first; no card data is stored). One payment per order;
+split bills and tips are out of scope. The amount is always the order's
+server-side `total` — a client-posted `amount`/`total` is ignored (tested).
+**Tax and discounts are still not recorded** and stay 0.00 "not recorded" in
+reports: no rule for them exists in the project, and inventing a rate would
+be invented accounting. They need a decision (e.g. VAT %, service charge,
+discount policy) before they can be built.
+
+### Rules
+
+| Rule | Enforcement |
+| --- | --- |
+| Pay any non-cancelled order once | `record_payment` locks the order row (`SELECT … FOR UPDATE`), re-reads status + payment; UNIQUE `order_id` catches a concurrent second insert |
+| A cancelled order cannot be paid | same locked re-read |
+| **A paid order cannot be cancelled until fully refunded** (staff or customer) | `NOT EXISTS (unrefunded payment)` inside the cancel UPDATE in `orders._apply_transition` — same order row the payment path locks. Customers see no cancel button once paid and are told to ask staff |
+| Refunds are ADMIN-only, partial or full, never above the amount | conditional `UPDATE … WHERE refunded_amount + x <= amount` + CHECK; invalid amounts (0, negative, text, NaN, Infinity) rejected |
+| Money is Decimal end to end | 3 × 0.10 = 0.30 exactly (tested) |
+
+Consequence: a cancelled order can never hold money, so the report needs no
+special "paid then cancelled" accounting.
+
+### Automatic table release
+
+When a dine-in order becomes `completed` or `cancelled` and **no other
+active order remains on that table**, the table moves `OCCUPIED → CLEANING`
+in the same transaction as the order change. A table that staff had already
+moved away from OCCUPIED is left alone. Staff still mark it AVAILABLE after
+cleaning (M10 known limitation closed). The order-status audit row covers
+this; the automatic table change has no separate audit event.
+
+### Routes
+
+| Route | Role |
+| --- | --- |
+| `POST /staff/orders/<id>/payment` (`method`) | STAFF, ADMIN |
+| `POST /staff/orders/<id>/refund` (`amount`, `reason`) | **ADMIN** |
+
+Staff order page: payment card (collect buttons per method, or paid details
++ admin refund form). Queue: "Paid" column (eager-loaded, no N+1). Customer
+order page: Paid badge, method, time, refunded amount. Audit:
+`payment_recorded`, `payment_refunded`.
+
+### Report definitions (changed)
+
+| Figure | Before (M10) | Now (M11) |
+| --- | --- | --- |
+| Refunds | 0.00 "not recorded" | Σ `refunded_amount` on completed orders |
+| Net sales | gross − 0 − 0 | gross − discounts − refunds |
+| Paid orders | = completed orders | completed orders **with a payment** |
+| Collected | Σ `total` of completed | Σ (`amount − refunded_amount`) on completed orders |
+| Paid in advance | — | net payments on orders not completed yet |
+| Completed but unpaid | — | completed orders with no payment (money owed) |
+| Discounts, tax | 0.00 "not recorded" | unchanged — still not recorded |
+
+`tests/test_sales.py::test_cancelled_and_unfinished_orders_are_not_sales`
+was updated for the new "collected" definition (it now records a payment on
+one of the two completed orders and asserts collected = that payment, plus 1
+unpaid). `test_completed_order_keeps_its_table_after_table_is_freed` now
+asserts the automatic CLEANING instead of setting it by hand. Both are the
+requested behaviour changes, not weakened assertions.
+
+### Migration
+
+**`c3a9d7e21f58`** (`down_revision = b5e2f8c41a07`): creates `payments`,
+widens `ck_audit_logs_event_type` by 2 events. Downgrade: deletes the 2 new
+audit event rows, restores the constraint, `drop_table('payments')` only
+(MySQL-safe — no index dropped before its foreign key; see #32). No existing
+row touched. Schema-match and round-trip tests pass on SQLite and MySQL.
+**Not applied to the live `quickjunctiondb` yet** (#33).
+
+**Results:** SQLite **608 passed, 5 skipped** (the MySQL-only races); MySQL
+test database **612 passed, 1 skipped** (#32), 0 failed.
+
+### Tests — 20 + 3 new
+
+- `tests/test_payments.py` (20): server-side amount (forged amount ignored),
+  audit, invalid method, double payment (service + DB UNIQUE), DB refund
+  CHECK, cancelled order unpayable, RBAC (401/403) + CSRF, partial→full
+  refund bounds, 6 invalid refund amounts, stale concurrent refund cannot
+  overdraw, refund ADMIN-only + audit, paid order not cancellable by customer
+  or staff until fully refunded (partial is not enough), stale cancel after
+  payment refused, report figures from payments (refunds, net, paid,
+  collected, prepaid, unpaid, AOV), table released only after the last
+  active order, release never overrides a non-occupied table, Decimal.
+- `tests/test_mysql_concurrency.py` (+3, MySQL only): two cashiers → exactly
+  one payment; payment vs cancel → never both (the order is either cancelled
+  and unpaid or paid and not cancelled); two full refunds → exactly one.
+  15 rounds each, stable over 5 runs.
+
+**Non-vacuity:** removing the "no unrefunded payment" clause from the cancel
+UPDATE fails both paid-cancel tests on SQLite and the payment-vs-cancel race
+on MySQL (`['cancelled', 'paid']`). Restored.
+
+---
+
 ## Next milestone
 
-Recommended: **Payments** — a `Payment` record (method, amount, captured_at,
-refunded_amount) attached to orders, so "paid", refunds, tax and discounts
-become real figures in the existing reports instead of zeros; then auto-free
-tables on order completion.
+Recommended: **Tax & discounts** — decide the rules first (VAT rate and
+whether prices are tax-inclusive, service charge, who may apply a discount
+and how much), then store them on the order at checkout as snapshots
+alongside `subtotal`, so `total` diverges from `subtotal` for the first time
+and the report's tax/discount rows become real. Also apply `c3a9d7e21f58` to
+the live database (#33).
 
 Carried over:
 

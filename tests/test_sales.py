@@ -15,6 +15,7 @@ from app.models.user import Role
 from app.services.sales import ReportRangeError, build_report, db_today, resolve_range, totals_for
 from app.services.tables import create_table
 from app.services.orders import checkout
+from app.services.payments import record_payment
 from tests.conftest import make_category, make_menu_item, make_user
 
 PASSWORD = "correct-horse-1"
@@ -44,17 +45,20 @@ def at(day: date, hour: int = 12) -> datetime:
 
 
 def test_cancelled_and_unfinished_orders_are_not_sales(buyer):
-    """The brief's example: 1,000 + 1,500 completed, 2,000 cancelled -> 2,500."""
+    """The brief's example: 1,000 + 1,500 completed, 2,000 cancelled -> 2,500.
+    Collected counts real payments only (M11): the 1,500 order is unpaid."""
     today = db_today()
-    order(buyer, "1000.00", when=at(today))
+    paid = order(buyer, "1000.00", when=at(today))
+    record_payment(paid, "cash", buyer)
     order(buyer, "1500.00", when=at(today))
     order(buyer, "2000.00", status=OrderStatus.CANCELLED, when=at(today))
     order(buyer, "700.00", status=OrderStatus.PREPARING, when=at(today))
 
     report = build_report(today, today, "Today")
     t = report.totals
-    assert (t.orders, t.gross, t.net, t.collected) == (2, D("2500.00"), D("2500.00"), D("2500.00"))
+    assert (t.orders, t.gross, t.net, t.collected, t.paid) == (2, D("2500.00"), D("2500.00"), D("1000.00"), 1)
     assert (t.discounts, t.tax, t.refunds) == (D("0.00"),) * 3
+    assert report.unpaid_completed == 1
     assert t.average == D("1250.00")
     assert (report.placed, report.cancelled, report.active) == (4, 1, 1)
 

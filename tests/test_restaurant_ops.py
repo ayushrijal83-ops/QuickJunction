@@ -371,7 +371,7 @@ def test_completed_order_keeps_its_table_after_table_is_freed(db):
     order = place(customer(), source=OrderSource.DINE_IN, table_id=table.id)
     for status in (OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.COMPLETED):
         update_order_status(order, status)
-    change_table_status(table, "cleaning")
+    assert table.status == TableStatus.CLEANING  # M11: released automatically on completion
     change_table_status(table, "available")
     _db.session.expire_all()
     assert _db.session.get(Order, order.id).table.name == "T03"

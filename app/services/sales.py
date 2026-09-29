@@ -1,24 +1,27 @@
-"""Sales reporting, derived from the transactional ``orders`` rows.
+"""Sales reporting, derived from the transactional ``orders`` + ``payments`` rows.
 
-There is no sales table: every figure is recomputed from ``Order`` on each
-request, so a report can never disagree with the orders it describes. Money
-comes only from the order's own ``subtotal``/``total`` -- the snapshots
-written at checkout -- never from current menu prices.
+There is no sales table: every figure is recomputed from ``Order`` and its
+``Payment`` on each request, so a report can never disagree with the records
+it describes. Money comes only from the order's own ``subtotal`` (the
+checkout-time snapshot, never current menu prices) and the payment row.
 
 Financial definitions (these are SALES/REVENUE, not profit -- Quick Junction
 records no costs, so profit cannot be computed):
 
-- **Recognised sale** -- an order with status ``COMPLETED``. The restaurant
-  settles the bill when an order completes; there is no separate payment
-  record, so COMPLETED is the only evidence of money received. Pending and
-  in-progress orders are not sales yet; cancelled orders never are.
+- **Recognised sale** -- an order with status ``COMPLETED`` (served/handed
+  over). Pending and in-progress orders are not sales yet; cancelled orders
+  never are -- and cannot hold money, since a paid order must be refunded in
+  full before it can be cancelled.
 - **Gross sales** -- sum of ``subtotal`` over recognised sales.
-- **Discounts, tax, refunds** -- the order model records none of these
-  (``total == subtotal`` since M04, and no payment is ever captured, so there
-  is nothing to refund). Reported as 0.00 and labelled "not recorded" in the
-  UI rather than omitted, so the statement's shape is ready when they exist.
+- **Discounts, tax** -- not recorded anywhere (``total == subtotal`` since
+  M04). Reported as 0.00 and labelled "not recorded" rather than invented.
+- **Refunds** -- sum of ``payments.refunded_amount`` over recognised sales.
 - **Net sales** -- gross - discounts - refunds.
-- **Collected** -- sum of ``total`` over recognised sales.
+- **Paid orders** -- recognised sales that have a payment row.
+- **Collected** -- sum of ``amount - refunded_amount`` of the payments on
+  recognised sales. ``Report.prepaid`` separately shows money already taken
+  for orders that are not completed yet (e.g. takeaway paid at the counter).
+- **Unpaid completed** -- recognised sales with no payment: money owed.
 - **Average order value** -- net sales / recognised order count.
 
 Dates are the order's ``created_at`` (when it was placed), compared against
@@ -38,6 +41,7 @@ import sqlalchemy as sa
 
 from app.extensions import db
 from app.models.order import Order, OrderSource, OrderStatus
+from app.models.payment import Payment
 from app.models.restaurant_table import RestaurantTable
 from app.services.errors import ValidationError
 from app.services.tables import ACTIVE_ORDER_STATUSES
@@ -60,6 +64,7 @@ class Totals:
     tax: Decimal = ZERO
     refunds: Decimal = ZERO
     collected: Decimal = ZERO
+    paid: int = 0  # recognised orders with a payment
 
     @property
     def net(self) -> Decimal:
@@ -69,10 +74,13 @@ class Totals:
     def average(self) -> Decimal:
         return (self.net / self.orders).quantize(Decimal("0.01")) if self.orders else ZERO
 
-    def add(self, subtotal: Decimal, total: Decimal) -> None:
+    def add(self, row) -> None:
         self.orders += 1
-        self.gross += subtotal
-        self.collected += total
+        self.gross += row.subtotal
+        if row.amount is not None:
+            self.paid += 1
+            self.refunds += row.refunded_amount
+            self.collected += row.amount - row.refunded_amount
 
 
 @dataclass
@@ -84,6 +92,8 @@ class Report:
     placed: int = 0
     cancelled: int = 0
     active: int = 0
+    unpaid_completed: int = 0
+    prepaid: Decimal = ZERO  # net payments on orders not completed yet
     daily: list[tuple[date, int, Totals]] = field(default_factory=list)
     by_source: list[tuple[OrderSource, Totals, Decimal]] = field(default_factory=list)
     by_table: list[tuple[RestaurantTable, Totals]] = field(default_factory=list)
@@ -133,7 +143,9 @@ def _rows(start: date, end: date):
     # ponytail: aggregates in Python over one column-only query; move to SQL
     # GROUP BY if a single report ever spans 100k+ orders.
     return db.session.execute(
-        sa.select(Order.status, Order.created_at, Order.subtotal, Order.total, Order.source, Order.table_id)
+        sa.select(Order.status, Order.created_at, Order.subtotal, Order.source, Order.table_id,
+                  Payment.amount, Payment.refunded_amount)
+        .outerjoin(Payment, Payment.order_id == Order.id)
         .where(Order.created_at >= lo, Order.created_at < hi)
     ).all()
 
@@ -142,7 +154,7 @@ def totals_for(start: date, end: date) -> Totals:
     totals = Totals()
     for row in _rows(start, end):
         if row.status == OrderStatus.COMPLETED:
-            totals.add(row.subtotal, row.total)
+            totals.add(row)
     return totals
 
 
@@ -162,11 +174,15 @@ def build_report(start: date, end: date, label: str) -> Report:
         elif row.status in ACTIVE_ORDER_STATUSES:
             report.active += 1
         if row.status != OrderStatus.COMPLETED:
+            if row.amount is not None:
+                report.prepaid += row.amount - row.refunded_amount
             continue
+        if row.amount is None:
+            report.unpaid_completed += 1
         for bucket in (report.totals, daily[row.created_at.date()], sources[row.source], hours[row.created_at.hour]):
-            bucket.add(row.subtotal, row.total)
+            bucket.add(row)
         if row.table_id is not None:
-            tables[row.table_id].add(row.subtotal, row.total)
+            tables[row.table_id].add(row)
 
     day = start
     while day <= end:

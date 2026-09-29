@@ -131,6 +131,7 @@ class Order(db.Model):
     # personal detail -- the template renders username only.
     customer: Mapped["User"] = relationship(foreign_keys=[user_id])  # noqa: F821
     table: Mapped["RestaurantTable | None"] = relationship()  # noqa: F821
+    payment: Mapped["Payment | None"] = relationship(back_populates="order", uselist=False)  # noqa: F821
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
         return f"<Order id={self.id} user_id={self.user_id} status={self.status.value} total={self.total}>"

@@ -31,11 +31,12 @@ from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models.order import CancellationActor, Order, OrderItem, OrderSource, OrderStatus
+from app.models.payment import Payment
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import Role, User
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available_menu_item
 from app.services.errors import ValidationError
-from app.services.tables import UNSEATABLE_STATUSES
+from app.services.tables import UNSEATABLE_STATUSES, release_table_if_idle
 
 MAX_DISTINCT_LINES = 30
 
@@ -229,7 +230,8 @@ def list_orders_for_staff() -> list[Order]:
     per-order item count does not fire one query per row."""
     return (
         db.session.query(Order)
-        .options(selectinload(Order.items), selectinload(Order.customer), selectinload(Order.table))
+        .options(selectinload(Order.items), selectinload(Order.customer), selectinload(Order.table),
+                 selectinload(Order.payment))
         .order_by(Order.created_at.desc(), Order.id.desc())
         .all()
     )
@@ -261,6 +263,12 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
     check happens inside the UPDATE itself, so the database (a row lock on
     InnoDB) serialises the two: exactly one matches, the other updates zero
     rows. Returns whether this caller won; ``order`` is refreshed either way.
+
+    Cancelling also requires that no unrefunded payment exists -- checked in
+    the same UPDATE, against the same order row ``record_payment`` locks, so
+    a paid order can never be cancelled while still holding the money.
+    Finishing a dine-in order (completed/cancelled) releases its table to
+    CLEANING in the same transaction when nothing else is active there.
     """
     values: dict = {"status": new_status}
     if new_status == OrderStatus.CANCELLED:
@@ -278,14 +286,23 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
     )
     if owner_id is not None:
         stmt = stmt.where(Order.user_id == owner_id)
+    if new_status == OrderStatus.CANCELLED:
+        stmt = stmt.where(~sa.exists().where(Payment.order_id == Order.id, Payment.refunded_amount < Payment.amount))
     try:
         won = db.session.execute(stmt).rowcount == 1
+        if won and order.table_id is not None and new_status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
+            release_table_if_idle(order.table_id)
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()
         raise OrderStatusError({"status": ["Could not update the order. Please try again."]})
     db.session.refresh(order)
     return won
+
+
+def holds_payment(order: Order) -> bool:
+    """True while money received for ``order`` has not been fully refunded."""
+    return order.payment is not None and not order.payment.fully_refunded
 
 
 def update_order_status(order: Order, new_status: OrderStatus, *, actor: User | None = None,
@@ -305,6 +322,10 @@ def update_order_status(order: Order, new_status: OrderStatus, *, actor: User | 
             {"status": [f"Cannot change an order from {previous.value} to {new_status.value}."]}
         )
     if not _apply_transition(order, frozenset({previous}), new_status, actor=actor, reason=reason):
+        if new_status == OrderStatus.CANCELLED and holds_payment(order):
+            raise OrderStatusError(
+                {"status": [f"Order #{order.id} has been paid. Refund the payment in full before cancelling."]}
+            )
         raise OrderStatusError(
             {"status": [f"Order #{order.id} was changed by someone else (now {order.status.value}). "
                         "Nothing was updated."]}
@@ -321,7 +342,7 @@ CUSTOMER_CANCELLABLE_STATUSES = frozenset({OrderStatus.PENDING, OrderStatus.CONF
 
 
 def customer_can_cancel(order: Order) -> bool:
-    return order.status in CUSTOMER_CANCELLABLE_STATUSES
+    return order.status in CUSTOMER_CANCELLABLE_STATUSES and not holds_payment(order)
 
 
 def cancel_order_as_customer(order: Order, customer: User, reason: str | None = None) -> OrderStatus:
@@ -341,6 +362,11 @@ def cancel_order_as_customer(order: Order, customer: User, reason: str | None = 
         order, CUSTOMER_CANCELLABLE_STATUSES, OrderStatus.CANCELLED,
         actor=customer, reason=reason, owner_id=customer.id,
     ):
+        if holds_payment(order):
+            raise OrderStatusError(
+                {"status": ["This order has already been paid, so it cannot be cancelled online. "
+                            "Please speak to our staff."]}
+            )
         raise OrderStatusError(
             {"status": [f"This order is already {order.status.value} and can no longer be cancelled. "
                         "Please speak to our staff."]}

@@ -72,6 +72,11 @@ class AuditEvent(str, enum.Enum):
     RESERVATION_CREATED = "reservation_created"
     RESERVATION_STATUS_CHANGED = "reservation_status_changed"
 
+    # Payments. user_id is the acting staff/admin member; order/payment ids,
+    # method and amounts (as strings) live in metadata_json.
+    PAYMENT_RECORDED = "payment_recorded"
+    PAYMENT_REFUNDED = "payment_refunded"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

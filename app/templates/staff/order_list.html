@@ -23,6 +23,7 @@
             <th scope="col">Status</th>
             <th scope="col" class="text-center">Items</th>
             <th scope="col" class="text-end">Total</th>
+            <th scope="col">Paid</th>
             <th scope="col"><span class="visually-hidden">Actions</span></th>
           </tr>
         </thead>
@@ -38,6 +39,7 @@
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
               <td class="text-center">{{ order.items | length }}</td>
               <td class="text-end qj-price">{{ order.total | money }}</td>
+              <td>{% if order.payment %}<span class="badge text-bg-success">{{ order.payment.method.value }}</span>{% else %}<span class="text-secondary small">&mdash;</span>{% endif %}</td>
               <td class="text-end">
                 <a class="btn btn-sm btn-outline-primary"
                    href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open</a>

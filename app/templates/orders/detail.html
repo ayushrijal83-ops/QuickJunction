@@ -70,6 +70,12 @@
           <dt class="col-7">Total</dt>
           <dd class="col-5 text-end qj-price h5 mb-0">{{ order.total | money }}</dd>
         </dl>
+        {% if order.payment %}
+          <p class="small mb-0 mt-2">
+            <span class="badge text-bg-success">Paid</span> {{ order.payment.method.value }}, {{ order.payment.captured_at.strftime("%d %b %Y %H:%M") }}
+            {% if order.payment.refunded_amount > 0 %}<br><span class="text-secondary">Refunded {{ order.payment.refunded_amount | money }}</span>{% endif %}
+          </p>
+        {% endif %}
       </div>
     </div>
 

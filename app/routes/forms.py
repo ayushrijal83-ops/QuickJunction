@@ -143,6 +143,19 @@ class TableForm(FlaskForm):
     submit = SubmitField("Save table")
 
 
+class PaymentForm(FlaskForm):
+    """Method only -- the amount is always the order's server-side total."""
+
+    method = StringField(validators=[DataRequired(), Length(max=16)])
+    submit = SubmitField("Record payment")
+
+
+class RefundForm(FlaskForm):
+    amount = StringField("Refund amount", validators=[DataRequired(), Length(max=12)])
+    reason = StringField("Reason", validators=[Optional(), Length(max=255)])
+    submit = SubmitField("Refund")
+
+
 class ReservationForm(FlaskForm):
     """No owner field on purpose: the owner is the signed-in account. All four
     values are re-validated by app/services/reservations.py."""

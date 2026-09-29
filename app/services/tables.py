@@ -89,6 +89,18 @@ def change_table_status(table: RestaurantTable, raw_status: str | None) -> Table
     return previous
 
 
+def release_table_if_idle(table_id: int) -> None:
+    """OCCUPIED -> CLEANING once no active order remains on the table. Called
+    inside the order transition's transaction (no commit here), so the table
+    and the order change together."""
+    table = db.session.get(RestaurantTable, table_id)
+    still_busy = db.session.query(Order.id).filter(
+        Order.table_id == table_id, Order.status.in_(ACTIVE_ORDER_STATUSES)
+    ).first()
+    if table.status == S.OCCUPIED and still_busy is None:
+        table.status = S.CLEANING
+
+
 def list_tables() -> list[RestaurantTable]:
     return db.session.query(RestaurantTable).order_by(RestaurantTable.name).all()
 

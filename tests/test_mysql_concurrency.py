@@ -130,3 +130,93 @@ def test_same_slot_booking_exactly_one_wins(app, db):
         assert sorted(map(str, results)) == ["conflict", "ok"], results
         _db.session.rollback()
         assert _db.session.query(Reservation).filter_by(table_id=table_id, holds_slot=True).count() == 1
+
+
+# --- Milestone 11: payments ------------------------------------------------------------
+
+
+def _paid_order_fixture():
+    from tests.test_restaurant_ops import place
+
+    customer = make_user(username="payer", email="payer@example.com")
+    staff_ids = [make_user(username=f"till{i}", email=f"till{i}@example.com", role=Role.ADMIN).id for i in (1, 2)]
+    return customer, staff_ids, place
+
+
+def test_two_cashiers_cannot_both_take_payment(app, db):
+    from app.models.payment import Payment
+    from app.services.payments import PaymentError, record_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order_id = place(customer).id
+
+        def pay(staff_id):
+            def act():
+                try:
+                    record_payment(_db.session.get(Order, order_id), "cash", _db.session.get(User, staff_id))
+                    return "ok"
+                except PaymentError:
+                    return "refused"
+            return act
+
+        results = _race(app, pay(a), pay(b))
+        assert sorted(map(str, results)) == ["ok", "refused"], results
+        _db.session.rollback()
+        assert _db.session.query(Payment).filter_by(order_id=order_id).count() == 1
+
+
+def test_payment_vs_cancel_never_leaves_a_cancelled_order_holding_money(app, db):
+    from app.models.payment import Payment
+    from app.services.payments import PaymentError, record_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order_id = place(customer).id
+
+        def pay():
+            try:
+                record_payment(_db.session.get(Order, order_id), "card", _db.session.get(User, a))
+                return "paid"
+            except PaymentError:
+                return "refused"
+
+        def cancel():
+            try:
+                update_order_status(_db.session.get(Order, order_id), OrderStatus.CANCELLED,
+                                    actor=_db.session.get(User, b))
+                return "cancelled"
+            except OrderStatusError:
+                return "refused"
+
+        results = _race(app, pay, cancel)
+        assert sorted(map(str, results)) in (["paid", "refused"], ["cancelled", "refused"]), results
+        _db.session.rollback()
+        row = _db.session.get(Order, order_id)
+        paid = _db.session.query(Payment).filter_by(order_id=order_id).count()
+        assert (row.status == OrderStatus.CANCELLED) != (paid == 1), (row.status, paid)
+
+
+def test_two_full_refunds_cannot_overdraw(app, db):
+    from decimal import Decimal
+
+    from app.models.payment import Payment
+    from app.services.payments import PaymentError, record_payment, refund_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order = place(customer)
+        payment_id = record_payment(order, "cash", _db.session.get(User, a)).id
+        full = str(order.total)
+
+        def refund():
+            try:
+                refund_payment(_db.session.get(Payment, payment_id), full, None)
+                return "ok"
+            except PaymentError:
+                return "refused"
+
+        results = _race(app, refund, refund)
+        assert sorted(map(str, results)) == ["ok", "refused"], results
+        _db.session.rollback()
+        assert _db.session.get(Payment, payment_id).refunded_amount == Decimal(full)

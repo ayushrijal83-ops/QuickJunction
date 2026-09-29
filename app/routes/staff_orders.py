@@ -22,8 +22,10 @@ from flask import Blueprint, abort, flash, redirect, render_template, url_for
 
 from app.models.audit_log import AuditEvent
 from app.models.user import Role
-from app.routes.forms import OrderStatusForm
+from app.models.payment import PaymentMethod
+from app.routes.forms import OrderStatusForm, PaymentForm, RefundForm
 from app.services.audit import record_event
+from app.services.payments import PaymentError, record_payment, refund_payment
 from app.services.orders import (
     OrderStatusError,
     allowed_next_statuses,
@@ -55,6 +57,9 @@ def order_detail(order_id: int):
         order=order,
         form=OrderStatusForm(),
         next_statuses=allowed_next_statuses(order.status),
+        payment_form=PaymentForm(),
+        refund_form=RefundForm(),
+        payment_methods=list(PaymentMethod),
     )
 
 
@@ -106,4 +111,68 @@ def order_status_update(order_id: int):
                   "actor": actor.role.value},
     )
     flash(f"Order #{order.id} is now {order.status.value}.", "success")
+    return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+
+
+def _flash_payment_errors(exc: PaymentError) -> None:
+    for messages in exc.errors.values():
+        for message in messages:
+            flash(message, "error")
+
+
+@staff_orders_bp.post("/orders/<int:order_id>/payment")
+@require_role(Role.STAFF, Role.ADMIN)
+def record_order_payment(order_id: int):
+    order = get_order_for_staff(order_id)
+    if order is None:
+        abort(404)
+    form = PaymentForm()
+    if not form.validate_on_submit():
+        flash("Could not record the payment.", "error")
+        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    actor = get_current_user()
+    try:
+        payment = record_payment(order, form.method.data, actor)
+    except PaymentError as exc:
+        _flash_payment_errors(exc)
+        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    record_event(
+        AuditEvent.PAYMENT_RECORDED,
+        success=True,
+        user_id=actor.id,
+        ip_address=client_ip(),
+        user_agent=user_agent(),
+        metadata={"order_id": order.id, "payment_id": payment.id, "method": payment.method.value,
+                  "amount": str(payment.amount)},
+    )
+    flash(f"Payment of {payment.amount} recorded for order #{order.id}.", "success")
+    return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+
+
+@staff_orders_bp.post("/orders/<int:order_id>/refund")
+@require_role(Role.ADMIN)
+def refund_order_payment(order_id: int):
+    """ADMIN only: money leaving the business is a manager's decision."""
+    order = get_order_for_staff(order_id)
+    if order is None or order.payment is None:
+        abort(404)
+    form = RefundForm()
+    if not form.validate_on_submit():
+        flash("Enter a refund amount.", "error")
+        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    try:
+        amount = refund_payment(order.payment, form.amount.data, form.reason.data)
+    except PaymentError as exc:
+        _flash_payment_errors(exc)
+        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    record_event(
+        AuditEvent.PAYMENT_REFUNDED,
+        success=True,
+        user_id=get_current_user().id,
+        ip_address=client_ip(),
+        user_agent=user_agent(),
+        metadata={"order_id": order.id, "payment_id": order.payment.id, "amount": str(amount),
+                  "refunded_total": str(order.payment.refunded_amount)},
+    )
+    flash(f"Refunded {amount} on order #{order.id}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))
