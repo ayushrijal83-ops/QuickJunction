@@ -42,7 +42,11 @@ class RegistrationInput:
     password_confirm: str
 
 
-def register_user(data: RegistrationInput) -> User:
+def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
+    """Create a CUSTOMER account, or -- when the *route* passes
+    ``as_staff=True`` -- a STAFF account that starts unapproved and cannot
+    sign in until an admin approves it. Never an admin: there is no code path
+    from a request to ``Role.ADMIN``."""
     username = normalize_username(data.username)
     email = normalize_email(data.email)
 
@@ -68,7 +72,8 @@ def register_user(data: RegistrationInput) -> User:
         username=username,
         email=email,
         password_hash=hash_password(data.password),
-        role=Role.CUSTOMER,  # never trust a client-supplied role
+        role=Role.STAFF if as_staff else Role.CUSTOMER,  # never a client-supplied role
+        staff_approved=False,
     )
     db.session.add(user)
     try:

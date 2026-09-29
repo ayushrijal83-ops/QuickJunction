@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_match.html" import match_summary %}
 {% block title %}Why we picked this &mdash; Quick Junction{% endblock %}
 
 {% block content %}
@@ -76,10 +77,7 @@
                 </tr>
                 <tr>
                   <th scope="row" class="fw-normal text-secondary">Match</th>
-                  <td>
-                    <span class="badge {{ 'text-bg-success' if top.score >= 0.45 else ('text-bg-primary' if top.score >= 0.20 else 'text-bg-secondary') }}">{{ top.match_label }}</span>
-                    {% if top.score > 0 %}<span class="small text-secondary ms-1">{{ top.score_percent }}%</span>{% endif %}
-                  </td>
+                  <td>{{ match_summary(top, show_breakdown=false) }}</td>
                 </tr>
               </tbody>
             </table>

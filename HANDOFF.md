@@ -225,6 +225,21 @@ good first check that the install is sound.
 
 ---
 
+## Accounts and sign-in
+
+* **Customers** register at `/register` (signed in automatically) and sign in at
+  `/login`. Taste preferences and food suggestions exist **only** in the customer
+  portal; staff and admin accounts get 403 on those pages.
+* **Staff** request an account at `/register/staff` and sign in at `/login/staff`. A new
+  staff account is **pending** and cannot sign in until an admin approves it.
+* **Admins** sign in at `/login/admin`. There is no public admin sign-up; admin
+  accounts are provisioned by the operator (e.g. `scripts/seed_demo.py`).
+* **Approving staff:** Admin dashboard → *Staff accounts* (`/admin/staff`) → *Approve*.
+  *Revoke access* signs that staff member out on their next request.
+* Choosing a portal never grants a role; the role stored on the account decides.
+
+Details: `docs/PHASE3_PRODUCT_IMPROVEMENTS.md`.
+
 ## Troubleshooting
 
 **AI explanation shows "temporarily unavailable"**
@@ -241,7 +256,7 @@ design.
 
 **"Table doesn't exist" / schema errors**
 Migrations have not been applied. Run `flask --app run.py db upgrade`. Confirm
-with `flask --app run.py db current`; the head is `2d9f3b20045f`.
+with `flask --app run.py db current`; the head is `7c4e1a9b52d3`.
 
 **Model loading failure**
 Verify both paths: the base model *and* the v4 adapter. If `LLM_MODEL_PATH` or

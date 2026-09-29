@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_match.html" import match_summary %}
 {% block title %}Recommended for you &mdash; Quick Junction{% endblock %}
 
 {% block content %}
@@ -64,21 +65,7 @@
             </div>
 
             <div class="mt-auto">
-              <div class="d-flex align-items-center justify-content-between mb-2">
-                <span class="badge {{ 'text-bg-success' if rec.score >= 0.45 else ('text-bg-primary' if rec.score >= 0.20 else ('text-bg-secondary' if rec.score > 0 else 'text-bg-light border')) }}">
-                  {{ rec.match_label }}
-                </span>
-                {% if rec.score > 0 %}
-                  <span class="small text-secondary">{{ rec.score_percent }}% match</span>
-                {% endif %}
-              </div>
-              {% if rec.score > 0 %}
-                <div class="progress" style="height:6px" role="progressbar"
-                     aria-label="Match strength for {{ rec.menu_item.name }}"
-                     aria-valuenow="{{ rec.score_percent }}" aria-valuemin="0" aria-valuemax="100">
-                  <div class="progress-bar" style="width: {{ rec.score_percent }}%"></div>
-                </div>
-              {% endif %}
+              {{ match_summary(rec) }}
             </div>
           </div>
         </div>
@@ -86,10 +73,22 @@
     {% endfor %}
   </div>
 
-  <p class="small text-secondary mt-3 mb-0">
-    Matches are calculated by Quick Junction from your preferences and the menu.
-    Items your dietary preference excludes are never shown.
-  </p>
+  <details class="qj-how small text-secondary mt-4">
+    <summary>How is the preference match calculated?</summary>
+    <p class="mt-2 mb-2">
+      Each preference you set is compared with the dish: cuisine must be the same;
+      spice counts fully when it is the same level and half when it is one level away;
+      a dish of exactly your dietary type counts fully, a compatible one (for example a
+      vegan dish for a vegetarian) counts half. The percentage is the average over the
+      preferences you set &mdash; it describes how closely the dish fits what you asked for,
+      not a prediction that you will like it.
+    </p>
+    <p class="mb-0">
+      Strong match: 80% or more &middot; Good match: 60&ndash;79% &middot;
+      Fair match: 40&ndash;59% &middot; Low match: below 40%.
+      Items your dietary preference excludes are never shown.
+    </p>
+  </details>
 {% else %}
   <div class="qj-empty border rounded-3 bg-white">
     <h2 class="h5">Nothing to recommend right now</h2>

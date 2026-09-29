@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Book a table &mdash; Quick Junction{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('reservations.mine') }}">My reservations</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Book a table</li>
+  </ol>
+</nav>
+
+<h1 class="h3 mb-1">Book a table</h1>
+<p class="text-secondary">Each booking holds your table for two hours. You are booking as <strong>{{ current_user.username }}</strong>.</p>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end" novalidate>
+      <div class="col-sm-4">
+        <label class="form-label" for="reservation_date">Date</label>
+        <input class="form-control {{ 'is-invalid' if errors.reservation_date }}" type="date" id="reservation_date"
+               name="reservation_date" value="{{ args.get('reservation_date', '') }}" required>
+        {% for e in errors.reservation_date or [] %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-sm-3">
+        <label class="form-label" for="reservation_time">Time</label>
+        <select class="form-select {{ 'is-invalid' if errors.reservation_time }}" id="reservation_time" name="reservation_time">
+          {% for t in slots %}
+            {% set v = t.strftime("%H:%M") %}
+            <option value="{{ v }}" {% if args.get('reservation_time') == v %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+        {% for e in errors.reservation_time or [] %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-sm-2">
+        <label class="form-label" for="guest_count">Guests</label>
+        <input class="form-control {{ 'is-invalid' if errors.guest_count }}" type="number" min="1" max="50"
+               id="guest_count" name="guest_count" value="{{ args.get('guest_count', '2') }}">
+        {% for e in errors.guest_count or [] %}<div class="invalid-feedback">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-sm-3 d-grid">
+        <button class="btn btn-outline-primary" type="submit">Find tables</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if tables is not none %}
+  {% set day, time, guests = slot %}
+  <h2 class="h5">Free on {{ day.strftime("%a %d %b %Y") }} at {{ time.strftime("%H:%M") }} for {{ guests }}</h2>
+  {% if tables %}
+    <div class="row g-3">
+      {% for table in tables %}
+        <div class="col-sm-6 col-lg-4">
+          <div class="card shadow-sm h-100">
+            <div class="card-body d-flex justify-content-between align-items-center">
+              <div><strong>{{ table.name }}</strong><div class="small text-secondary">{{ table.capacity }} seats</div></div>
+              <form method="post" action="{{ url_for('reservations.create') }}">
+                {{ form.csrf_token }}
+                <input type="hidden" name="table_id" value="{{ table.id }}">
+                <input type="hidden" name="reservation_date" value="{{ day.isoformat() }}">
+                <input type="hidden" name="reservation_time" value="{{ time.strftime('%H:%M') }}">
+                <input type="hidden" name="guest_count" value="{{ guests }}">
+                <button class="btn btn-primary btn-sm" type="submit">Book</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="qj-empty border rounded-3 bg-white">
+      <p class="mb-0">No table for {{ guests }} is free at that time. Try another time or date.</p>
+    </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

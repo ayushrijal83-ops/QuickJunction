@@ -75,7 +75,7 @@ def order_status_update(order_id: int):
     previous = order.status
     try:
         new_status = coerce_status(form.status.data)
-        previous = update_order_status(order, new_status)
+        previous = update_order_status(order, new_status, actor=actor, reason=form.reason.data)
     except OrderStatusError as exc:
         # Rejected transitions are audited too: a repeated attempt to force
         # an order backwards is exactly the kind of thing worth seeing.
@@ -102,7 +102,8 @@ def order_status_update(order_id: int):
         user_id=actor.id,
         ip_address=client_ip(),
         user_agent=user_agent(),
-        metadata={"order_id": order.id, "from": previous.value, "to": order.status.value},
+        metadata={"order_id": order.id, "from": previous.value, "to": order.status.value,
+                  "actor": actor.role.value},
     )
     flash(f"Order #{order.id} is now {order.status.value}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))

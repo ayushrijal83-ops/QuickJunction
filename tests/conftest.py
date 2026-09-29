@@ -47,15 +47,20 @@ def db(app: Flask):
 
 
 def make_user(username: str = "alice", email: str = "alice@example.com", password: str = "correct-horse-1",
-              role: Role = Role.CUSTOMER, is_active: bool = True) -> User:
+              role: Role = Role.CUSTOMER, is_active: bool = True,
+              staff_approved: bool | None = None) -> User:
     """Insert a user directly, bypassing HTTP -- for tests that need an
-    account to already exist (login, authorization checks)."""
+    account to already exist (login, authorization checks).
+
+    A directly inserted STAFF account stands for one an operator provisioned,
+    so it is approved unless the test asks for a pending one."""
     user = User(
         username=username,
         email=email,
         password_hash=hash_password(password),
         role=role,
         is_active=is_active,
+        staff_approved=(role == Role.STAFF) if staff_approved is None else staff_approved,
     )
     _db.session.add(user)
     _db.session.commit()

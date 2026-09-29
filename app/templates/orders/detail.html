@@ -14,7 +14,17 @@
   {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
 </div>
 
-<p class="text-secondary">Placed {{ order.created_at.strftime("%d %b %Y at %H:%M") }}</p>
+<p class="text-secondary">
+  Placed {{ order.created_at.strftime("%d %b %Y at %H:%M") }}
+  &middot; {{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %}
+</p>
+
+{% if order.status.value == "cancelled" and order.cancelled_at %}
+  <div class="alert alert-secondary">
+    Cancelled {{ "by you" if order.cancellation_actor and order.cancellation_actor.value == "customer" else "by the restaurant" }}
+    on {{ order.cancelled_at.strftime("%d %b %Y at %H:%M") }}{% if order.cancellation_reason %} &mdash; &ldquo;{{ order.cancellation_reason }}&rdquo;{% endif %}.
+  </div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-8">
@@ -62,6 +72,22 @@
         </dl>
       </div>
     </div>
+
+    {# Shown only while cancellable; the server enforces the rule regardless. #}
+    {% if can_cancel %}
+      <div class="card shadow-sm mt-3">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-secondary">Changed your mind?</h2>
+          <p class="small text-secondary">You can cancel until the kitchen starts preparing your order.</p>
+          <form method="post" action="{{ url_for('orders.cancel', order_id=order.id) }}" novalidate>
+            {{ cancel_form.csrf_token }}
+            <input class="form-control form-control-sm mb-2" name="reason" maxlength="255"
+                   placeholder="Reason (optional)" aria-label="Cancellation reason">
+            <button type="submit" class="btn btn-outline-danger w-100">Cancel order</button>
+          </form>
+        </div>
+      </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

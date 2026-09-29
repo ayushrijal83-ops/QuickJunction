@@ -376,7 +376,9 @@ Registered in `app/routes/__init__.py` in this order:
 | GET | `/health` | `health.health` | public |
 | GET | `/` | `main.home` | public |
 | GET/POST | `/register` | `auth.register` | public |
-| GET/POST | `/login` | `auth.login` | public |
+| GET/POST | `/register/staff` | `auth.register_staff` | public — creates a **pending** STAFF account |
+| GET/POST | `/login` | `auth.login` | public — customer portal; any role may sign in |
+| GET/POST | `/login/staff`, `/login/admin` | `auth.login` | public — refuses accounts of another role |
 | POST | `/logout` | `auth.logout` | `@login_required` |
 | GET | `/account/` | `account.index` | `@login_required` |
 | GET | `/account/me` | `account.me` | `@login_required` |
@@ -393,9 +395,12 @@ Registered in `app/routes/__init__.py` in this order:
 | POST | `/checkout` | `orders.checkout_submit` | `@login_required` |
 | GET | `/orders` | `orders.history` | `@login_required` |
 | GET | `/orders/<int:order_id>` | `orders.detail` | `@login_required` + **ownership** |
-| GET/POST | `/preferences` | `preferences.preferences` | `@login_required` |
-| GET | `/recommendations` | `preferences.recommendations` | `@login_required` |
-| GET | `/recommendations/explain` | `preferences.explain` | `@login_required` |
+| GET/POST | `/preferences` | `preferences.preferences` | `@customer_required` |
+| GET | `/recommendations` | `preferences.recommendations` | `@customer_required` |
+| GET | `/recommendations/explain` | `preferences.explain` | `@customer_required` |
+| GET | `/admin/staff` | `admin_staff.staff_list` | `@require_role(ADMIN)` |
+| POST | `/admin/staff/<int:user_id>/approve` | `admin_staff.approve` | `@require_role(ADMIN)` |
+| POST | `/admin/staff/<int:user_id>/revoke` | `admin_staff.revoke` | `@require_role(ADMIN)` |
 | GET | `/staff/orders` | `staff_orders.order_list` | `@require_role(STAFF, ADMIN)` |
 | GET | `/staff/orders/<int:order_id>` | `staff_orders.order_detail` | `@require_role(STAFF, ADMIN)` |
 | POST | `/staff/orders/<int:order_id>/status` | `staff_orders.order_status_update` | `@require_role(STAFF, ADMIN)` |
@@ -1464,34 +1469,81 @@ the ranking at all.
 | No candidates after the dietary filter | Empty list — an ordinary outcome, not an error |
 | Empty menu | Empty list |
 
-A score of `0.0` renders as **"Suggested"**, not as a match claim the engine cannot
-support.
+With no preferences, no match score exists (`match_score=None`) and every card renders
+as **"Suggested"** with "No preferences to compare" — never a match claim the engine
+cannot support.
 
-### 10.7 Match labels
+### 10.7 Two numbers: relevance and preference match (Phase 3)
 
-```python
-score >= 0.45  →  "Strong match"
-score >= 0.20  →  "Good match"
-score >  0.00  →  "Fair match"
-otherwise      →  "Suggested"
+Each `Recommendation` carries two different scores:
+
+| Field | What it is | Shown to the customer? |
+| --- | --- | --- |
+| `score` | TF-IDF cosine between the query (preferences + 0.5 × history) and the whole item document | **No** — internal tie-breaker only |
+| `match_score` | Mean of the per-preference components below, over the preferences the customer actually set | **Yes**, as "Preference match N%" |
+
+**Why the cosine is no longer shown.** It is computed over name, description,
+category, ingredients and attribute tokens, so it is diluted by description length and
+weighted by how rare a token is on the current menu. Measured on the demo menu before
+Phase 3: an item matching all three stated preferences scored 26%, one matching a single
+preference scored 62%, and any positive cosine — as low as 2.3% — was labelled
+"Fair match". The percentage did not mean what it said.
+
+**Preference-match components** (`app/services/recommendations.py`):
+
+| Preference | 1.0 | 0.5 | 0.0 |
+| --- | --- | --- | --- |
+| Cuisine (`cuisine_match`) | same cuisine | — | different cuisine |
+| Spice (`spice_match`) | same level | one step apart on none→mild→medium→hot→extra hot | two or more steps apart |
+| Diet (`dietary_match`) | exact dietary type | compatible but different (e.g. vegan dish for a vegetarian) | — (incompatible items are filtered out before scoring) |
+
+A preference the customer did not set is `None` and is left out of the average.
+
+**Cuisine similarity.** Cuisine is a controlled vocabulary (`Cuisine` enum), so exact
+equality *is* the similarity. A TF-IDF "cuisine profile" (all dish text of the preferred
+cuisine vs. each item's text) was prototyped and rejected: on the demo menu it rated
+Chicken Fajitas (Mexican) 31% similar to Indian and Steamed Rice 19% similar to Italian,
+purely through shared words like "chicken", "onion" and "rice".
+
+### 10.8 Match labels
+
+Classified on the **same rounded whole-number percentage the page prints** (half-up),
+so the badge and the number can never disagree:
+
+```text
+percent >= 80  →  "Strong match"
+percent >= 60  →  "Good match"
+percent >= 40  →  "Fair match"
+otherwise      →  "Suggested"   (shown on the page as "Low match" when preferences are set)
+no preferences →  "Suggested"
 ```
 
-> *"Cosine similarity on short documents is not an intuitive number to show a
-> customer."*
+Rationale, from the values the score can take with three preferences set: 3/3 = 100,
+2 exact + near spice = 83, 2 exact + 1 miss = 67, 1 exact + 1 near + 1 miss = 50,
+1 exact + 2 misses = 33. "Fair" therefore means *at least half of what you asked for*.
 
-`score_percent` renders the raw score as a percentage for the progress bar.
+The four label strings are unchanged because they are the vocabulary the frozen V4
+adapter was trained on; `match_label` (sent to the model) always returns one of them,
+and only the page-side `display_label` says "Low match".
 
-### 10.8 Determinism
+The percentage describes how closely a dish fits the stated preferences. It is **not** a
+probability that the customer will like it, and the page says so.
+
+**Ranking** is `(match_score desc, cosine desc, name, id)`: a dish never outranks one that
+meets more of what the customer asked for, and history/text relevance orders dishes
+within the same match level.
+
+### 10.9 Determinism
 
 Three separate mechanisms guarantee it:
 
 1. No randomness anywhere — no sampling, no seed.
-2. Ties break on `item.name` ascending, so equal-scoring items never shuffle between
-   requests.
+2. Ties break on `item.name` then `item.id` ascending, so equal-scoring items never
+   shuffle between requests.
 3. The vectorizer is fitted fresh on each call from the current menu, so the result is
    a pure function of (menu state, preferences, completed orders).
 
-### 10.9 What it is not
+### 10.10 What it is not
 
 > **The recommendation engine is not the AI.**
 
@@ -3595,7 +3647,7 @@ CONFIGURATION
 
 SCHEMA
 [ ] flask --app run.py db upgrade  completed
-[ ] flask --app run.py db current  →  2d9f3b20045f (head)
+[ ] flask --app run.py db current  →  7c4e1a9b52d3 (head)
 [ ] flask --app run.py db heads    →  exactly one line
 [ ] SHOW TABLES;  →  10 tables
 
@@ -3680,3 +3732,6 @@ DOCUMENTATION READ
 `models/qwen3-0.6b-quickjunction-lora-v4`. Dataset: v4, 240 hand-authored examples.
 Migration head: `2d9f3b20045f`. Database: MySQL 8.0.46. Test suite: 420 passed,
 0 failed, 0 skipped.*
+
+*Phase 3 (2026-09-27): migration head is now `7c4e1a9b52d3` (staff approval); see
+`docs/PHASE3_PRODUCT_IMPROVEMENTS.md`.*

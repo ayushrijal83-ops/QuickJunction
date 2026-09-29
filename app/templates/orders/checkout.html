@@ -67,6 +67,25 @@
           {% else %}
             <form method="post" action="{{ url_for('orders.checkout_submit') }}">
               {{ form.csrf_token }}
+              <fieldset class="mb-3">
+                <legend class="h6 text-uppercase text-secondary">Order type</legend>
+                {% for source in sources %}
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="source" id="source-{{ source.value }}"
+                           value="{{ source.value }}" {% if source.value == "online" %}checked{% endif %}>
+                    <label class="form-check-label" for="source-{{ source.value }}">{{ source.value.replace("_", "-") | capitalize }}</label>
+                  </div>
+                {% endfor %}
+              </fieldset>
+              <div class="mb-3">
+                <label class="form-label" for="table_id">Table (dine-in only)</label>
+                <select class="form-select" name="table_id" id="table_id">
+                  <option value="">No table</option>
+                  {% for table in tables %}
+                    <option value="{{ table.id }}">{{ table.name }} ({{ table.capacity }} seats)</option>
+                  {% endfor %}
+                </select>
+              </div>
               <div class="d-grid">{{ submit("Place order", "btn btn-success btn-lg") }}</div>
             </form>
             <a class="btn btn-link w-100 mt-2" href="{{ url_for('cart.index') }}">Back to cart</a>

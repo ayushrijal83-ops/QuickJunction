@@ -686,6 +686,51 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON quick_junction.* TO 'qj_user'@'127.0.0.1
 `GRANT ALL` in production"* as work still outstanding, so this is a known and already
 documented gap rather than something you have discovered.
 
+**Separate migration account (recommended for anything beyond a demo).** Keep schema
+changes and day-to-day traffic on different accounts:
+
+```sql
+-- Runtime: what the Flask app uses in DATABASE_URL.
+CREATE USER 'qj_user'@'127.0.0.1' IDENTIFIED BY 'CHOOSE_A_STRONG_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE ON quick_junction.* TO 'qj_user'@'127.0.0.1';
+
+-- Migrations only: used for `flask db upgrade`, then not used by the app.
+CREATE USER 'qj_migrator'@'127.0.0.1' IDENTIFIED BY 'CHOOSE_ANOTHER_STRONG_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+  ON quick_junction.* TO 'qj_migrator'@'127.0.0.1';
+```
+
+Run migrations with the migrator's URL set only for that command (PowerShell):
+
+```powershell
+$env:DATABASE_URL = "mysql+pymysql://qj_migrator:CHOOSE_ANOTHER_STRONG_PASSWORD@127.0.0.1:3306/quick_junction"
+flask --app run.py db upgrade
+Remove-Item Env:DATABASE_URL   # back to the qj_user URL in .env
+```
+
+A process environment variable takes precedence over `.env`, so `.env` keeps the
+runtime `qj_user` URL throughout. (`qj_migrator` needs `INSERT`/`UPDATE`/`DELETE` too:
+some migrations back-fill or tidy data, e.g. `7c4e1a9b52d3` approves pre-existing staff.)
+
+### 5.6 Moving an existing installation off `root`
+
+If your `.env` currently connects as `root`, the application now tells you so: every
+start logs *"DATABASE_URL connects as MySQL 'root'"*, and `APP_ENV=production` refuses
+to start at all. To switch without losing data:
+
+1. Sign in to MySQL as the administrator (§3.5).
+2. Create `qj_user` and grant it privileges **on your existing database name** — the
+   one after the last `/` in your current `DATABASE_URL`, which may not be
+   `quick_junction`. Use §5.4, replacing `quick_junction` with that name.
+3. Edit `.env` and change only the user and password parts of `DATABASE_URL`:
+   `mysql+pymysql://qj_user:<new password>@127.0.0.1:3306/<your database>`.
+4. Restart the app, confirm the root warning is gone from the startup log, and open
+   `/menu` — it reads from the database, so seeing the menu confirms `qj_user` can
+   connect and read. Signing in confirms it can write (the audit log records it).
+
+No data moves: it is the same database, reached through a narrower account. Nothing in
+the application needs the `root` password afterwards.
+
 ---
 
 ## 6 — Configure `.env`
@@ -1162,7 +1207,7 @@ Three reasons:
 
 ### 9.3 The migration chain in this repository
 
-There are **five** migration files in `migrations/versions/`, forming a single
+There are **six** migration files in `migrations/versions/`, forming a single
 unbroken chain with **one head**:
 
 ```text
@@ -1180,11 +1225,17 @@ d8f3bfd0e2a9   add cart order tables
 38297b707b89   widen audit event allow-list for order status events
       │
       ▼
-2d9f3b20045f   add users.session_version for session revocation      ◄── HEAD
+2d9f3b20045f   add users.session_version for session revocation
+      │
+      ▼
+7c4e1a9b52d3   add users.staff_approved and staff-approval audit events  ◄── HEAD
 ```
 
-**The head revision is `2d9f3b20045f`.** `HANDOFF.md` states the same value, and a
-live check on 2026-08-20 confirmed it.
+**The head revision is `7c4e1a9b52d3`** (Phase 3, 2026-09-27). It adds one column and
+widens the audit-event allow-list; it drops nothing. Staff accounts that already exist
+when it runs are marked approved, because before this revision a staff account could
+only be created by an operator (seed script or direct SQL). Customers and admins are
+unaffected. Staff who sign up afterwards start pending.
 
 ### 9.4 Check where you are
 
@@ -1410,6 +1461,7 @@ Defined in `app/models/user.py`.
 | `role` | VARCHAR(16) + CHECK | One of `admin`, `staff`, `customer`. Default `customer` |
 | `is_active` | BOOLEAN | Default true. A deactivated account's session is dropped on its next request |
 | `session_version` | INT | Default 0. **The mechanism that makes logout actually revoke** — see below |
+| `staff_approved` | BOOLEAN | Default false. Only meaningful for `role = 'staff'`: an unapproved staff account cannot sign in and any session it holds stops working on the next request. Set by an admin at `/admin/staff`. Added by `7c4e1a9b52d3` |
 | `created_at`, `updated_at` | DATETIME | Server-generated |
 
 **Roles.** Three fixed roles, stored as a constrained string rather than a separate

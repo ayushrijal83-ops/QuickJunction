@@ -1,6 +1,7 @@
 """Customer taste preferences and personalised recommendations.
 
-Both routes are ``@login_required`` and both derive the customer identity
+Every route is ``@customer_required`` (staff and admin portals do not offer
+preferences or suggestions) and derives the customer identity
 from the **server-side session** (``get_current_user()``), never from a
 form field, query parameter, or header. There is no ``user_id`` parameter
 anywhere in this module: a forged one has nothing to bind to, because the
@@ -19,13 +20,13 @@ from app.routes.forms import PreferenceForm
 from app.services.preferences import PreferenceError, PreferenceInput, get_preferences, update_preferences
 from app.services.local_llm import ExplanationRequest, generate_explanation
 from app.services.recommendations import recommend_for_user
-from app.utils.authorization import get_current_user, login_required
+from app.utils.authorization import customer_required, get_current_user
 
 preferences_bp = Blueprint("preferences", __name__)
 
 
 @preferences_bp.route("/preferences", methods=["GET", "POST"])
-@login_required
+@customer_required
 def preferences():
     user = get_current_user()
     existing = get_preferences(user.id)
@@ -57,7 +58,7 @@ def preferences():
 
 
 @preferences_bp.get("/recommendations")
-@login_required
+@customer_required
 def recommendations():
     user = get_current_user()
     preference = get_preferences(user.id)
@@ -70,7 +71,7 @@ def recommendations():
 
 
 @preferences_bp.get("/recommendations/explain")
-@login_required
+@customer_required
 def explain():
     """Top recommendation, its deterministic facts, and -- if the local model
     is available -- a generated sentence about it.

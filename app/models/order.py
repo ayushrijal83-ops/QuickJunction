@@ -31,8 +31,28 @@ class OrderStatus(str, enum.Enum):
     CONFIRMED = "confirmed"
     PREPARING = "preparing"
     READY = "ready"
+    SERVED = "served"  # dine-in: food at the table, bill not yet settled
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class OrderSource(str, enum.Enum):
+    """Where an order came from. Only DINE_IN carries a table -- enforced by
+    ``ck_orders_source_table`` below as well as in the checkout service."""
+
+    DINE_IN = "dine_in"
+    TAKEAWAY = "takeaway"
+    DELIVERY = "delivery"
+    ONLINE = "online"
+
+
+class CancellationActor(str, enum.Enum):
+    """Who cancelled. Recorded from the acting account's server-side role,
+    never from anything the client sent."""
+
+    CUSTOMER = "customer"
+    STAFF = "staff"
+    ADMIN = "admin"
 
 
 class Order(db.Model):
@@ -42,6 +62,13 @@ class Order(db.Model):
         sa.CheckConstraint("total >= 0", name="ck_orders_total_nonnegative"),
         # Backs "my orders, newest first" -- the only query GET /orders runs.
         sa.Index("ix_orders_user_created", "user_id", "created_at"),
+        # Backs the date-range scans in app/services/sales.py.
+        sa.Index("ix_orders_created_at", "created_at"),
+        # A dine-in order always names its table; no other source ever does.
+        sa.CheckConstraint(
+            "(source = 'dine_in' AND table_id IS NOT NULL) OR (source <> 'dine_in' AND table_id IS NULL)",
+            name="ck_orders_source_table",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -67,6 +94,30 @@ class Order(db.Model):
     # place to diverge from subtotal without a schema change.
     total: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), nullable=False)
 
+    # Orders placed before sources existed were all web checkouts, hence the
+    # ONLINE default (also what the migration backfills).
+    source: Mapped[OrderSource] = mapped_column(
+        enum_column(OrderSource, 16, name="ck_orders_source"),
+        nullable=False,
+        server_default=OrderSource.ONLINE.value,
+    )
+    # RESTRICT for the same reason as user_id: a table with order history can
+    # be taken out of service but never deleted out from under its orders.
+    table_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("restaurant_tables.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+
+    # Cancellation record. All four stay NULL unless status is CANCELLED
+    # (and for orders cancelled before these columns existed).
+    cancelled_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True)
+    cancelled_by_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    cancellation_actor: Mapped[CancellationActor | None] = mapped_column(
+        enum_column(CancellationActor, 16, name="ck_orders_cancellation_actor"), nullable=True
+    )
+    cancellation_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False
@@ -78,7 +129,8 @@ class Order(db.Model):
     # Read-only convenience for the staff queue, which shows *whose* order
     # each row is. Deliberately exposes the account, not a copy of any
     # personal detail -- the template renders username only.
-    customer: Mapped["User"] = relationship()  # noqa: F821
+    customer: Mapped["User"] = relationship(foreign_keys=[user_id])  # noqa: F821
+    table: Mapped["RestaurantTable | None"] = relationship()  # noqa: F821
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
         return f"<Order id={self.id} user_id={self.user_id} status={self.status.value} total={self.total}>"

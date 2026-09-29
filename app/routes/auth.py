@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.models.audit_log import AuditEvent
+from app.models.user import Role
 from app.routes.forms import LoginForm, RegistrationForm
 from app.services.audit import record_event
 from app.services.auth import RegistrationError, RegistrationInput, authenticate_user, register_user
@@ -24,6 +25,15 @@ from app.utils.request_meta import client_ip as _client_ip
 from app.utils.request_meta import user_agent as _user_agent
 
 auth_bp = Blueprint("auth", __name__)
+
+# Sign-in portals. One login view serves all three, so password checking,
+# rate limiting and session creation exist exactly once. The portal chosen
+# never grants anything: the role stored on the account decides access, and
+# the staff/admin portals only *refuse* accounts of another role, so each
+# portal is clearly for one kind of user. The customer portal (/login) is
+# the general entry point and accepts every role, routing each account to
+# its own dashboard.
+PORTAL_ROLES = {"staff": Role.STAFF, "admin": Role.ADMIN}
 
 
 def safe_next_target() -> str | None:
@@ -40,12 +50,17 @@ def safe_next_target() -> str | None:
     * must start with a single ``/``  -- rejects absolute URLs
     * must not start with ``//``      -- rejects protocol-relative ``//evil``
     * must not contain a backslash    -- some browsers normalise ``\\`` to ``/``
-    * must not be the login page      -- avoids a redirect loop
+    * must not be a login page        -- avoids a redirect loop
+
+    Following it never bypasses authorization: the destination route runs
+    its own role check like any other request.
     """
     target = request.args.get("next", "")
     if not target.startswith("/") or target.startswith("//") or "\\" in target:
         return None
-    if urlparse(target).path == url_for("auth.login"):
+    path = urlparse(target).path
+    login_path = url_for("auth.login")
+    if path == login_path or path.startswith(login_path + "/"):
         return None
     return target
 
@@ -92,11 +107,57 @@ def register():
             flash("Welcome to Quick Junction. Tell us what you like.", "success")
             return redirect(url_for("preferences.preferences"))
 
-    return render_template("register.html", form=form)
+    return render_template("register.html", form=form, staff=False)
 
 
-@auth_bp.route("/login", methods=["GET", "POST"])
-def login():
+@auth_bp.route("/register/staff", methods=["GET", "POST"])
+def register_staff():
+    """Staff sign-up. Creates a STAFF account that starts **pending**: it
+    cannot sign in, holds no session and reaches no staff route until an
+    admin approves it (app/routes/admin_staff.py). So, unlike customer
+    registration, it deliberately does not sign the new account in."""
+    if get_current_user() is not None:
+        return redirect(url_for("account.index"))
+
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        try:
+            user = register_user(
+                RegistrationInput(
+                    username=form.username.data,
+                    email=form.email.data,
+                    password=form.password.data,
+                    password_confirm=form.password_confirm.data,
+                ),
+                as_staff=True,
+            )
+        except RegistrationError as exc:
+            for field_name, messages in exc.errors.items():
+                if hasattr(form, field_name):
+                    getattr(form, field_name).errors.extend(messages)
+                else:
+                    for message in messages:
+                        flash(message, "error")
+        else:
+            record_event(
+                AuditEvent.STAFF_REGISTERED,
+                success=True,
+                user_id=user.id,
+                ip_address=_client_ip(),
+                user_agent=_user_agent(),
+            )
+            flash(
+                "Staff account requested. An administrator must approve it before you can sign in.",
+                "success",
+            )
+            return redirect(url_for("auth.login", portal="staff"))
+
+    return render_template("register.html", form=form, staff=True)
+
+
+@auth_bp.route("/login", methods=["GET", "POST"], defaults={"portal": "customer"})
+@auth_bp.route("/login/<any(staff, admin):portal>", methods=["GET", "POST"])
+def login(portal: str):
     if get_current_user() is not None:
         return redirect(url_for("account.index"))
 
@@ -115,7 +176,7 @@ def login():
                 metadata={"username": username_key},
             )
             flash("Too many login attempts. Try again later.", "error")
-            return render_template("login.html", form=form), 429
+            return render_template("login.html", form=form, portal=portal), 429
 
         user = authenticate_user(form.username.data, form.password.data)
         if user is None:
@@ -130,6 +191,26 @@ def login():
             # Deliberately generic: does not say which of username/password
             # was wrong, and identical whether or not the username exists.
             flash("Invalid username or password.", "error")
+        elif user.is_pending_staff or (portal in PORTAL_ROLES and user.role != PORTAL_ROLES[portal]):
+            # Correct password, but no session is created. These messages are
+            # only reachable with the right password, so they reveal nothing
+            # to someone guessing usernames.
+            pending = user.is_pending_staff
+            login_limiter.reset(rate_key)
+            record_event(
+                AuditEvent.LOGIN_FAILURE,
+                success=False,
+                user_id=user.id,
+                ip_address=ip,
+                user_agent=_user_agent(),
+                metadata={"reason": "staff_pending" if pending else f"not_{portal}"},
+            )
+            if pending:
+                flash("Your staff account is waiting for administrator approval. "
+                      "You can sign in once an admin approves it.", "error")
+            else:
+                flash(f"This account does not have {portal} access. "
+                      "Please use the sign-in page for your account type.", "error")
         else:
             login_limiter.reset(rate_key)
             login_user(user)
@@ -142,7 +223,7 @@ def login():
             )
             return redirect(safe_next_target() or url_for("account.index"))
 
-    return render_template("login.html", form=form)
+    return render_template("login.html", form=form, portal=portal)
 
 
 @auth_bp.post("/logout")

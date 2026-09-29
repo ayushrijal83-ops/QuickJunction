@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, submit %}
+{% block title %}{{ "Edit" if table else "New" }} table &mdash; Quick Junction Admin{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('tables.board') }}">Tables</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ "Edit" if table else "New" }}</li>
+  </ol>
+</nav>
+
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <h1 class="h3 mb-3">{{ "Edit " ~ table.name if table else "New table" }}</h1>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.name, autofocus=true, help="Unique, e.g. T05 or Patio 2.") }}
+          {{ field(form.capacity, min=1, max=50) }}
+          <div class="d-flex flex-wrap gap-2">
+            {{ submit("Save table") }}
+            <a class="btn btn-outline-secondary" href="{{ url_for('tables.board') }}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

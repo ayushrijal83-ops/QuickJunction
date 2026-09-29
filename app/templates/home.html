@@ -11,8 +11,10 @@
     </p>
     <div class="d-flex flex-wrap gap-2">
       <a class="btn btn-primary btn-lg" href="{{ url_for('menu.index') }}">Browse the menu</a>
-      {% if current_user %}
+      {% if current_user and current_user.role.value == "customer" %}
         <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('preferences.recommendations') }}">My recommendations</a>
+      {% elif current_user %}
+        <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('account.index') }}">Go to dashboard</a>
       {% else %}
         <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('auth.register') }}">Create an account</a>
       {% endif %}

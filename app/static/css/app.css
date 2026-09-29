@@ -35,3 +35,74 @@
 button[disabled] .spinner-border {
   vertical-align: -0.125em;
 }
+
+/* Visible keyboard focus everywhere, not only where Bootstrap adds a ring. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--bs-primary);
+  outline-offset: 2px;
+}
+
+/* Sign-in portal selector: a segmented control of three links. */
+.qj-portals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .25rem;
+  padding: .25rem;
+  background: var(--bs-secondary-bg);
+  border-radius: var(--bs-border-radius-lg);
+}
+
+.qj-portal {
+  padding: .5rem;
+  text-align: center;
+  font-weight: 600;
+  color: var(--bs-body-color);
+  text-decoration: none;
+  border-radius: var(--bs-border-radius);
+}
+
+.qj-portal:hover {
+  background: var(--bs-body-bg);
+}
+
+.qj-portal.is-active {
+  background: var(--bs-body-bg);
+  color: var(--bs-primary);
+  box-shadow: var(--bs-box-shadow-sm);
+}
+
+/* Preference match: thin bar plus a text breakdown, so the meaning never
+   depends on colour alone. */
+.qj-match-bar {
+  height: 6px;
+}
+
+.qj-match-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .75rem;
+}
+
+.qj-match-part--yes { color: var(--bs-success-text-emphasis); }
+.qj-match-part--near { color: var(--bs-warning-text-emphasis); }
+.qj-match-part--no { color: var(--bs-secondary-color); }
+
+.qj-how summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+/* Dashboard tiles lift slightly on hover to read as clickable. */
+.qj-tile {
+  transition: box-shadow .15s ease;
+}
+
+.qj-tile:hover {
+  box-shadow: var(--bs-box-shadow) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qj-tile { transition: none; }
+}

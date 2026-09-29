@@ -1,68 +1,112 @@
 {% extends "base.html" %}
-{% block title %}My account &mdash; Quick Junction{% endblock %}
+{% set portal_name = {"customer": "My account", "staff": "Staff dashboard", "admin": "Admin dashboard"}[user.role.value] %}
+{% block title %}{{ portal_name }} &mdash; Quick Junction{% endblock %}
+
+{% macro tile(title, text, href, label, primary=false, badge=none) %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100 shadow-sm qj-tile">
+      <div class="card-body d-flex flex-column">
+        <h2 class="h6 d-flex align-items-center gap-2">{{ title }}{% if badge %} {{ badge }}{% endif %}</h2>
+        <p class="small text-secondary">{{ text }}</p>
+        <a class="btn btn-sm {{ 'btn-primary' if primary else 'btn-outline-primary' }} mt-auto align-self-start" href="{{ href }}">{{ label }}</a>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
 
 {% block content %}
 <div class="d-flex flex-wrap align-items-center gap-3 mb-4">
   <div>
-    <h1 class="h3 mb-1">{{ user.username }}</h1>
-    <span class="badge text-bg-secondary text-uppercase">{{ user.role.value }}</span>
+    <p class="text-secondary small text-uppercase fw-semibold mb-1">{{ portal_name }}</p>
+    <h1 class="h3 mb-0">Welcome, {{ user.username }}</h1>
   </div>
+  <span class="badge text-bg-secondary text-uppercase ms-auto">{{ user.role.value }}</span>
 </div>
 
+{# Tiles are a display convenience; every route enforces its own role. #}
 <div class="row g-3">
-  <div class="col-md-6 col-lg-4">
-    <div class="card h-100 shadow-sm">
-      <div class="card-body">
-        <h2 class="h6">Recommended for you</h2>
-        <p class="small text-secondary">Dishes matched to your stated preferences.</p>
-        <a class="btn btn-sm btn-primary" href="{{ url_for('preferences.recommendations') }}">View recommendations</a>
-      </div>
-    </div>
-  </div>
+  {% if user.role.value == "customer" %}
+    {{ tile("Recommended for you", "Dishes matched to your stated preferences.",
+            url_for('preferences.recommendations'), "View recommendations", primary=true) }}
+    {{ tile("My preferences", "Set your diet, cuisine and spice level.",
+            url_for('preferences.preferences'), "Edit preferences") }}
+    {{ tile("Browse the menu", "Everything the kitchen is serving today.",
+            url_for('menu.index'), "Open menu") }}
+  {% endif %}
 
-  <div class="col-md-6 col-lg-4">
-    <div class="card h-100 shadow-sm">
-      <div class="card-body">
-        <h2 class="h6">My preferences</h2>
-        <p class="small text-secondary">Set your diet, cuisine and spice level.</p>
-        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
-      </div>
-    </div>
-  </div>
-
-  <div class="col-md-6 col-lg-4">
-    <div class="card h-100 shadow-sm">
-      <div class="card-body">
-        <h2 class="h6">My orders</h2>
-        <p class="small text-secondary">Track the status of orders you have placed.</p>
-        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('orders.history') }}">View orders</a>
-      </div>
-    </div>
-  </div>
-
-  {# Shown for convenience only; the routes themselves enforce the role. #}
   {% if user.role.value in ("staff", "admin") %}
-    <div class="col-md-6 col-lg-4">
-      <div class="card h-100 shadow-sm border-primary-subtle">
-        <div class="card-body">
-          <h2 class="h6">Order queue <span class="badge text-bg-primary">Staff</span></h2>
-          <p class="small text-secondary">Work through incoming orders.</p>
-          <a class="btn btn-sm btn-primary" href="{{ url_for('staff_orders.order_list') }}">Open queue</a>
-        </div>
-      </div>
-    </div>
+    {{ tile("Order queue", "Work through incoming orders and update their status.",
+            url_for('staff_orders.order_list'), "Open queue", primary=true) }}
+    {{ tile("Menu", "See every item, including those currently unavailable.",
+            url_for('admin_menu.menu_list'), "View menu" if user.role.value == "staff" else "Manage menu") }}
   {% endif %}
 
   {% if user.role.value == "admin" %}
-    <div class="col-md-6 col-lg-4">
-      <div class="card h-100 shadow-sm border-primary-subtle">
-        <div class="card-body">
-          <h2 class="h6">Menu management <span class="badge text-bg-danger">Admin</span></h2>
-          <p class="small text-secondary">Create and edit categories and menu items.</p>
-          <a class="btn btn-sm btn-primary" href="{{ url_for('admin_menu.menu_list') }}">Manage menu</a>
-        </div>
+    {% set badge %}<span class="badge rounded-pill text-bg-warning">{{ pending_staff }} pending</span>{% endset %}
+    {{ tile("Staff accounts", "Approve new staff and revoke access.",
+            url_for('admin_staff.staff_list'), "Review staff", primary=pending_staff > 0,
+            badge=badge if pending_staff else none) }}
+    {{ tile("Categories", "Create, rename and deactivate menu categories.",
+            url_for('admin_menu.category_list'), "Manage categories") }}
+  {% endif %}
+
+  {% if user.role.value == "customer" %}
+    {{ tile("Book a table", "Pick a date, time and party size; we show the free tables.",
+            url_for('reservations.new'), "Book a table") }}
+    {{ tile("My reservations", "Upcoming and past table bookings.",
+            url_for('reservations.mine'), "View reservations") }}
+  {% endif %}
+
+  {{ tile("My orders", "Track the status of orders you have placed.",
+          url_for('orders.history'), "View orders") }}
+</div>
+
+{% if user.role.value == "customer" %}
+<div class="row g-4 mt-1">
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between"><strong>Recent orders</strong><a class="small" href="{{ url_for('orders.history') }}">All orders</a></div>
+      <ul class="list-group list-group-flush">
+        {% for order in recent_orders %}
+          <li class="list-group-item d-flex justify-content-between align-items-center gap-2">
+            <a href="{{ url_for('orders.detail', order_id=order.id) }}">Order #{{ order.id }}</a>
+            <span class="small text-secondary">{{ order.created_at.strftime("%d %b, %H:%M") }}</span>
+            <span class="qj-price">{{ order.total | money }}</span>
+            {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+            {% if order.status in cancellable %}<span class="small text-secondary">can cancel</span>{% endif %}
+          </li>
+        {% else %}
+          <li class="list-group-item text-secondary">No orders yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header bg-white d-flex justify-content-between"><strong>Upcoming reservations</strong><a class="small" href="{{ url_for('reservations.mine') }}">All reservations</a></div>
+      <ul class="list-group list-group-flush">
+        {% for r in upcoming %}
+          <li class="list-group-item d-flex justify-content-between">
+            <a href="{{ url_for('reservations.detail', reservation_id=r.id) }}">{{ r.table.name }} &middot; {{ r.reservation_date.strftime("%a %d %b") }} {{ r.reservation_time.strftime("%H:%M") }}</a>
+            <span class="small text-uppercase text-secondary">{{ r.status.value.replace("_", " ") }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item text-secondary">No upcoming reservations.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Tables free right now</strong></div>
+      <div class="card-body">
+        {% for t in free_tables %}
+          <span class="badge text-bg-light border me-1 mb-1">{{ t.name }} &middot; {{ t.capacity }} seats</span>
+        {% else %}
+          <span class="text-secondary">No table is free at the moment.</span>
+        {% endfor %}
+        <p class="small text-secondary mt-2 mb-0">For a later time, <a href="{{ url_for('reservations.new') }}">check availability</a> &mdash; a table free now may be booked later, and vice versa.</p>
       </div>
     </div>
-  {% endif %}
+  </div>
 </div>
+{% endif %}
 {% endblock %}

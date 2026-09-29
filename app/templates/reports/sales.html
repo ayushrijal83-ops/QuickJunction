@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Sales &mdash; Quick Junction Admin{% endblock %}
+
+{% macro kpi(label, value, note=none) %}
+  <div class="col-6 col-lg-3">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <div class="small text-secondary text-uppercase">{{ label }}</div>
+      <div class="h4 mb-0 qj-price">{{ value }}</div>
+      {% if note %}<div class="small text-secondary">{{ note }}</div>{% endif %}
+    </div></div>
+  </div>
+{% endmacro %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Sales</h1>
+    <p class="text-secondary mb-0">
+      Statement: <strong>{{ report.label }}</strong>
+      ({{ report.start.strftime("%d %b %Y") }} &ndash; {{ report.end.strftime("%d %b %Y") }}).
+      Revenue only &mdash; not profit.
+    </p>
+  </div>
+  <form method="get" class="d-flex flex-wrap gap-2 align-items-end">
+    <div>
+      <label class="form-label small mb-0" for="range">Range</label>
+      <select class="form-select form-select-sm" name="range" id="range">
+        {% for p in presets %}
+          <option value="{{ p }}" {% if p == selected %}selected{% endif %}>{{ p.replace("_", " ") | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label small mb-0" for="start">From (custom)</label>
+      <input class="form-control form-control-sm" type="date" name="start" id="start" value="{{ args.get('start', '') }}">
+    </div>
+    <div>
+      <label class="form-label small mb-0" for="end">To (custom)</label>
+      <input class="form-control form-control-sm" type="date" name="end" id="end" value="{{ args.get('end', '') }}">
+    </div>
+    <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+  </form>
+</div>
+<form method="get" class="d-flex gap-2 align-items-end mb-4">
+  <div>
+    <label class="form-label small mb-0" for="month">Monthly statement</label>
+    <input class="form-control form-control-sm" type="month" name="month" id="month" value="{{ args.get('month', '') }}">
+  </div>
+  <button class="btn btn-sm btn-outline-primary" type="submit">Show month</button>
+</form>
+
+<div class="row g-3 mb-4">
+  {{ kpi("Today's sales", today_totals.net | money, today_totals.orders ~ " completed") }}
+  {{ kpi("This month's sales", month_totals.net | money, month_totals.orders ~ " completed") }}
+  {{ kpi("Net sales (range)", report.totals.net | money) }}
+  {{ kpi("Average order value", report.totals.average | money) }}
+  {{ kpi("Total orders", report.placed, "placed in range") }}
+  {{ kpi("Paid orders", report.totals.orders, "completed & settled") }}
+  {{ kpi("Cancelled orders", report.cancelled, "never counted as sales") }}
+  {{ kpi("Pending orders", report.active, "not yet completed") }}
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-lg-5">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white"><strong>Financial breakdown</strong></div>
+      <table class="table mb-0">
+        <tbody>
+          <tr><th scope="row" class="fw-normal">Gross sales</th><td class="text-end qj-price">{{ report.totals.gross | money }}</td></tr>
+          <tr><th scope="row" class="fw-normal">Discounts <span class="small text-secondary">(not recorded)</span></th><td class="text-end qj-price">&minus;{{ report.totals.discounts | money }}</td></tr>
+          <tr><th scope="row" class="fw-normal">Refunds <span class="small text-secondary">(not recorded)</span></th><td class="text-end qj-price">&minus;{{ report.totals.refunds | money }}</td></tr>
+          <tr class="table-light"><th scope="row">Net sales</th><td class="text-end qj-price fw-semibold">{{ report.totals.net | money }}</td></tr>
+          <tr><th scope="row" class="fw-normal">Tax <span class="small text-secondary">(not recorded)</span></th><td class="text-end qj-price">{{ report.totals.tax | money }}</td></tr>
+          <tr><th scope="row" class="fw-normal">Collected</th><td class="text-end qj-price">{{ report.totals.collected | money }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white"><strong>By order type</strong></div>
+      <table class="table mb-0">
+        <thead class="table-light"><tr><th scope="col">Type</th><th scope="col" class="text-end">Orders</th><th scope="col" class="text-end">Sales</th><th scope="col" class="text-end">%</th></tr></thead>
+        <tbody>
+          {% for source, t, pct in report.by_source %}
+            <tr><td>{{ source.value.replace("_", "-") | capitalize }}</td><td class="text-end">{{ t.orders }}</td><td class="text-end qj-price">{{ t.net | money }}</td><td class="text-end">{{ pct }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-header bg-white d-flex justify-content-between"><strong>Tables now</strong><a class="small" href="{{ url_for('tables.board') }}">Board</a></div>
+      <ul class="list-group list-group-flush">
+        {% for status, n in table_counts.items() %}
+          <li class="list-group-item d-flex justify-content-between">{% include "partials/_table_status_badge.html" %}<span>{{ n }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+{% set peak = (report.daily | map(attribute=2) | map(attribute="net") | max) if report.daily else 0 %}
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-white"><strong>Daily breakdown &amp; trend</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr><th scope="col">Date</th><th scope="col" class="text-end">Orders placed</th><th scope="col" class="text-end">Completed</th><th scope="col" class="text-end">Gross</th><th scope="col" class="text-end">Discounts</th><th scope="col" class="text-end">Net sales</th><th scope="col" style="width:25%"><span class="visually-hidden">Trend</span></th></tr>
+      </thead>
+      <tbody>
+        {% for day, placed, t in report.daily %}
+          <tr>
+            <td>{{ day.strftime("%a %d %b") }}</td>
+            <td class="text-end">{{ placed }}</td>
+            <td class="text-end">{{ t.orders }}</td>
+            <td class="text-end qj-price">{{ t.gross | money }}</td>
+            <td class="text-end qj-price">{{ t.discounts | money }}</td>
+            <td class="text-end qj-price">{{ t.net | money }}</td>
+            <td>{% if peak %}<div class="progress" style="height:.5rem" role="presentation"><div class="progress-bar" style="width: {{ (t.net * 100 / peak) | round(1) }}%"></div></div>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="table-light">
+        <tr><th scope="row">Total</th><td class="text-end">{{ report.placed }}</td><td class="text-end">{{ report.totals.orders }}</td><td class="text-end qj-price">{{ report.totals.gross | money }}</td><td class="text-end qj-price">{{ report.totals.discounts | money }}</td><td class="text-end qj-price fw-semibold">{{ report.totals.net | money }}</td><td></td></tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Sales by table</strong></div>
+      <table class="table mb-0">
+        <thead class="table-light"><tr><th scope="col">Table</th><th scope="col" class="text-end">Orders</th><th scope="col" class="text-end">Revenue</th></tr></thead>
+        <tbody>
+          {% for table, t in report.by_table %}
+            <tr><td>{{ table.name }}</td><td class="text-end">{{ t.orders }}</td><td class="text-end qj-price">{{ t.net | money }}</td></tr>
+          {% else %}
+            <tr><td colspan="3" class="text-secondary">No tables configured.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header bg-white"><strong>Sales by hour</strong></div>
+      <table class="table mb-0">
+        <thead class="table-light"><tr><th scope="col">Hour</th><th scope="col" class="text-end">Orders</th><th scope="col" class="text-end">Revenue</th></tr></thead>
+        <tbody>
+          {% for hour, t in report.by_hour %}
+            <tr><td>{{ "%02d:00" | format(hour) }}&ndash;{{ "%02d:59" | format(hour) }}</td><td class="text-end">{{ t.orders }}</td><td class="text-end qj-price">{{ t.net | money }}</td></tr>
+          {% else %}
+            <tr><td colspan="3" class="text-secondary">No completed orders in this range.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

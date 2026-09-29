@@ -46,11 +46,31 @@ class AuditEvent(str, enum.Enum):
     ORDER_CREATED = "order_created"
     ORDER_CREATION_FAILED = "order_creation_failed"
 
-    # Staff order management. user_id is the acting staff/admin member, not
-    # the customer who owns the order; the order id and the from/to statuses
-    # live in metadata_json (see app/services/orders.py).
+    # Order status changes. user_id is the acting account -- staff/admin for
+    # the kitchen workflow, or the customer for a self-service cancellation;
+    # metadata_json carries the order id, from/to statuses and an "actor"
+    # role (see app/routes/staff_orders.py, app/routes/orders.py).
     ORDER_STATUS_CHANGED = "order_status_changed"
     ORDER_STATUS_CHANGE_REJECTED = "order_status_change_rejected"
+
+    # Staff approval. STAFF_REGISTERED's user_id is the new (pending) account;
+    # for approve/revoke user_id is the acting admin and the subject staff id
+    # lives in metadata_json (see app/routes/admin_staff.py).
+    STAFF_REGISTERED = "staff_registered"
+    STAFF_APPROVED = "staff_approved"
+    STAFF_APPROVAL_REVOKED = "staff_approval_revoked"
+
+    # Restaurant tables. user_id is the acting staff/admin member; the table
+    # id (and from/to status) live in metadata_json (see app/routes/tables.py).
+    TABLE_CREATED = "table_created"
+    TABLE_UPDATED = "table_updated"
+    TABLE_STATUS_CHANGED = "table_status_changed"
+
+    # Reservations. user_id is the acting account (the booking customer, or
+    # the staff/admin member changing its status); reservation/table ids,
+    # from/to status and the actor's role live in metadata_json.
+    RESERVATION_CREATED = "reservation_created"
+    RESERVATION_STATUS_CHANGED = "reservation_status_changed"
 
 
 class AuditLog(db.Model):

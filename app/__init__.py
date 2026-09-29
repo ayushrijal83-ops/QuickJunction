@@ -15,7 +15,7 @@ from app.utils.authorization import get_current_user
 from app.utils.errors import register_error_handlers
 from app.utils.formatting import register_filters
 from app.utils.logging import configure_logging
-from config import BaseConfig, get_config
+from config import BaseConfig, database_uses_root, get_config
 
 __all__ = ["create_app"]
 
@@ -34,6 +34,15 @@ def create_app(config_name: str | None = None) -> Flask:
     config_class.validate()
 
     configure_logging(app)
+
+    # Production refuses this outright (ProductionConfig.validate); elsewhere
+    # it is a loud reminder rather than a hard stop, so an existing local
+    # setup keeps working while it is migrated to the application account.
+    if database_uses_root(app.config.get("SQLALCHEMY_DATABASE_URI")):
+        app.logger.warning(
+            "DATABASE_URL connects as MySQL 'root'. The application should use its own "
+            "least-privilege account -- see docs/MYSQL_SETUP_HANDOFF.md section 5."
+        )
 
     db.init_app(app)
     migrate.init_app(app, db)

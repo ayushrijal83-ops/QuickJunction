@@ -27,7 +27,7 @@ browse menu → set preferences → get recommendations → cart → checkout
 
 | Area | What it does |
 | --- | --- |
-| **Accounts** | Registration, login, logout; three roles (customer / staff / admin) |
+| **Accounts** | Registration, login, logout; three roles with separate sign-in pages (`/login`, `/login/staff`, `/login/admin`); staff accounts need admin approval |
 | **Menu** | Public browsing by category, with cuisine, dietary and spice attributes |
 | **Menu management** | Admin creates/edits categories and items; staff may view |
 | **Cart** | Session-based; stores only item ids and quantities, never a price |
@@ -296,8 +296,9 @@ gunicorn "app:create_app('production')"
 
 ## 14. Demo setup
 
-`python scripts/seed_demo.py` is idempotent and creates a 10-item menu (one
-deliberately unavailable, to show availability filtering) plus three accounts:
+`python scripts/seed_demo.py` is idempotent and creates an 18-item menu (one
+deliberately unavailable, to show availability filtering) plus three accounts
+(the seeded `staff` account is pre-approved):
 
 | Username | Password | Role |
 | --- | --- | --- |
@@ -312,13 +313,18 @@ production password policy.
 A five-minute demo path:
 
 1. `/` → browse the menu
-2. Register, or log in as `customer`
+2. Register, or sign in as `customer` at `/login`
 3. **My preferences** → vegetarian / Indian / hot → save
-4. **Recommended** → note that meat dishes are absent entirely
+4. **Recommended** → meat dishes are absent entirely; each card shows a
+   *Preference match* percentage, a Strong / Good / Fair / Low badge and a
+   per-preference breakdown
 5. **Why the top pick?** → deterministic facts beside the AI explanation
 6. Add to cart → checkout → order appears as `PENDING`
-7. Log in as `staff` → **Order queue** → walk `PENDING → … → COMPLETED`
+7. Sign in as `staff` at `/login/staff` → **Order queue** → walk `PENDING → … → COMPLETED`
 8. Back as `customer` → the status is updated
+9. Request a staff account at `/register/staff` → try to sign in (refused, pending) →
+   sign in as `admin` at `/login/admin` → **Staff accounts** → *Approve* → the new
+   staff member can now sign in
 
 ---
 

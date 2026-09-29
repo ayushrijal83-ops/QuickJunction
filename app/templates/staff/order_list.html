@@ -19,6 +19,7 @@
             <th scope="col">Order</th>
             <th scope="col">Customer</th>
             <th scope="col">Placed</th>
+            <th scope="col">Type</th>
             <th scope="col">Status</th>
             <th scope="col" class="text-center">Items</th>
             <th scope="col" class="text-end">Total</th>
@@ -33,6 +34,7 @@
                  read their email address. #}
               <td>{{ order.customer.username }}</td>
               <td class="text-secondary">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</td>
+              <td>{{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %}</td>
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
               <td class="text-center">{{ order.items | length }}</td>
               <td class="text-end qj-price">{{ order.total | money }}</td>

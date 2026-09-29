@@ -25,13 +25,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
-from app.models.order import Order, OrderItem, OrderStatus
+from app.models.order import CancellationActor, Order, OrderItem, OrderSource, OrderStatus
+from app.models.restaurant_table import RestaurantTable, TableStatus
+from app.models.user import Role, User
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available_menu_item
 from app.services.errors import ValidationError
+from app.services.tables import UNSEATABLE_STATUSES
 
 MAX_DISTINCT_LINES = 30
 
@@ -58,7 +62,46 @@ def _parse_cart(cart: dict[str, int]) -> list[_Line]:
     return lines
 
 
-def checkout(user_id: int, cart: dict[str, int]) -> Order:
+def resolve_order_channel(raw_source, raw_table_id) -> tuple[OrderSource, int | None]:
+    """Validate a client-supplied (source, table) pair.
+
+    DINE_IN requires an existing, seatable table; every other source must not
+    carry one. Both are re-checked by ``ck_orders_source_table`` in the
+    database, so a bypass of this function still cannot store a mismatch.
+    """
+    try:
+        source = OrderSource(raw_source or OrderSource.ONLINE.value)
+    except ValueError:
+        raise CheckoutError({"source": ["Unknown order type."]})
+
+    table_id = None
+    if raw_table_id not in (None, ""):
+        try:
+            table_id = int(raw_table_id)
+        except (TypeError, ValueError):
+            raise CheckoutError({"table_id": ["Unknown table."]})
+
+    if source != OrderSource.DINE_IN:
+        if table_id is not None:
+            raise CheckoutError({"table_id": ["Only dine-in orders can be assigned a table."]})
+        return source, None
+
+    if table_id is None:
+        raise CheckoutError({"table_id": ["Choose your table for a dine-in order."]})
+    table = db.session.get(RestaurantTable, table_id)
+    if table is None:
+        raise CheckoutError({"table_id": ["Unknown table."]})
+    if table.status in UNSEATABLE_STATUSES:
+        raise CheckoutError({"table_id": [f"Table {table.name} is not available right now."]})
+    return source, table.id
+
+
+def checkout(
+    user_id: int,
+    cart: dict[str, int],
+    source: OrderSource | str = OrderSource.ONLINE,
+    table_id: int | None = None,
+) -> Order:
     """Validate ``cart`` against the live menu and create an ``Order`` with
     its ``OrderItem`` rows in a single transaction.
 
@@ -90,7 +133,18 @@ def checkout(user_id: int, cart: dict[str, int]) -> Order:
     if problems:
         raise CheckoutError({"cart": problems})
 
-    order = Order(user_id=user_id, status=OrderStatus.PENDING, subtotal=Decimal("0.00"), total=Decimal("0.00"))
+    # Re-validated here, not only in the route: the channel rule is a
+    # business rule, and callers other than the checkout route exist.
+    source, table_id = resolve_order_channel(source, table_id)
+
+    order = Order(
+        user_id=user_id,
+        status=OrderStatus.PENDING,
+        source=source,
+        table_id=table_id,
+        subtotal=Decimal("0.00"),
+        total=Decimal("0.00"),
+    )
     subtotal = Decimal("0.00")
 
     try:
@@ -113,6 +167,10 @@ def checkout(user_id: int, cart: dict[str, int]) -> Order:
 
         order.subtotal = subtotal
         order.total = subtotal  # no tax, discount, or delivery fee in this milestone
+        if table_id is not None:
+            # A party ordering at a table means it is in use. Freeing it again
+            # (CLEANING -> AVAILABLE) is a staff action on the table board.
+            db.session.get(RestaurantTable, table_id).status = TableStatus.OCCUPIED
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()
@@ -143,7 +201,9 @@ ALLOWED_STATUS_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
     OrderStatus.PENDING: frozenset({OrderStatus.CONFIRMED, OrderStatus.CANCELLED}),
     OrderStatus.CONFIRMED: frozenset({OrderStatus.PREPARING, OrderStatus.CANCELLED}),
     OrderStatus.PREPARING: frozenset({OrderStatus.READY, OrderStatus.CANCELLED}),
-    OrderStatus.READY: frozenset({OrderStatus.COMPLETED}),
+    # SERVED is the dine-in step; takeaway/delivery go READY -> COMPLETED.
+    OrderStatus.READY: frozenset({OrderStatus.SERVED, OrderStatus.COMPLETED}),
+    OrderStatus.SERVED: frozenset({OrderStatus.COMPLETED}),
     OrderStatus.COMPLETED: frozenset(),
     OrderStatus.CANCELLED: frozenset(),
 }
@@ -169,7 +229,7 @@ def list_orders_for_staff() -> list[Order]:
     per-order item count does not fire one query per row."""
     return (
         db.session.query(Order)
-        .options(selectinload(Order.items), selectinload(Order.customer))
+        .options(selectinload(Order.items), selectinload(Order.customer), selectinload(Order.table))
         .order_by(Order.created_at.desc(), Order.id.desc())
         .all()
     )
@@ -182,26 +242,109 @@ def get_order_for_staff(order_id: int) -> Order | None:
     return db.session.get(Order, order_id)
 
 
-def update_order_status(order: Order, new_status: OrderStatus) -> OrderStatus:
+def _actor_for(user: User) -> CancellationActor:
+    return {
+        Role.CUSTOMER: CancellationActor.CUSTOMER,
+        Role.STAFF: CancellationActor.STAFF,
+        Role.ADMIN: CancellationActor.ADMIN,
+    }[user.role]
+
+
+def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_status: OrderStatus,
+                      *, actor: User | None, reason: str | None, owner_id: int | None = None) -> bool:
+    """Move ``order`` to ``new_status`` **only if its current database row is
+    still in ``from_statuses``**, in one conditional UPDATE.
+
+    This is the concurrency guard. A read-then-write would let a customer's
+    cancel and a cook's "start preparing" both pass their checks against the
+    same stale PENDING read, and the later write would win. Here the status
+    check happens inside the UPDATE itself, so the database (a row lock on
+    InnoDB) serialises the two: exactly one matches, the other updates zero
+    rows. Returns whether this caller won; ``order`` is refreshed either way.
+    """
+    values: dict = {"status": new_status}
+    if new_status == OrderStatus.CANCELLED:
+        values.update(
+            cancelled_at=sa.func.now(),
+            cancelled_by_id=actor.id if actor else None,
+            cancellation_actor=_actor_for(actor) if actor else None,
+            cancellation_reason=(reason or "").strip()[:255] or None,
+        )
+    stmt = (
+        sa.update(Order)
+        .where(Order.id == order.id, Order.status.in_(from_statuses))
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if owner_id is not None:
+        stmt = stmt.where(Order.user_id == owner_id)
+    try:
+        won = db.session.execute(stmt).rowcount == 1
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        raise OrderStatusError({"status": ["Could not update the order. Please try again."]})
+    db.session.refresh(order)
+    return won
+
+
+def update_order_status(order: Order, new_status: OrderStatus, *, actor: User | None = None,
+                        reason: str | None = None) -> OrderStatus:
     """Move ``order`` to ``new_status`` if the workflow permits it.
 
     Returns the previous status (the caller needs it for the audit record).
-    Raises ``OrderStatusError`` on any disallowed transition, leaving the
-    order untouched. Nothing about the order's money is recalculated here:
-    a status change must never rewrite a stored price snapshot.
+    Raises ``OrderStatusError`` on any disallowed transition -- including one
+    that *was* allowed from the status the caller loaded but no longer is,
+    because someone else changed the order in between. Nothing about the
+    order's money is recalculated here: a status change must never rewrite a
+    stored price snapshot.
     """
     previous = order.status
     if not is_valid_transition(previous, new_status):
         raise OrderStatusError(
             {"status": [f"Cannot change an order from {previous.value} to {new_status.value}."]}
         )
+    if not _apply_transition(order, frozenset({previous}), new_status, actor=actor, reason=reason):
+        raise OrderStatusError(
+            {"status": [f"Order #{order.id} was changed by someone else (now {order.status.value}). "
+                        "Nothing was updated."]}
+        )
+    return previous
 
-    order.status = new_status
-    try:
-        db.session.commit()
-    except SQLAlchemyError:
-        db.session.rollback()
-        raise OrderStatusError({"status": ["Could not update the order. Please try again."]})
+
+# --- customer self-service cancellation --------------------------------------
+
+# The customer rule: cancellable only until the kitchen starts. Deliberately
+# narrower than staff's (who may also cancel PREPARING); both are subsets of
+# ALLOWED_STATUS_TRANSITIONS, so neither path can create a new transition.
+CUSTOMER_CANCELLABLE_STATUSES = frozenset({OrderStatus.PENDING, OrderStatus.CONFIRMED})
+
+
+def customer_can_cancel(order: Order) -> bool:
+    return order.status in CUSTOMER_CANCELLABLE_STATUSES
+
+
+def cancel_order_as_customer(order: Order, customer: User, reason: str | None = None) -> OrderStatus:
+    """Cancel ``customer``'s own ``order``. Returns the previous status.
+
+    Ownership is enforced twice: callers load the order with
+    ``get_order_for_user`` (404 otherwise), and the UPDATE itself is scoped to
+    ``user_id``. The status rule is enforced inside that same UPDATE, so a
+    cook starting preparation a moment earlier wins and this raises.
+    """
+    previous = order.status
+    if order.user_id != customer.id:
+        raise OrderStatusError({"status": ["Order not found."]})
+    if previous == OrderStatus.CANCELLED:
+        raise OrderStatusError({"status": ["This order is already cancelled."]})
+    if previous not in CUSTOMER_CANCELLABLE_STATUSES or not _apply_transition(
+        order, CUSTOMER_CANCELLABLE_STATUSES, OrderStatus.CANCELLED,
+        actor=customer, reason=reason, owner_id=customer.id,
+    ):
+        raise OrderStatusError(
+            {"status": [f"This order is already {order.status.value} and can no longer be cancelled. "
+                        "Please speak to our staff."]}
+        )
     return previous
 
 

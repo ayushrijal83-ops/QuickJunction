@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Staff accounts &mdash; Quick Junction Admin{% endblock %}
+
+{% macro staff_table(users, pending) %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Username</th>
+            <th scope="col">Email</th>
+            <th scope="col">Requested</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+            <tr>
+              <th scope="row" class="fw-semibold">{{ user.username }}</th>
+              <td class="text-break">{{ user.email }}</td>
+              <td class="text-nowrap small">{{ user.created_at.strftime("%d %b %Y, %H:%M") }}</td>
+              <td>
+                {% if pending %}
+                  <span class="badge text-bg-warning">Pending approval</span>
+                {% else %}
+                  <span class="badge text-bg-success">Approved</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <form method="post" class="d-inline"
+                      action="{{ url_for('admin_staff.approve' if pending else 'admin_staff.revoke', user_id=user.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  {% if pending %}
+                    <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                  {% else %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Revoke access</button>
+                  {% endif %}
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endmacro %}
+
+{% block content %}
+<div class="mb-4">
+  <h1 class="h3 mb-1">Staff accounts</h1>
+  <p class="text-secondary mb-0">
+    New staff accounts cannot sign in until you approve them. Revoking access
+    signs the staff member out on their next request.
+  </p>
+</div>
+
+<section class="mb-5" aria-labelledby="pending-heading">
+  <h2 id="pending-heading" class="h5 d-flex align-items-center gap-2">
+    Waiting for approval <span class="badge rounded-pill text-bg-warning">{{ pending|length }}</span>
+  </h2>
+  {% if pending %}
+    {{ staff_table(pending, true) }}
+  {% else %}
+    <div class="qj-empty border rounded-3 bg-white"><p class="mb-0">No staff accounts are waiting for approval.</p></div>
+  {% endif %}
+</section>
+
+<section aria-labelledby="approved-heading">
+  <h2 id="approved-heading" class="h5 d-flex align-items-center gap-2">
+    Approved staff <span class="badge rounded-pill text-bg-success">{{ approved|length }}</span>
+  </h2>
+  {% if approved %}
+    {{ staff_table(approved, false) }}
+  {% else %}
+    <div class="qj-empty border rounded-3 bg-white"><p class="mb-0">No approved staff yet.</p></div>
+  {% endif %}
+</section>
+{% endblock %}

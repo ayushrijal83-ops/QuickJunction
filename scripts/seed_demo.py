@@ -28,6 +28,7 @@ from app.extensions import db  # noqa: E402
 from app.models.category import Category  # noqa: E402
 from app.models.enums import Cuisine, DietaryType, SpiceLevel  # noqa: E402
 from app.models.menu_item import MenuItem  # noqa: E402
+from app.models.restaurant_table import RestaurantTable  # noqa: E402
 from app.models.user import Role, User  # noqa: E402
 from app.services.menu import sync_menu_item_ingredients  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
@@ -98,6 +99,10 @@ ITEMS = [
 ]
 
 
+# (name, seats) -- a small dining room for the table board and dine-in checkout.
+TABLES = [("T01", 2), ("T02", 2), ("T03", 4), ("T04", 4), ("T05", 6), ("T06", 8)]
+
+
 def main() -> int:
     app = create_app()
     if app.config["ENV_NAME"] == "production":
@@ -140,13 +145,23 @@ def main() -> int:
                     username=username, email=email,
                     password_hash=hash_password(DEMO_PASSWORD),
                     role=role, is_active=True,
+                    # Provisioned by the operator running this script, so the
+                    # demo staff account is approved up front. Staff who sign
+                    # up through the site start pending instead.
+                    staff_approved=(role == Role.STAFF),
                 ))
                 created_users += 1
+        db.session.commit()
+
+        for name, capacity in TABLES:
+            if db.session.query(RestaurantTable).filter_by(name=name).first() is None:
+                db.session.add(RestaurantTable(name=name, capacity=capacity))
         db.session.commit()
 
         print(f"categories: {db.session.query(Category).count()}")
         print(f"menu items: {db.session.query(MenuItem).count()} (+{created_items} new)")
         print(f"users:      {db.session.query(User).count()} (+{created_users} new)")
+        print(f"tables:     {db.session.query(RestaurantTable).count()}")
         print()
         print("Demo accounts (development only):")
         for username, _, role in ACCOUNTS:

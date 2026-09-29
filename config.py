@@ -179,6 +179,25 @@ class ProductionConfig(BaseConfig):
         uri = cls.SQLALCHEMY_DATABASE_URI or ""
         if uri.startswith("sqlite"):
             raise ConfigError("Production requires the MySQL DATABASE_URL.")
+        if database_uses_root(uri):
+            raise ConfigError(
+                "DATABASE_URL connects as the MySQL root account. Use the dedicated "
+                "application account instead -- see docs/MYSQL_SETUP_HANDOFF.md section 5."
+            )
+
+
+def database_uses_root(uri: str | None) -> bool:
+    """True when the DSN's user is MySQL ``root``. Parses the URL rather than
+    pattern-matching it, and never returns or logs any part of it."""
+    if not uri:
+        return False
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        return (make_url(uri).username or "").lower() == "root"
+    except ArgumentError:
+        return False
 
 
 _WEAK_SECRETS = {

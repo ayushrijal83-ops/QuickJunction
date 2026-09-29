@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Reservations &mdash; Quick Junction Staff{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <h1 class="h3 mb-1">Reservations</h1>
+  <p class="text-secondary mb-0">Today and upcoming, earliest first. Floor status of each table is on the <a href="{{ url_for('tables.board') }}">table board</a>.</p>
+</div>
+
+{% if reservations %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr><th scope="col">Table</th><th scope="col">Customer</th><th scope="col">Date</th><th scope="col">Time</th><th scope="col" class="text-center">Guests</th><th scope="col">Reserved at</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+        </thead>
+        <tbody>
+          {% for r in reservations %}
+            <tr>
+              <td>{{ r.table.name }}</td>
+              {# Username only -- same privacy rule as the order queue. #}
+              <td>{{ r.user.username }}</td>
+              <td>{{ r.reservation_date.strftime("%a %d %b") }}</td>
+              <td>{{ r.reservation_time.strftime("%H:%M") }}</td>
+              <td class="text-center">{{ r.guest_count }}</td>
+              <td class="text-secondary small">{{ r.reserved_at.strftime("%d %b, %H:%M") }}</td>
+              <td><span class="badge text-bg-{{ 'success' if r.status.value == 'confirmed' else 'secondary' }} text-uppercase">{{ r.status.value.replace("_", " ") }}</span></td>
+              <td class="text-end">
+                <div class="d-flex gap-1 justify-content-end">
+                  {% for next in transitions[r.status] | sort(attribute="value") %}
+                    <form method="post" action="{{ url_for('reservations.staff_set_status', reservation_id=r.id) }}">
+                      {{ form.csrf_token }}
+                      <input type="hidden" name="status" value="{{ next.value }}">
+                      <button class="btn btn-sm {{ 'btn-outline-danger' if next.value == 'cancelled' else 'btn-outline-secondary' }}" type="submit">{{ next.value.replace("_", " ") | capitalize }}</button>
+                    </form>
+                  {% endfor %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white"><p class="mb-0">No upcoming reservations.</p></div>
+{% endif %}
+{% endblock %}

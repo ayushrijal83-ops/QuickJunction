@@ -125,7 +125,38 @@ class ClearCartForm(FlaskForm):
 
 
 class CheckoutForm(FlaskForm):
+    # Plain strings: app/services/orders.py::resolve_order_channel is the one
+    # validator for the source/table pair, so a raw POST gets the same rules.
+    source = StringField(validators=[Optional(), Length(max=16)])
+    table_id = StringField(validators=[Optional(), Length(max=12)])
     submit = SubmitField("Place order")
+
+
+class CancelOrderForm(FlaskForm):
+    reason = StringField("Reason (optional)", validators=[Optional(), Length(max=255)])
+    submit = SubmitField("Cancel order")
+
+
+class TableForm(FlaskForm):
+    name = StringField("Table name", validators=[DataRequired(), Length(max=40)])
+    capacity = IntegerField("Seats", validators=[InputRequired(), NumberRange(min=1, max=50)])
+    submit = SubmitField("Save table")
+
+
+class ReservationForm(FlaskForm):
+    """No owner field on purpose: the owner is the signed-in account. All four
+    values are re-validated by app/services/reservations.py."""
+
+    table_id = StringField(validators=[DataRequired(), Length(max=12)])
+    reservation_date = StringField(validators=[DataRequired(), Length(max=10)])
+    reservation_time = StringField(validators=[DataRequired(), Length(max=8)])
+    guest_count = StringField(validators=[DataRequired(), Length(max=3)])
+    submit = SubmitField("Book table")
+
+
+class TableStatusForm(FlaskForm):
+    status = StringField(validators=[DataRequired(), Length(max=16)])
+    submit = SubmitField("Update")
 
 
 def _optional_enum_choices(enum_cls) -> list[tuple[str, str]]:
@@ -160,4 +191,5 @@ class OrderStatusForm(FlaskForm):
     talk the server into a transition the real row does not permit."""
 
     status = StringField(validators=[DataRequired(), Length(max=16)])
+    reason = StringField(validators=[Optional(), Length(max=255)])  # only used when cancelling
     submit = SubmitField("Update status")

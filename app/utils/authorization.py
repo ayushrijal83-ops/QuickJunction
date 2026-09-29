@@ -88,8 +88,11 @@ def get_current_user() -> User | None:
     user = None
     if user_id is not None:
         user = db.session.get(User, user_id)
-        if user is None or not user.is_active:
-            # Deleted or deactivated since the session was issued.
+        if user is None or not user.is_active or user.is_pending_staff:
+            # Deleted or deactivated since the session was issued -- or a
+            # staff account whose approval an admin has revoked. Checked here,
+            # the one function every protected route goes through, so a
+            # revocation takes effect on the very next request everywhere.
             session.clear()
             user = None
         elif session.get(_VERSION_KEY) != user.session_version:
@@ -166,3 +169,8 @@ def require_role(*roles: Role) -> Callable[[Callable], Callable]:
         return wrapped
 
     return decorator
+
+
+# Taste preferences and food suggestions are a customer feature only; staff
+# and admin portals do not offer them.
+customer_required = require_role(Role.CUSTOMER)

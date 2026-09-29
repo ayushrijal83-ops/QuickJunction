@@ -1,16 +1,35 @@
 {% extends "base.html" %}
 {% from "partials/_forms.html" import field, submit %}
-{% block title %}Log in &mdash; Quick Junction{% endblock %}
+{% set portals = {
+  "customer": {"title": "Customer sign in", "blurb": "Order food, set your taste preferences and get suggestions."},
+  "staff":    {"title": "Staff sign in",    "blurb": "Work the kitchen order queue."},
+  "admin":    {"title": "Admin sign in",    "blurb": "Manage the menu and approve staff accounts."},
+} %}
+{% block title %}{{ portals[portal].title }} &mdash; Quick Junction{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
-  <div class="col-md-6 col-lg-4">
+  <div class="col-md-8 col-lg-6 col-xl-5">
+    <h1 class="h3 text-center mb-3">Sign in to Quick Junction</h1>
+
+    {# Portal choice is navigation only. The role stored on the account
+       decides access; the staff and admin pages refuse other account types. #}
+    <nav class="qj-portals mb-3" aria-label="Choose how to sign in">
+      {% for key in ("customer", "staff", "admin") %}
+        <a class="qj-portal{{ ' is-active' if key == portal }}"
+           href="{{ url_for('auth.login', portal=key) }}"
+           {% if key == portal %}aria-current="page"{% endif %}>
+          <span class="qj-portal-name">{{ key|title }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h1 class="h4 mb-1">Log in</h1>
-        <p class="text-secondary small mb-4">Welcome back to Quick Junction.</p>
+        <h2 class="h5 mb-1">{{ portals[portal].title }}</h2>
+        <p class="text-secondary small mb-4">{{ portals[portal].blurb }}</p>
 
-        <form method="post" action="{{ url_for('auth.login') }}" novalidate>
+        <form method="post" action="{{ url_for('auth.login', portal=portal, next=request.args.get('next')) }}" novalidate>
           {{ form.hidden_tag() }}
           {{ field(form.username, autofocus=true, autocomplete="username") }}
           {{ field(form.password, autocomplete="current-password") }}
@@ -19,12 +38,20 @@
             <div class="alert alert-danger py-2">{{ error }}</div>
           {% endfor %}
 
-          <div class="d-grid">{{ submit("Log in") }}</div>
+          <div class="d-grid">{{ submit("Sign in") }}</div>
         </form>
       </div>
     </div>
-    <p class="text-center mt-3 mb-0">
-      Need an account? <a href="{{ url_for('auth.register') }}">Register</a>
+
+    <p class="text-center small mt-3 mb-0">
+      {% if portal == "customer" %}
+        New here? <a href="{{ url_for('auth.register') }}">Create a customer account</a>
+      {% elif portal == "staff" %}
+        New staff member? <a href="{{ url_for('auth.register_staff') }}">Request a staff account</a>
+        <span class="d-block text-secondary mt-1">An administrator approves every staff account before it can sign in.</span>
+      {% else %}
+        Admin accounts are created by the system operator; there is no public sign-up.
+      {% endif %}
     </p>
   </div>
 </div>

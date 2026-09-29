@@ -63,10 +63,23 @@ class User(db.Model):
         sa.Integer, nullable=False, server_default=sa.text("0")
     )
 
+    # Admin approval for STAFF accounts. A staff account with this false
+    # cannot sign in and holds no session (see get_current_user), so it has
+    # no staff access -- and no customer access either. Meaningless for other
+    # roles. Defaults false so an account can only become working staff
+    # through an explicit admin action (app/routes/admin_staff.py).
+    staff_approved: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False
     )
+
+    @property
+    def is_pending_staff(self) -> bool:
+        return self.role == Role.STAFF and not self.staff_approved
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
         return f"<User id={self.id} username={self.username!r} role={self.role.value}>"

@@ -13,11 +13,14 @@ from app.models.customer_preference import CustomerPreference
 from app.models.ingredient import Ingredient
 from app.models.menu_item_ingredient import MenuItemIngredient
 from app.models.menu_item import MenuItem
-from app.models.order import Order, OrderItem, OrderStatus
+from app.models.restaurant_table import RestaurantTable, TableStatus
+from app.models.order import CancellationActor, Order, OrderItem, OrderSource, OrderStatus
+from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import Role, User
 
 __all__ = [
     "AuditEvent",
+    "CancellationActor",
     "AuditLog",
     "Category",
     "CustomerPreference",
@@ -26,7 +29,12 @@ __all__ = [
     "MenuItemIngredient",
     "Order",
     "OrderItem",
+    "OrderSource",
     "OrderStatus",
+    "Reservation",
+    "ReservationStatus",
+    "RestaurantTable",
     "Role",
+    "TableStatus",
     "User",
 ]

@@ -1,0 +1,49 @@
+{# Match badge + per-preference breakdown for one Recommendation.
+
+   Badge, percentage and bar all read the same rec.match_percent, and the
+   label is derived from that same integer in app/services/recommendations.py,
+   so the number and the badge cannot disagree. Every part carries text as
+   well as colour. #}
+
+{% macro component(name, value, near_word='close') %}
+  {% if value is not none %}
+    {% set state = 'yes' if value >= 1 else ('near' if value > 0 else 'no') %}
+    <li class="qj-match-part qj-match-part--{{ state }}">
+      <span aria-hidden="true">{{ {'yes': '✓', 'near': '≈', 'no': '✗'}[state] }}</span>
+      {{ name }}: {{ {'yes': 'matches', 'near': near_word, 'no': 'different'}[state] }}
+    </li>
+  {% endif %}
+{% endmacro %}
+
+{% macro match_summary(rec, show_breakdown=true) %}
+  {% set badge_class = {
+    "strong": "text-bg-success",
+    "good": "text-bg-primary",
+    "fair": "text-bg-warning",
+    "low": "text-bg-secondary",
+    "none": "text-bg-light border",
+  }[rec.match_level] %}
+  <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+    <span class="badge {{ badge_class }}">{{ rec.display_label }}</span>
+    {% if rec.match_percent is not none %}
+      <span class="small text-secondary">Preference match {{ rec.match_percent }}%</span>
+    {% else %}
+      <span class="small text-secondary">No preferences to compare</span>
+    {% endif %}
+  </div>
+  {% if rec.match_percent is not none %}
+    <div class="progress qj-match-bar mb-2" role="progressbar"
+         aria-label="Preference match for {{ rec.menu_item.name }}"
+         aria-valuenow="{{ rec.match_percent }}" aria-valuemin="0" aria-valuemax="100">
+      {# Width is data, so it is the one inline style that earns its place. #}
+      <div class="progress-bar" style="width: {{ rec.match_percent }}%"></div>
+    </div>
+    {% if show_breakdown %}
+      <ul class="qj-match-parts list-unstyled small mb-0">
+        {{ component("Cuisine", rec.cuisine_match) }}
+        {{ component("Spice", rec.spice_match) }}
+        {{ component("Diet", rec.dietary_match, "compatible") }}
+      </ul>
+    {% endif %}
+  {% endif %}
+{% endmacro %}
