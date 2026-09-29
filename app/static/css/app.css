@@ -1,6 +1,162 @@
-/* Quick Junction — the small amount of styling Bootstrap does not give us.
-   Deliberately short: anything Bootstrap already provides is used as-is
-   rather than re-implemented. */
+/* Quick Junction -- the small design layer on top of vendored Bootstrap 5.3.
+   Anything Bootstrap already provides is used as-is; this file only sets
+   the brand, a few shared components, and accessibility details. */
+
+/* --- Tokens ---------------------------------------------------------------
+   One brand colour (terracotta, 5.4:1 on white -- WCAG AA for text) wired
+   into Bootstrap's own variables, so links, focus rings and .text-bg-primary
+   follow it without touching templates. */
+:root {
+  --qj-brand: #b4462b;
+  --qj-brand-dark: #933820;
+  --qj-brand-rgb: 180, 70, 43;
+  --qj-ink: #1f2933;
+  --qj-surface: #ffffff;
+  --qj-radius: .75rem;
+  --bs-primary: var(--qj-brand);
+  --bs-primary-rgb: var(--qj-brand-rgb);
+  --bs-link-color: var(--qj-brand);
+  --bs-link-color-rgb: var(--qj-brand-rgb);
+  --bs-link-hover-color: var(--qj-brand-dark);
+  --bs-link-hover-color-rgb: 147, 56, 32;
+  --bs-focus-ring-color: rgba(var(--qj-brand-rgb), .35);
+}
+
+.btn-primary {
+  --bs-btn-bg: var(--qj-brand);
+  --bs-btn-border-color: var(--qj-brand);
+  --bs-btn-hover-bg: var(--qj-brand-dark);
+  --bs-btn-hover-border-color: var(--qj-brand-dark);
+  --bs-btn-active-bg: var(--qj-brand-dark);
+  --bs-btn-active-border-color: var(--qj-brand-dark);
+  --bs-btn-disabled-bg: var(--qj-brand);
+  --bs-btn-disabled-border-color: var(--qj-brand);
+}
+
+.btn-outline-primary {
+  --bs-btn-color: var(--qj-brand);
+  --bs-btn-border-color: var(--qj-brand);
+  --bs-btn-hover-bg: var(--qj-brand);
+  --bs-btn-hover-border-color: var(--qj-brand);
+  --bs-btn-active-bg: var(--qj-brand-dark);
+  --bs-btn-active-border-color: var(--qj-brand-dark);
+}
+
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus {
+  border-color: rgba(var(--qj-brand-rgb), .6);
+  box-shadow: 0 0 0 .25rem rgba(var(--qj-brand-rgb), .25);
+}
+
+.form-check-input:checked {
+  background-color: var(--qj-brand);
+  border-color: var(--qj-brand);
+}
+
+/* --- Layout ------------------------------------------------------------------ */
+.qj-navbar {
+  background: var(--qj-ink);
+}
+
+.qj-navbar .navbar-brand .qj-mark {
+  color: #ffb199;
+}
+
+.qj-navbar .nav-link[aria-current="page"] {
+  color: #fff;
+  box-shadow: inset 0 -3px 0 var(--qj-brand);
+}
+
+/* Page title row shared by every screen. */
+.qj-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: 1.25rem;
+}
+
+.qj-page-header h1 {
+  margin-bottom: .15rem;
+}
+
+.qj-eyebrow {
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+}
+
+/* --- Components ------------------------------------------------------------------ */
+.card {
+  border-radius: var(--qj-radius);
+  border-color: rgba(0, 0, 0, .06);
+}
+
+/* KPI tile: label, one big number, an optional note. */
+.qj-kpi {
+  height: 100%;
+  padding: 1rem 1.1rem;
+  background: var(--qj-surface);
+  border: 1px solid rgba(0, 0, 0, .06);
+  border-radius: var(--qj-radius);
+  box-shadow: var(--bs-box-shadow-sm);
+}
+
+.qj-kpi__label {
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+}
+
+.qj-kpi__value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.qj-kpi__note {
+  font-size: .8rem;
+  color: var(--bs-secondary-color);
+}
+
+.qj-kpi--accent {
+  border-left: 4px solid var(--qj-brand);
+}
+
+.qj-kpi--warn {
+  border-left: 4px solid var(--bs-warning);
+}
+
+/* Section card header used on dashboards. */
+.qj-section-title {
+  font-size: .95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.table > thead th {
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+}
+
+.table-hover > tbody > tr:hover > * {
+  --bs-table-bg-state: rgba(var(--qj-brand-rgb), .04);
+}
+
+.badge {
+  font-weight: 600;
+  letter-spacing: .02em;
+}
 
 .qj-price {
   font-variant-numeric: tabular-nums;
@@ -30,18 +186,46 @@
   color: var(--bs-secondary-color);
 }
 
+/* Customer welcome band. */
+.qj-hero {
+  padding: 1.5rem;
+  border-radius: var(--qj-radius);
+  background: linear-gradient(135deg, var(--qj-ink), #3b2a24);
+  color: #fff;
+}
+
+.qj-hero .qj-eyebrow {
+  color: #ffb199;
+}
+
 /* Submit buttons disable themselves on click (see base.html usage); keep the
    label from shifting when the spinner appears. */
 button[disabled] .spinner-border {
   vertical-align: -0.125em;
 }
 
+/* --- Accessibility ---------------------------------------------------------------- */
+
 /* Visible keyboard focus everywhere, not only where Bootstrap adds a ring. */
 a:focus-visible,
 button:focus-visible,
-summary:focus-visible {
-  outline: 3px solid var(--bs-primary);
+summary:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--qj-brand);
   outline-offset: 2px;
+}
+
+.qj-skip-link:focus {
+  position: absolute;
+  top: .5rem;
+  left: .5rem;
+  z-index: 2000;
+  padding: .5rem 1rem;
+  background: #fff;
+  color: var(--qj-brand-dark);
+  border-radius: var(--bs-border-radius);
 }
 
 /* Sign-in portal selector: a segmented control of three links. */
@@ -69,7 +253,7 @@ summary:focus-visible {
 
 .qj-portal.is-active {
   background: var(--bs-body-bg);
-  color: var(--bs-primary);
+  color: var(--qj-brand);
   box-shadow: var(--bs-box-shadow-sm);
 }
 

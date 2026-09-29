@@ -4,10 +4,10 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-30 (end of Milestone 14)
-Current state: **Milestone 14 complete — kitchen operations on top of M13
-inventory, M12 tax/discounts, M11 payments/refunds and M10 restaurant
-operations, reservations, cancellation and sales reporting.**
+Last updated: 2026-09-30 (end of Milestone 15)
+Current state: **Milestone 15 complete — UI/UX overhaul (design system,
+role-based navigation, three dashboards, admin payments and audit views) over
+M10–M14 restaurant operations, finance, inventory and kitchen.**
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
 > Operations, Customer Dashboard, Table Reservation, Customer Order
@@ -43,9 +43,10 @@ operations, reservations, cancellation and sales reporting.**
 | 12 | Tax (configurable, snapshotted) + staff/admin discounts | ✅ Complete (not yet applied to live DB) |
 | 13 | Inventory: stock, recipes, movement ledger, sale deduction | ✅ Complete (not yet applied to live DB) |
 | 14 | Kitchen screen: queue, one-tap workflow, prep timestamps and timings | ✅ Complete (not yet applied to live DB) |
-| 15–16 | UI overhaul, final audit | ⬜ Planned |
+| 15 | UI/UX overhaul: design system, role nav, dashboards, admin payments + audit views | ✅ Complete (no schema change) |
+| 16 | Final integration, security and demo audit | ⬜ Planned |
 
-**Test suite: 679 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 685 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M14; `pytest`; in-memory SQLite by default for
+**Test suite: 701 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 707 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M15; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1166,6 +1167,8 @@ No schema change was made in M08; no migration was added.
 | 31 | ~~No payment/refund/tax/discount records~~ — **payments and refunds closed in M11; tax and discounts closed in M12** | — |
 | 34 | Migrations `d7f1e3a9c2b4` (M12 pricing), `e5b8c1d4f7a2` (M13 inventory) and `f3a6d9b2e8c5` (M14 kitchen timestamps) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12–M14 there |
 | 37 | Orders have no free-text "kitchen notes" field (e.g. "no onions"); the kitchen screen shows items, quantities, source/table and timings only | adding customer notes is a small follow-up if wanted |
+| 38 | The M15 UI was verified by rendering tests (every nav destination per role returns 200, content and RBAC asserted) but **not yet reviewed visually in a browser**; the local live DB also lacks the M12–M14 schema (#34), so a browser walkthrough needs #34 or a scratch DB first | a visual pass belongs to the M16 demo audit |
+| 39 | Admin payments and audit views show the latest 200 rows, unpaginated; the audit view is filterable by event type only | fine for a demo; add paging/date filters if volume grows |
 | 35 | Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative (shown "short"). Recipes are read at completion time, not snapshotted per order | deliberate — a served order is never blocked; staff correct counts with an adjustment |
 | 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
@@ -1194,13 +1197,13 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | SQLite **679 passed, 7 skipped**; MySQL **685 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25; M14 added kitchen 14 |
+| Tests | SQLite **701 passed, 7 skipped**; MySQL **707 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25; M14 added kitchen 14; M15 added ui_overhaul 22 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
 | Migrations | **11 revisions, head = `f3a6d9b2e8c5`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 `d7f1e3a9c2b4`; M13 `e5b8c1d4f7a2`; M14 kitchen timestamps). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
 | Tables | 14: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings`, `stock_movements` |
 | Models | 14 modules in `app/models/` |
-| Services | 16 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`; M14: `kitchen`) |
+| Services | 17 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`; M14: `kitchen`; M15: `dashboard`) |
 | Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
 | Audit events | 31 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
@@ -2567,11 +2570,114 @@ no new SQL outside the ORM.
 
 ---
 
+## Milestone 15 — UI/UX overhaul ✅
+
+Presentation layer only: **no backend logic, business rule, route guard or
+schema changed** (no migration). Same stack — Flask templates, vendored
+Bootstrap 5.3.3, one small stylesheet, no new JavaScript or dependency.
+Baseline: SQLite **679 passed, 7 skipped**; MySQL test DB **685 passed, 1
+skipped**.
+
+### Design system (`app/static/css/app.css`)
+
+- **Brand**: one terracotta accent (`#b4462b`, 5.4:1 on white — AA for
+  text) wired into Bootstrap's own variables (`--bs-primary`, link colour,
+  focus ring, `.btn-primary` / `.btn-outline-primary`), so existing templates
+  follow it without edits. Dark ink navbar.
+- **Components**: page header (`.qj-page-header`, `.qj-eyebrow`), KPI tile
+  (`.qj-kpi` + accent/warn variants), section headers, table header styling
+  and hover, rounded cards, customer welcome band (`.qj-hero`). All earlier
+  classes kept.
+- **Status badges** — one partial per vocabulary, each status with its own
+  colour pair from Bootstrap 5.3's AA-contrast "subtle" palette, and the
+  status **text** always rendered (colour is never the only signal):
+  `_status_badge.html` (7 order statuses — SERVED now distinct from READY,
+  uniqueness tested), `_table_status_badge.html`, new
+  `_reservation_badge.html` (replacing three inline copies).
+- Fixed a pre-existing mojibake in the stylesheet header.
+
+### Navigation (`base.html`)
+
+Role-based, and a display convenience only — every route still enforces
+its role server-side (tested per role, including direct GETs):
+
+| Role | Links |
+| --- | --- |
+| Anonymous | Menu · Cart · Sign in · Register |
+| Customer | Dashboard · Menu · For you · My orders · Reservations · Cart · profile |
+| Staff | Dashboard · Orders · Kitchen · Tables · Reservations · Inventory · profile |
+| Admin | staff links + **Manage** ▾ (Sales reports · Payments & refunds · Menu & recipes · Users (staff accounts) · Settings · Audit log) |
+
+Staff/admin no longer see the customer-only Cart / "My orders" / "For you".
+The current section is marked `aria-current="page"` (sub-pages highlight
+their section). Added a skip-to-content link and a `main` landmark; focus
+rings extended to form controls.
+
+### Dashboards (`/account/`, one per role)
+
+Built by the new **`app/services/dashboard.py`** — composition only, every
+figure from an existing service (sales, kitchen, tables, reservations,
+inventory, orders, recommendations); no new query logic or money
+arithmetic. Data scope follows RBAC:
+
+- **Customer**: welcome band with quick actions, *current order* card,
+  recent orders (with "can cancel"), top-3 "Picked for you" from the
+  existing recommendation engine, upcoming reservations, tables free now.
+  Own data only.
+- **Staff**: kitchen counts by column, table status counts, today's
+  reservations, low-stock list, today's order *counts*. **No money** —
+  sales stay ADMIN-only; the dashboard does not widen that (asserted: no
+  currency symbol on the staff dashboard).
+- **Admin**: the staff view plus today's net sales, month net sales,
+  collected today with paid/unpaid split, refunds this month, orders /
+  cancelled / paid-in-advance today, pending staff accounts, and quick
+  actions. KPIs link to their detail pages.
+
+The old single `account.html` was replaced by `dashboard/customer.html`,
+`dashboard/staff.html` and `dashboard/admin.html` (admin extends staff).
+
+### New read-only admin views (`app/routes/admin_views.py`, ADMIN only, GET only)
+
+- **`/admin/payments`** — latest 200 payments: order, table, time, method,
+  amount, refunded (+ reason), recorded by, order status; totals taken /
+  refunded. Refunds are still made on the order page (M11 route).
+- **`/admin/audit`** — latest 200 audit events, filterable by event type via
+  an **allow-list** (an unknown/hostile value falls back to "all" and never
+  reaches SQL); metadata rendered as escaped text (XSS payload tested).
+
+### Tests — 22 new (`tests/test_ui_overhaul.py`)
+
+Anonymous / customer / staff / admin navigation shows exactly the permitted
+links; staff are also refused the admin URLs directly (the menu list stays
+viewable by staff, as since M03); `aria-current`; skip link + landmarks;
+404 page renders the layout; customer dashboard own-data-only; staff
+dashboard operational and money-free; admin dashboard sales figures (net
+100.00 vs collected 113.00 with tax); payments page RBAC + refund display;
+audit page RBAC, allow-list filter, hostile filter value, escaping; every
+order status has a unique badge (7 cases); **crawl** — every link each role
+is shown returns 200 (3 cases). No existing test changed: the pinned
+strings ("Order queue", "2 pending", "Book a table", "Tables free right
+now", "Upcoming reservations", no staff links for customers, no
+recommendation links for staff/admin) were designed around.
+
+**Results:** SQLite **701 passed, 7 skipped** (679 + 22), 24 warnings.
+MySQL test DB **707 passed, 1 skipped** (#32), 18 warnings, 363 s. 0
+failures. The existing template scan (`|safe` / autoescape) covers every new
+template.
+
+### Not done here
+
+A visual review in a real browser (#38) — the rendering tests assert
+content and RBAC, not appearance. Planned for the M16 demo audit.
+
+---
+
 ## Next milestone
 
-**M15 — UI/UX overhaul** (per the fast-track plan). Also apply
-`d7f1e3a9c2b4`, `e5b8c1d4f7a2` and `f3a6d9b2e8c5` to the live database after
-a backup (#34).
+**M16 — Final integration, security and demo audit** (per the fast-track
+plan): browser walkthrough of all three roles, full security and
+data-integrity review, and applying `d7f1e3a9c2b4`, `e5b8c1d4f7a2` and
+`f3a6d9b2e8c5` to the live database after a backup (#34).
 
 Carried over:
 

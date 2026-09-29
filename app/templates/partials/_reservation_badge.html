@@ -1,0 +1,8 @@
+{# Reservation status badge. Expects `status` (a ReservationStatus member). #}
+{%- set _styles = {
+  "confirmed": "bg-success-subtle text-success-emphasis border-success-subtle",
+  "completed": "bg-secondary-subtle text-secondary-emphasis border-secondary-subtle",
+  "no_show":   "bg-warning-subtle text-warning-emphasis border-warning-subtle",
+  "cancelled": "bg-danger-subtle text-danger-emphasis border-danger-subtle",
+} -%}
+<span class="badge border {{ _styles.get(status.value, 'bg-secondary-subtle text-secondary-emphasis') }} text-uppercase">{{ status.value.replace("_", " ") }}</span>

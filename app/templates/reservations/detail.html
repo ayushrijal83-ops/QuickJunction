@@ -24,7 +24,7 @@
           <dt class="col-5 fw-normal text-secondary">Reserved by</dt><dd class="col-7">{{ r.user.username }}</dd>
           <dt class="col-5 fw-normal text-secondary">Reserved at</dt><dd class="col-7">{{ r.reserved_at.strftime("%d %b %Y, %H:%M:%S") }}</dd>
           <dt class="col-5 fw-normal text-secondary">Status</dt>
-          <dd class="col-7 mb-0"><span class="badge text-bg-{{ 'success' if r.status.value == 'confirmed' else 'secondary' }} text-uppercase">{{ r.status.value.replace("_", " ") }}</span></dd>
+          <dd class="col-7 mb-0">{% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}</dd>
         </dl>
         {% if can_cancel %}
           <form method="post" action="{{ url_for('reservations.cancel', reservation_id=r.id) }}" class="mt-4">

@@ -1,10 +1,10 @@
 {# Table status badge. Expects `status` (a TableStatus member). Colour is
    presentation only -- the text is the authoritative value. #}
-{%- set _colours = {
-  "available":      "text-bg-success",
-  "occupied":       "text-bg-danger",
-  "reserved":       "text-bg-info",
-  "cleaning":       "text-bg-warning",
-  "out_of_service": "text-bg-secondary",
+{%- set _styles = {
+  "available":      "bg-success-subtle text-success-emphasis border-success-subtle",
+  "occupied":       "bg-danger-subtle text-danger-emphasis border-danger-subtle",
+  "reserved":       "bg-info-subtle text-info-emphasis border-info-subtle",
+  "cleaning":       "bg-warning-subtle text-warning-emphasis border-warning-subtle",
+  "out_of_service": "bg-secondary-subtle text-secondary-emphasis border-secondary-subtle",
 } -%}
-<span class="badge {{ _colours.get(status.value, 'text-bg-secondary') }} text-uppercase">{{ status.value.replace("_", " ") }}</span>
+<span class="badge border {{ _styles.get(status.value, 'bg-secondary-subtle text-secondary-emphasis') }} text-uppercase">{{ status.value.replace("_", " ") }}</span>

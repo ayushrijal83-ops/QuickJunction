@@ -24,7 +24,7 @@
               <td>{{ r.reservation_time.strftime("%H:%M") }}</td>
               <td class="text-center">{{ r.guest_count }}</td>
               <td class="text-secondary small">{{ r.reserved_at.strftime("%d %b, %H:%M") }}</td>
-              <td><span class="badge text-bg-{{ 'success' if r.status.value == 'confirmed' else 'secondary' }} text-uppercase">{{ r.status.value.replace("_", " ") }}</span></td>
+              <td>{% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}</td>
               <td class="text-end">
                 <div class="d-flex gap-1 justify-content-end">
                   {% for next in transitions[r.status] | sort(attribute="value") %}

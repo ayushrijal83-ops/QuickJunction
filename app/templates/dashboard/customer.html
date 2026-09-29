@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "partials/_dashboard.html" import action, section %}
+{% block title %}My account &mdash; Quick Junction{% endblock %}
+
+{% block content %}
+<div class="qj-hero mb-4">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+    <div>
+      <div class="qj-eyebrow">My account</div>
+      <h1 class="h3 mb-1">Welcome, {{ user.username }}</h1>
+      <p class="mb-0 opacity-75">Order ahead, book a table, and see what suits your taste.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-light btn-sm" href="{{ url_for('menu.index') }}">Browse the menu</a>
+      <a class="btn btn-outline-light btn-sm" href="{{ url_for('reservations.new') }}">Book a table</a>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    {% if active_order %}
+      <div class="card shadow-sm mb-4 border-start border-4" style="border-left-color: var(--qj-brand) !important">
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <div class="qj-eyebrow">Your current order</div>
+            <a class="h5 mb-1 d-inline-block" href="{{ url_for('orders.detail', order_id=active_order.id) }}">Order #{{ active_order.id }}</a>
+            <div class="small text-secondary">{{ active_order.items | length }} item{{ "s" if active_order.items | length != 1 }} &middot;
+              <span class="qj-price">{{ active_order.total | money }}</span>
+              {% if active_order.table %} &middot; {{ active_order.table.name }}{% endif %}</div>
+          </div>
+          {% with status = active_order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+      {{ section("Recent orders", "All orders", url_for('orders.history')) }}
+      <ul class="list-group list-group-flush">
+        {% for order in recent_orders %}
+          <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <a href="{{ url_for('orders.detail', order_id=order.id) }}">Order #{{ order.id }}</a>
+            <span class="small text-secondary">{{ order.created_at.strftime("%d %b, %H:%M") }}</span>
+            <span class="qj-price">{{ order.total | money }}</span>
+            <span>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+              {% if order.status in cancellable and not order.payment %}<span class="small text-secondary ms-1">can cancel</span>{% endif %}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item qj-empty py-4">No orders yet. <a href="{{ url_for('menu.index') }}">Browse the menu</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="card shadow-sm">
+      {{ section("Picked for you", "All recommendations", url_for('preferences.recommendations')) }}
+      <div class="card-body">
+        {% if top_picks %}
+          <div class="row g-2">
+            {% for pick in top_picks %}
+              <div class="col-sm-4">
+                <a class="d-block border rounded-3 p-2 h-100 text-decoration-none text-reset qj-tile" href="{{ url_for('menu.detail', item_id=pick.menu_item.id) }}">
+                  <div class="fw-semibold">{{ pick.menu_item.name }}</div>
+                  <div class="small text-secondary qj-price">{{ pick.menu_item.price | money }}</div>
+                </a>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="mb-0 text-secondary">Nothing to suggest yet.</p>
+        {% endif %}
+        <p class="small text-secondary mb-0 mt-2"><a href="{{ url_for('preferences.preferences') }}">Set your taste preferences</a> to improve these.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm mb-4">
+      {{ section("Upcoming reservations", "All reservations", url_for('reservations.mine')) }}
+      <ul class="list-group list-group-flush">
+        {% for r in upcoming %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <a href="{{ url_for('reservations.detail', reservation_id=r.id) }}">{{ r.table.name }} &middot; {{ r.reservation_date.strftime("%a %d %b") }} {{ r.reservation_time.strftime("%H:%M") }}</a>
+            <span class="small text-secondary">{{ r.guest_count }} guest{{ "s" if r.guest_count != 1 }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item text-secondary">No upcoming reservations.</li>
+        {% endfor %}
+      </ul>
+      <div class="card-body pt-2">{{ action("Book a table", url_for('reservations.new'), primary=true) }}</div>
+    </div>
+
+    <div class="card shadow-sm">
+      {{ section("Tables free right now") }}
+      <div class="card-body">
+        {% for t in free_tables %}
+          <span class="badge border bg-success-subtle text-success-emphasis border-success-subtle me-1 mb-1">{{ t.name }} &middot; {{ t.capacity }} seats</span>
+        {% else %}
+          <span class="text-secondary">No table is free at the moment.</span>
+        {% endfor %}
+        <p class="small text-secondary mt-2 mb-0">For a later time, <a href="{{ url_for('reservations.new') }}">check availability</a> &mdash; a table free now may be booked later, and vice versa.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

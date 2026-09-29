@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "partials/_dashboard.html" import kpi, action, section %}
+{% block title %}{% block dash_title %}Staff dashboard{% endblock %} &mdash; Quick Junction{% endblock %}
+
+{% block content %}
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">{% block eyebrow %}Staff dashboard{% endblock %}</div>
+    <h1 class="h3">Welcome, {{ user.username }}</h1>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    {{ action("Kitchen", url_for('kitchen.board'), primary=true) }}
+    {{ action("Order queue", url_for('staff_orders.order_list')) }}
+    {{ action("Tables", url_for('tables.board')) }}
+  </div>
+</div>
+
+{% block business %}{% endblock %}
+
+<h2 class="h6 qj-eyebrow mb-2">Kitchen now</h2>
+<div class="row g-3 mb-4">
+  {% for status, count in kitchen.items() %}
+    {{ kpi({"pending": "New", "confirmed": "Confirmed", "preparing": "Preparing", "ready": "Ready to serve"}[status.value],
+           count, href=url_for('kitchen.board'), variant="accent" if status.value == "ready" and count else "") }}
+  {% endfor %}
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      {{ section("Tables", "Board", url_for('tables.board')) }}
+      <ul class="list-group list-group-flush">
+        {% for status, n in table_counts.items() %}
+          <li class="list-group-item d-flex justify-content-between">{% include "partials/_table_status_badge.html" %}<span>{{ n }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      {{ section("Today's reservations", "All", url_for('reservations.staff_list')) }}
+      <ul class="list-group list-group-flush">
+        {% for r in todays_reservations[:6] %}
+          <li class="list-group-item d-flex justify-content-between">
+            <span>{{ r.reservation_time.strftime("%H:%M") }} &middot; {{ r.table.name }}</span>
+            <span class="small text-secondary">{{ r.user.username }}, {{ r.guest_count }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item text-secondary">None booked for today.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      {{ section("Low stock", "Inventory", url_for('inventory.stock')) }}
+      <ul class="list-group list-group-flush">
+        {% for i in low_stock[:6] %}
+          <li class="list-group-item d-flex justify-content-between">
+            <a href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">{{ i.name }}</a>
+            <span class="{{ 'text-danger fw-semibold' if i.current_quantity < 0 else 'text-warning-emphasis' }}">{{ i.current_quantity | round(3) }} {{ i.unit.value }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item text-secondary">Everything is stocked.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+{% block staff_footer %}
+<p class="small text-secondary mt-4 mb-0">Today: {{ orders_today }} order{{ "s" if orders_today != 1 }} placed, {{ completed_today }} completed.</p>
+{% endblock %}
+{% endblock %}

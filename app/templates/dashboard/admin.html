@@ -1,0 +1,31 @@
+{% extends "dashboard/staff.html" %}
+{% from "partials/_dashboard.html" import kpi, action %}
+{% block dash_title %}Admin dashboard{% endblock %}
+{% block eyebrow %}Admin dashboard{% endblock %}
+
+{# The business view: sales figures are ADMIN-only, from app/services/sales. #}
+{% block business %}
+<h2 class="h6 qj-eyebrow mb-2">Sales</h2>
+<div class="row g-3 mb-3">
+  {{ kpi("Today's net sales", today.totals.net | money, today.totals.orders ~ " completed", url_for('reports.sales', range='today'), "accent") }}
+  {{ kpi("This month", month.net | money, month.orders ~ " completed", url_for('reports.sales')) }}
+  {{ kpi("Collected today", today.totals.collected | money, today.totals.paid ~ " paid · " ~ today.unpaid_completed ~ " unpaid",
+         url_for('admin_views.payments'), "warn" if today.unpaid_completed else "") }}
+  {{ kpi("Refunds this month", month.refunds | money, none, url_for('admin_views.payments')) }}
+</div>
+<div class="row g-3 mb-4">
+  {{ kpi("Orders today", today.placed, today.active ~ " in progress") }}
+  {{ kpi("Cancelled today", today.cancelled) }}
+  {{ kpi("Paid in advance", today.prepaid | money, "orders not yet completed") }}
+  {{ kpi("Staff accounts", pending_staff ~ " pending", "awaiting approval", url_for('admin_staff.staff_list'), "warn" if pending_staff else "") }}
+</div>
+<div class="d-flex flex-wrap gap-2 mb-4">
+  {{ action("Sales reports", url_for('reports.sales')) }}
+  {{ action("Payments & refunds", url_for('admin_views.payments')) }}
+  {{ action("Menu & recipes", url_for('admin_menu.menu_list')) }}
+  {{ action("Settings", url_for('admin_settings.pricing')) }}
+  {{ action("Audit log", url_for('admin_views.audit')) }}
+</div>
+{% endblock %}
+
+{% block staff_footer %}{% endblock %}

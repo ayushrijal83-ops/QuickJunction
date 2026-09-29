@@ -1,0 +1,24 @@
+{# Dashboard building blocks (M15). Presentation only. #}
+
+{% macro kpi(label, value, note=none, href=none, variant="") %}
+  <div class="col-6 col-lg-3">
+    {% if href %}<a class="text-decoration-none text-reset d-block h-100" href="{{ href }}">{% endif %}
+    <div class="qj-kpi {{ 'qj-kpi--' ~ variant if variant else '' }} {{ 'qj-tile' if href else '' }}">
+      <div class="qj-kpi__label">{{ label }}</div>
+      <div class="qj-kpi__value">{{ value }}</div>
+      {% if note %}<div class="qj-kpi__note">{{ note }}</div>{% endif %}
+    </div>
+    {% if href %}</a>{% endif %}
+  </div>
+{% endmacro %}
+
+{% macro action(label, href, primary=false) %}
+  <a class="btn btn-sm {{ 'btn-primary' if primary else 'btn-outline-primary' }}" href="{{ href }}">{{ label }}</a>
+{% endmacro %}
+
+{% macro section(title, link_label=none, link_href=none) %}
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <h2 class="qj-section-title">{{ title }}</h2>
+    {% if link_href %}<a class="small" href="{{ link_href }}">{{ link_label }}</a>{% endif %}
+  </div>
+{% endmacro %}

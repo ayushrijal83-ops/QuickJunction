@@ -18,10 +18,20 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body class="d-flex flex-column min-vh-100 bg-body-tertiary">
+<a class="visually-hidden-focusable qj-skip-link" href="#main">Skip to content</a>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+{# One nav link. `section` is the blueprint (or endpoint prefix) that marks
+   the link current, so a sub-page such as an order detail still highlights
+   "Orders". #}
+{% macro nav(endpoint, label, section=none) -%}
+  {% set here = request.endpoint or "" %}
+  {% set current = here == endpoint or (section and here.startswith(section)) %}
+  <li class="nav-item"><a class="nav-link" href="{{ url_for(endpoint) }}"{% if current %} aria-current="page"{% endif %}>{{ label }}</a></li>
+{%- endmacro %}
+
+<nav class="navbar navbar-expand-lg navbar-dark qj-navbar" aria-label="Main">
   <div class="container">
-    <a class="navbar-brand fw-semibold" href="{{ url_for('main.home') }}">Quick Junction</a>
+    <a class="navbar-brand fw-semibold" href="{{ url_for('main.home') }}"><span class="qj-mark" aria-hidden="true">&#9679;</span> Quick Junction</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
             data-bs-target="#nav" aria-controls="nav" aria-expanded="false"
             aria-label="Toggle navigation">
@@ -29,43 +39,56 @@
     </button>
 
     <div class="collapse navbar-collapse" id="nav">
+      {# Display convenience only. Every route re-checks the role server-side
+         via require_role -- hiding a link is not the control
+         (docs/SECURITY.md). Each role sees only links it may use. #}
       <ul class="navbar-nav me-auto">
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('menu.index') }}">Menu</a></li>
-        {% if current_user %}
+        {% set role = current_user.role.value if current_user else none %}
+        {% if role %}{{ nav("account.index", "Dashboard") }}{% endif %}
+        {% if role in (none, "customer") %}
+          {{ nav("menu.index", "Menu", "menu.") }}
+        {% endif %}
+        {% if role == "customer" %}
           {# Suggestions and preferences are a customer-only feature. #}
-          {% if current_user.role.value == "customer" %}
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('preferences.recommendations') }}">Recommended</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('reservations.mine') }}">Reservations</a></li>
-          {% endif %}
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('orders.history') }}">My orders</a></li>
-          {# Display convenience only. Every staff/admin route re-checks the
-             role server-side via require_role -- hiding a link is not the
-             control (docs/SECURITY.md). #}
-          {% if current_user.role.value in ("staff", "admin") %}
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('staff_orders.order_list') }}">Order queue</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('kitchen.board') }}">Kitchen</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('tables.board') }}">Tables</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('reservations.staff_list') }}">Reservations</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('inventory.stock') }}">Inventory</a></li>
-          {% endif %}
-          {% if current_user.role.value == "admin" %}
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_menu.menu_list') }}">Manage menu</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_staff.staff_list') }}">Staff accounts</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('reports.sales') }}">Sales</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_settings.pricing') }}">Settings</a></li>
-          {% endif %}
+          {{ nav("preferences.recommendations", "For you", "preferences.") }}
+          {{ nav("orders.history", "My orders", "orders.") }}
+          {{ nav("reservations.mine", "Reservations", "reservations.") }}
+        {% elif role in ("staff", "admin") %}
+          {{ nav("staff_orders.order_list", "Orders", "staff_orders.") }}
+          {{ nav("kitchen.board", "Kitchen", "kitchen.") }}
+          {{ nav("tables.board", "Tables", "tables.") }}
+          {{ nav("reservations.staff_list", "Reservations", "reservations.staff") }}
+          {{ nav("inventory.stock", "Inventory", "inventory.") }}
+        {% endif %}
+        {% if role == "admin" %}
+          {% set admin_here = (request.endpoint or "").split(".")[0] in ("admin_menu", "admin_staff", "reports", "admin_settings", "admin_views") %}
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"
+               {% if admin_here %}aria-current="page"{% endif %}>Manage</a>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="{{ url_for('reports.sales') }}">Sales reports</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_views.payments') }}">Payments &amp; refunds</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_menu.menu_list') }}">Menu &amp; recipes</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_staff.staff_list') }}">Users (staff accounts)</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_settings.pricing') }}">Settings</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_views.audit') }}">Audit log</a></li>
+            </ul>
+          </li>
         {% endif %}
       </ul>
 
       <ul class="navbar-nav align-items-lg-center">
-        <li class="nav-item">
-          <a class="nav-link" href="{{ url_for('cart.index') }}">
-            Cart{% if cart_count %} <span class="badge text-bg-primary">{{ cart_count }}</span>{% endif %}
-          </a>
-        </li>
+        {% if role in (none, "customer") %}
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('cart.index') }}"{% if (request.endpoint or "").startswith("cart.") %} aria-current="page"{% endif %}>
+              Cart{% if cart_count %} <span class="badge text-bg-primary">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}
+            </a>
+          </li>
+        {% endif %}
         {% if current_user %}
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('account.index') }}">
+            <a class="nav-link" href="{{ url_for('account.index') }}" title="Your dashboard">
               {{ current_user.username }}
               <span class="badge text-bg-secondary text-uppercase">{{ current_user.role.value }}</span>
             </a>
@@ -90,7 +113,7 @@
 {# Announces asynchronous status changes to screen readers. #}
 <div id="global-status" class="visually-hidden" role="status" aria-live="polite"></div>
 
-<main class="container py-4 flex-grow-1">
+<main id="main" class="container py-4 flex-grow-1" tabindex="-1">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
       {# Flash categories used in this app: success, error. #}

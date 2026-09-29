@@ -1,13 +1,14 @@
 {# Order status badge. Expects `status` (an OrderStatus member).
-   Colour is presentation only -- the authoritative status is the enum value
-   rendered inside the badge. #}
-{%- set _colours = {
-  "pending":   "text-bg-secondary",
-  "confirmed": "text-bg-info",
-  "preparing": "text-bg-warning",
-  "ready":     "text-bg-primary",
-  "served":    "text-bg-primary",
-  "completed": "text-bg-success",
-  "cancelled": "text-bg-danger",
+   Every status has its own colour pair (Bootstrap 5.3's AA-contrast "subtle"
+   palette), but the colour is presentation only -- the authoritative status
+   is the text rendered inside the badge. #}
+{%- set _styles = {
+  "pending":   "bg-secondary-subtle text-secondary-emphasis border-secondary-subtle",
+  "confirmed": "bg-info-subtle text-info-emphasis border-info-subtle",
+  "preparing": "bg-warning-subtle text-warning-emphasis border-warning-subtle",
+  "ready":     "bg-primary-subtle text-primary-emphasis border-primary-subtle",
+  "served":    "bg-dark-subtle text-dark-emphasis border-dark-subtle",
+  "completed": "bg-success-subtle text-success-emphasis border-success-subtle",
+  "cancelled": "bg-danger-subtle text-danger-emphasis border-danger-subtle",
 } -%}
-<span class="badge {{ _colours.get(status.value, 'text-bg-secondary') }} text-uppercase">{{ status.value }}</span>
+<span class="badge border {{ _styles.get(status.value, 'bg-secondary-subtle text-secondary-emphasis') }} text-uppercase">{{ status.value }}</span>

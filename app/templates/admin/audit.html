@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Audit log &mdash; Quick Junction Admin{% endblock %}
+
+{% block content %}
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">Manage</div>
+    <h1 class="h3">Audit log</h1>
+    <p class="text-secondary mb-0">Most recent {{ rows | length }} events, newest first. Read-only.</p>
+  </div>
+  <form method="get" class="d-flex gap-2 align-items-end">
+    <div>
+      <label class="form-label small mb-0" for="event">Event</label>
+      <select class="form-select form-select-sm" id="event" name="event">
+        <option value="">All events</option>
+        {% for e in events %}<option value="{{ e }}" {% if e == selected %}selected{% endif %}>{{ e.replace("_", " ") }}</option>{% endfor %}
+      </select>
+    </div>
+    <button class="btn btn-sm btn-outline-primary" type="submit">Filter</button>
+  </form>
+</div>
+
+{% if rows %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Result</th><th scope="col">Account</th><th scope="col">Details</th><th scope="col">IP</th></tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td class="small text-secondary text-nowrap">{{ r.created_at.strftime("%d %b %Y, %H:%M:%S") }}</td>
+              <td>{{ r.event_type.value.replace("_", " ") }}</td>
+              <td>{% if r.success %}<span class="badge border bg-success-subtle text-success-emphasis border-success-subtle">ok</span>
+                  {% else %}<span class="badge border bg-danger-subtle text-danger-emphasis border-danger-subtle">refused</span>{% endif %}</td>
+              <td>{{ users.get(r.user_id, "deleted account") if r.user_id else "" }}</td>
+              {# Stored metadata, rendered as escaped text. #}
+              <td class="small font-monospace text-break">{{ r.metadata_json or "" }}</td>
+              <td class="small text-secondary">{{ r.ip_address or "" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3 bg-white"><p class="mb-0">No events recorded{% if selected %} of this type{% endif %}.</p></div>
+{% endif %}
+{% endblock %}

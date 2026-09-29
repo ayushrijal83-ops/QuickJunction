@@ -22,7 +22,7 @@
               <td>{{ r.reservation_time.strftime("%H:%M") }}</td>
               <td class="text-center">{{ r.guest_count }}</td>
               <td class="text-secondary small">{{ r.reserved_at.strftime("%d %b %Y, %H:%M") }}</td>
-              <td><span class="badge text-bg-{{ 'success' if r.status.value == 'confirmed' else 'secondary' }} text-uppercase">{{ r.status.value.replace("_", " ") }}</span></td>
+              <td>{% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}</td>
               <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('reservations.detail', reservation_id=r.id) }}">View</a></td>
             </tr>
           {% endfor %}
