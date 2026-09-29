@@ -42,11 +42,11 @@
 {# Submit button that disables itself and shows a spinner on submit, so a slow
    request (checkout, AI explanation) gives feedback and cannot be
    double-submitted by an impatient click. The server is still the authority
-   on duplicate submissions -- this is UX, not a control. #}
+   on duplicate submissions -- this is UX, not a control. The behaviour lives
+   in static/js/loading.js (data-submit-once), not an inline handler, so the
+   Content-Security-Policy can forbid inline script entirely (M16). #}
 {% macro submit(label, classes="btn btn-primary") %}
-  <button type="submit" class="{{ classes }}"
-          onclick="this.disabled=true;this.form.requestSubmit?this.form.requestSubmit():this.form.submit();
-                   this.innerHTML='<span class=&quot;spinner-border spinner-border-sm&quot; aria-hidden=&quot;true&quot;></span> Working&hellip;';">
+  <button type="submit" class="{{ classes }}" data-submit-once>
     {{ label }}
   </button>
 {% endmacro %}

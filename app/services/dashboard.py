@@ -51,10 +51,10 @@ def customer(user: User) -> dict:
     }
 
 
-def staff() -> dict:
+def staff(report=None) -> dict:
     today = db_today()
     tables, table_counts = _table_counts()
-    report = build_report(today, today, "Today")
+    report = report or build_report(today, today, "Today")
     return {
         "kitchen": {status: len(orders) for status, orders in queue().items()},
         "tables": tables,
@@ -69,8 +69,8 @@ def staff() -> dict:
 
 def admin() -> dict:
     today = db_today()
-    data = staff()
     report = build_report(today, today, "Today")
+    data = staff(report)  # one report, shared -- not built twice
     data.update(
         today=report,
         month=totals_for(today.replace(day=1), today),

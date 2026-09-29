@@ -11,7 +11,7 @@
     <form method="get" class="d-flex gap-2 align-items-end">
       <div>
         <label class="form-label small mb-0" for="days">Activity window</label>
-        <select class="form-select form-select-sm" id="days" name="days" onchange="this.form.submit()">
+        <select class="form-select form-select-sm" id="days" name="days" data-autosubmit>
           {% for d in windows %}<option value="{{ d }}" {% if d == days %}selected{% endif %}>Last {{ d }} days</option>{% endfor %}
         </select>
       </div>

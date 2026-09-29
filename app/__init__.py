@@ -14,6 +14,7 @@ from app.routes import register_blueprints
 from app.utils.authorization import get_current_user
 from app.utils.errors import register_error_handlers
 from app.utils.formatting import register_filters
+from app.utils.headers import register_security_headers
 from app.utils.logging import configure_logging
 from config import BaseConfig, database_uses_root, get_config
 
@@ -54,6 +55,7 @@ def create_app(config_name: str | None = None) -> Flask:
 
     register_error_handlers(app)
     register_filters(app)
+    register_security_headers(app)
     register_blueprints(app)
 
     # So a template can show/hide admin-only controls without every route

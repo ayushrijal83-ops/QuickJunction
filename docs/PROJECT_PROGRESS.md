@@ -4,10 +4,11 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-30 (end of Milestone 15)
-Current state: **Milestone 15 complete — UI/UX overhaul (design system,
-role-based navigation, three dashboards, admin payments and audit views) over
-M10–M14 restaurant operations, finance, inventory and kitchen.**
+Last updated: 2026-09-30 (end of Milestone 16 — final)
+Current state: **Milestone 16 complete — final integration, security and
+demo audit done. Quick Junction is feature-complete for the fast-track plan
+(M10–M16) and demo-ready; the live MySQL database is on the current schema.**
+See [Final state](#final-state-end-of-m16) at the end of this document.
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
 > Operations, Customer Dashboard, Table Reservation, Customer Order
@@ -44,9 +45,9 @@ M10–M14 restaurant operations, finance, inventory and kitchen.**
 | 13 | Inventory: stock, recipes, movement ledger, sale deduction | ✅ Complete (not yet applied to live DB) |
 | 14 | Kitchen screen: queue, one-tap workflow, prep timestamps and timings | ✅ Complete (not yet applied to live DB) |
 | 15 | UI/UX overhaul: design system, role nav, dashboards, admin payments + audit views | ✅ Complete (no schema change) |
-| 16 | Final integration, security and demo audit | ⬜ Planned |
+| 16 | Final integration, security and demo audit | ✅ Complete |
 
-**Test suite: 701 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 707 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M15; `pytest`; in-memory SQLite by default for
+**Test suite: 710 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 716 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M16; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1138,7 +1139,7 @@ No schema change was made in M08; no migration was added.
 | 4 | Checkout idempotency relies on the cart being cleared after success, not a dedicated idempotency key | concurrent double-submit under multiple workers |
 | 5 | Rate limiter is in-process only (`dict` + lock) | ineffective across gunicorn workers/instances |
 | 6 | Error handlers always return JSON, even for HTML routes | poor UX on an unexpected error in a browser |
-| 7 | No security headers (HSTS, CSP, `X-Frame-Options`, …) | required before real users |
+| 7 | ~~No security headers~~ — **closed in M16**: CSP (no inline script), `X-Frame-Options: DENY` / `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS when cookies are Secure | — |
 | 8 | Audit log retention not enforced in code | `audit_logs` holds IPs; needs a purge policy |
 | 9 | `tests/__init__.py` exists solely to stop a stray `tests` package in site-packages from shadowing the local one | environment-specific workaround, not a project need |
 | 10 | ~~Order status changes have no concurrency guard~~ — **closed in M10**: every transition is a conditional `UPDATE … WHERE status = <expected>` | — |
@@ -1157,7 +1158,7 @@ No schema change was made in M08; no migration was added.
 | 22 | Each gunicorn worker would load its own 1.2 GB model copy (module-level singleton, per process) | multi-worker deployment needs a shared inference process |
 | 23 | The LoRA adapter is git-ignored with the rest of `models/`; reproducible from the dataset in ~21 min | a fresh clone has no adapter until training is re-run |
 | 24 | `USE_TF=0` is required because of a broken TensorFlow install in this environment | environment-specific; harmless but surprising |
-| 25 | No `Cache-Control` headers on authenticated pages — a browser served a stale `/recommendations/explain` during testing | stale personalised content after preference changes |
+| 25 | ~~No `Cache-Control` on authenticated pages~~ — **closed in M16**: every page served to a signed-in user is `Cache-Control: no-store` (+ `Vary: Cookie`); static assets unaffected | — |
 | 26 | ~~Logout does not revoke a copied session cookie~~ — **closed in M09** via `users.session_version`; verified live on MySQL with controls, 18 regression tests | — |
 | 26a | Logout revokes **all** of that user's sessions, not just the current device — a deliberate consequence of using one counter instead of per-session state | logging out on a phone signs the account out on a laptop too |
 | 29 | **Test-harness weakness**: the pytest `app` fixture holds one application context open, so `g.current_user` persists across requests and clients within a test. Production is unaffected (one context per request), but identity-switching tests can pass for the wrong reason unless they clear it | older suites not yet audited for this |
@@ -1165,9 +1166,9 @@ No schema change was made in M08; no migration was added.
 | 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
 | 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
 | 31 | ~~No payment/refund/tax/discount records~~ — **payments and refunds closed in M11; tax and discounts closed in M12** | — |
-| 34 | Migrations `d7f1e3a9c2b4` (M12 pricing), `e5b8c1d4f7a2` (M13 inventory) and `f3a6d9b2e8c5` (M14 kitchen timestamps) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12–M14 there |
+| 34 | ~~M12–M14 migrations not applied to live `quickjunctiondb`~~ — **closed in M16**: backed up, applied, schema + data verified | — |
 | 37 | Orders have no free-text "kitchen notes" field (e.g. "no onions"); the kitchen screen shows items, quantities, source/table and timings only | adding customer notes is a small follow-up if wanted |
-| 38 | The M15 UI was verified by rendering tests (every nav destination per role returns 200, content and RBAC asserted) but **not yet reviewed visually in a browser**; the local live DB also lacks the M12–M14 schema (#34), so a browser walkthrough needs #34 or a scratch DB first | a visual pass belongs to the M16 demo audit |
+| 38 | ~~M15 UI not reviewed in a browser~~ — **closed in M16**: customer, staff and admin walked through in Chrome on a seeded scratch DB; no console/CSP errors | — |
 | 39 | Admin payments and audit views show the latest 200 rows, unpaginated; the audit view is filterable by event type only | fine for a demo; add paging/date filters if volume grows |
 | 35 | Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative (shown "short"). Recipes are read at completion time, not snapshotted per order | deliberate — a served order is never blocked; staff correct counts with an adjustment |
 | 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
@@ -1197,10 +1198,10 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | SQLite **701 passed, 7 skipped**; MySQL **707 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25; M14 added kitchen 14; M15 added ui_overhaul 22 |
+| Tests | SQLite **710 passed, 7 skipped**; MySQL **716 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25; M14 added kitchen 14; M15 added ui_overhaul 22; M16 added final_audit 8, demo_flow 1 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
-| Migrations | **11 revisions, head = `f3a6d9b2e8c5`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 `d7f1e3a9c2b4`; M13 `e5b8c1d4f7a2`; M14 kitchen timestamps). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
+| Migrations | **11 revisions, head = `f3a6d9b2e8c5`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 `d7f1e3a9c2b4`; M13 `e5b8c1d4f7a2`; M14 kitchen timestamps). **Live `quickjunctiondb` also at `f3a6d9b2e8c5`** (M16) |
 | Tables | 14: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings`, `stock_movements` |
 | Models | 14 modules in `app/models/` |
 | Services | 17 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`; M14: `kitchen`; M15: `dashboard`) |
@@ -2672,16 +2673,162 @@ content and RBAC, not appearance. Planned for the M16 demo audit.
 
 ---
 
-## Next milestone
+## Milestone 16 — Final integration, security and demo audit ✅
 
-**M16 — Final integration, security and demo audit** (per the fast-track
-plan): browser walkthrough of all three roles, full security and
-data-integrity review, and applying `d7f1e3a9c2b4`, `e5b8c1d4f7a2` and
-`f3a6d9b2e8c5` to the live database after a backup (#34).
+No new features. Baseline: SQLite **701 passed, 7 skipped**; MySQL test DB
+**707 passed, 1 skipped**.
 
-Carried over:
+### Live database brought current (closes #34)
 
-- `training/evaluate.py` still contains four scenarios the application cannot
-  produce; retiring or re-pointing them is deferred work, not a blocker.
-- Known issue #29: auditing the older test suites for the `g.current_user`
-  app-context caching weakness found in M09.
+`mysqldump --single-transaction` → `quickjunctiondb_pre_m16.sql` (exit 0,
+29,074 bytes, completed, 13 tables; M10/M11 backups kept). `flask db
+upgrade` applied `d7f1e3a9c2b4` → `e5b8c1d4f7a2` → `f3a6d9b2e8c5` with no
+error; `flask db current` = **`f3a6d9b2e8c5 (head)`** = repository head.
+`flask db check`: only the documented enum-CHECK false positive. Verified:
+row counts unchanged (5 users, 2 orders, 18 menu items, 36 ingredients, 51
+links, 17 audit rows); `pricing_settings` seeded 13.00 / 20.00; both old
+orders backfilled discount 0 / tax 0 (formula CHECK holds); ingredients at 0
+stock, recipe links at 0; every new CHECK and the stock idempotency key
+present; all 31 audit events accepted (rolled-back probe).
+
+### Data-integrity audit — live DB, 10 checks, 0 violations
+
+Order total = subtotal − discount + tax; subtotal = Σ line totals; line =
+unit snapshot × qty; payment = order total; no cancelled order holds
+unrefunded money; stock = ledger sum; sale movements only on completed
+orders; reservation slot flag ↔ status; dine-in ↔ table; cancellation
+records complete. The same checks close the new end-to-end demo test.
+
+### Security audit and fixes
+
+- **Security headers (closes #7)** — `app/utils/headers.py`: CSP
+  `default-src 'self'`, **`script-src 'self'` with no `'unsafe-inline'`**,
+  `object-src 'none'`, `base-uri`/`form-action 'self'`,
+  `frame-ancestors 'none'`; `X-Frame-Options: DENY`; `nosniff`;
+  `Referrer-Policy: same-origin`; `Permissions-Policy`; HSTS only when cookies
+  are Secure (production). To make the strict script policy possible, the
+  only two inline handlers (submit-once button, inventory window select) were
+  moved into `static/js/loading.js` as `data-submit-once` / `data-autosubmit`
+  — progressive enhancement, no behaviour lost. Inline `style=""` stays
+  allowed (styles cannot run code).
+- **No caching of signed-in pages (closes #25)** — `Cache-Control: no-store`
+  + `Vary: Cookie` on every page served to a signed-in user; public pages and
+  static assets unaffected.
+- **Whole-app route sweep** — `tests/test_final_audit.py` enumerates all 78
+  route/method pairs from the URL map: anonymous callers reach only an
+  explicit public allow-list (home, menu, cart, health, login, register);
+  the 18 admin-only pairs refuse customers and staff; the 14 staff pairs
+  refuse customers. Proven non-vacuous: removing the guard from
+  `/admin/payments` and `/staff/kitchen` failed 4 tests; restored.
+- Also asserted: headers on every response including 404s; no inline script
+  in any template (so the CSP can never silently break a page); DEBUG off in
+  testing/production.
+- Reviewed and found sound (no change needed): Argon2id hashing, session
+  revocation (M09), CSRF app-wide, ownership-in-query IDOR protection (404),
+  server-side money everywhere, atomic/locked transitions for every race
+  (orders, payments, refunds, discounts, stock, reservations), audit writer
+  refusing secret keys, no `|safe`, ORM/bound SQL only.
+
+### Performance
+
+Query counts measured per page at 5 and 30 orders: **every page flat** (no
+N+1) — dashboards 15, reports 7, staff orders 5, kitchen 5, payments 4,
+tables/inventory 3, reservations 2, customer orders 1. One real waste fixed:
+the admin dashboard built today's sales report twice; it now builds it once.
+
+### Browser walkthrough (closes #38)
+
+Run on a scratch SQLite DB (migrated from empty through all 11 revisions,
+seeded with `scripts/seed_demo.py` + demo orders/stock) — never the live DB.
+In Chrome: **customer** dashboard (hero, current order, status badges,
+reservations, free tables) and a discounted order (349.00 − 34.90 + 40.83
+tax = 354.93, paid); **staff** dashboard (kitchen counts, table statuses, low
+stock, no money) and the kitchen screen, including a real "Start preparing"
+that moved the card and returned to the board; **admin** dashboard (net
+458.00 vs collected 517.54 with tax, paid in advance 354.93), sales report
+and audit log (which faithfully recorded the session, including a refused
+customer login on the admin portal). Console: **no CSP violations or JS
+errors**.
+
+### Tests — 9 new
+
+- `tests/test_final_audit.py` (8): anonymous sweep, admin-only sweep ×2
+  roles, staff sweep, security headers, no-store caching, no inline script,
+  debug off.
+- `tests/test_demo_flow.py` (1): the complete demo through real HTTP —
+  admin settings/tables/stock/recipe → staff sign-up + approval → customer
+  registers, browses, dine-in order (13 % tax) and cancels (table
+  auto-released) → takeaway order → reservation (rival customer gets 404 on
+  both) → kitchen (no customer name) → staff discount over the admin-set 15 %
+  cap refused, 10 % applied → confirm / prepare / ready → customer cancel
+  refused → card payment at the server total → completion deducts stock →
+  staff refund refused, admin refund → report figures (gross, discounts, tax,
+  refunds, net, collected, cancelled) → payments and audit pages → menu
+  repricing and a tax change leave the order untouched → all integrity checks.
+
+**Results:** SQLite **710 passed, 7 skipped** (701 + 9), 24 warnings. MySQL
+test DB **716 passed, 1 skipped** (#32), 18 warnings, 348 s. 0 failures. No
+existing test changed.
+
+---
+
+## Final state (end of M16)
+
+### Milestones
+
+M01–M09 foundation → auth/RBAC/audit → menu → cart/orders → staff workflow →
+preferences + recommendations → local LLM explanations → UI polish → session
+revocation; M07.x AI dataset/adapter iterations (V4 in production behind a
+deterministic guard); fast-track M10 restaurant operations, cancellation,
+tables, reservations, sales → M11 payments/refunds → M12 tax/discounts → M13
+inventory → M14 kitchen → M15 UI overhaul → **M16 final audit**.
+
+| Item | Value |
+| --- | --- |
+| Migration head | **`f3a6d9b2e8c5`** — repository and live `quickjunctiondb` |
+| Tests | SQLite **710 passed, 7 skipped (MySQL-only races)**; MySQL test DB **716 passed, 1 skipped (#32)**; 0 failing |
+| Database | MySQL 8.0.46 (live verified at every schema milestone); SQLite for tests |
+| Security | Argon2id, server-side session revocation, CSRF, RBAC on every route (swept), ownership-in-query IDOR, CSP + anti-framing + no-store, audit log with secret-key refusal |
+| Data integrity | DB CHECK/UNIQUE constraints for money formulas, statuses, stock ledger idempotency, reservation slots; 10 integrity checks pass on live data |
+
+### Architecture (one line per layer)
+
+Flask app factory + blueprints (routes parse/authorize) → services (all
+business rules, money arithmetic in `pricing`/`payments`, atomic conditional
+UPDATEs and row locks for every race) → SQLAlchemy models with CHECK/UNIQUE
+backstops → MySQL; Jinja templates on vendored Bootstrap with one small
+design layer; reporting and dashboards are pure reads composed from the
+services — no duplicated sales or order data anywhere.
+
+### Demo flow (≈ 10 minutes, `scripts/seed_demo.py` accounts, password `demo-password-1`)
+
+1. **admin** → Dashboard (sales KPIs) → Manage ▸ Settings (tax 13 %, staff
+   cap) → Menu & recipes ▸ *Recipe* on a dish → Inventory ▸ record a purchase.
+2. **customer** → Menu → add to cart → Checkout (tax preview) → dine-in at a
+   table → Dashboard shows the current order → cancel it (table goes to
+   cleaning) → order again → Book a table.
+3. **staff** → Kitchen → Confirm → Start preparing → Mark ready → order page
+   → apply a discount (cap enforced) → record payment → Serve → Complete
+   (stock deducted on the Inventory page).
+4. **admin** → refund part of it → Sales reports (gross / discounts / tax /
+   refunds / net / collected) → Payments & refunds → Audit log (every step
+   above is there).
+
+### Remaining known limitations (all documented above)
+
+#3 cart discarded on login · #4 checkout idempotency by cart clearing ·
+#5 in-process rate limiter · #8 no audit retention job · #12/#39 unpaginated
+lists · #13 `env.py` deprecation warnings · #14–#18 recommendation-engine
+limits · #20a/#21–#24/#27 local-LLM limits · #26a logout revokes all devices ·
+#28 no production deployment config · #29 older tests not audited for the
+identity-cache weakness · #32 full downgrade-to-base fails on MySQL (pre-M10
+migrations) · #35 stock checked not reserved · #36 no ingredient costs ·
+#37 no kitchen notes. Plus: `.env` connects as MySQL `root` — the app should
+use its own least-privilege account (`docs/MYSQL_SETUP_HANDOFF.md` §5).
+
+### Next steps (if the project continues)
+
+Least-privilege MySQL account and a production deployment config (#28);
+pagination on the long lists (#12/#39); optional kitchen notes (#37);
+cleaning up #32 and #13; ingredient costs if profit reporting is wanted
+(#36).
