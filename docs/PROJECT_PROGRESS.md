@@ -4,9 +4,9 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-30 (end of Milestone 13)
-Current state: **Milestone 13 complete — inventory and stock management on
-top of M12 tax/discounts, M11 payments/refunds and M10 restaurant
+Last updated: 2026-09-30 (end of Milestone 14)
+Current state: **Milestone 14 complete — kitchen operations on top of M13
+inventory, M12 tax/discounts, M11 payments/refunds and M10 restaurant
 operations, reservations, cancellation and sales reporting.**
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
@@ -42,9 +42,10 @@ operations, reservations, cancellation and sales reporting.**
 | 11 | Payments, admin refunds, paid-order cancellation rule, automatic table release | ✅ Complete (live MySQL-verified) |
 | 12 | Tax (configurable, snapshotted) + staff/admin discounts | ✅ Complete (not yet applied to live DB) |
 | 13 | Inventory: stock, recipes, movement ledger, sale deduction | ✅ Complete (not yet applied to live DB) |
-| 14–16 | Kitchen operations, UI overhaul, final audit | ⬜ Planned |
+| 14 | Kitchen screen: queue, one-tap workflow, prep timestamps and timings | ✅ Complete (not yet applied to live DB) |
+| 15–16 | UI overhaul, final audit | ⬜ Planned |
 
-**Test suite: 665 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 671 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M13; `pytest`; in-memory SQLite by default for
+**Test suite: 679 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 685 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M14; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1163,7 +1164,8 @@ No schema change was made in M08; no migration was added.
 | 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
 | 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
 | 31 | ~~No payment/refund/tax/discount records~~ — **payments and refunds closed in M11; tax and discounts closed in M12** | — |
-| 34 | Migrations `d7f1e3a9c2b4` (M12 pricing) and `e5b8c1d4f7a2` (M13 inventory) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12/M13 there |
+| 34 | Migrations `d7f1e3a9c2b4` (M12 pricing), `e5b8c1d4f7a2` (M13 inventory) and `f3a6d9b2e8c5` (M14 kitchen timestamps) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12–M14 there |
+| 37 | Orders have no free-text "kitchen notes" field (e.g. "no onions"); the kitchen screen shows items, quantities, source/table and timings only | adding customer notes is a small follow-up if wanted |
 | 35 | Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative (shown "short"). Recipes are read at completion time, not snapshotted per order | deliberate — a served order is never blocked; staff correct counts with an adjustment |
 | 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
@@ -1192,13 +1194,13 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | SQLite **665 passed, 7 skipped**; MySQL **671 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25 |
+| Tests | SQLite **679 passed, 7 skipped**; MySQL **685 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 7 (MySQL-only, incl. M11/M12/M13 races); M11 added payments 20; M12 added pricing 32; M13 added inventory 25; M14 added kitchen 14 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
-| Migrations | **10 revisions, head = `e5b8c1d4f7a2`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 `d7f1e3a9c2b4`; M13 inventory). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
+| Migrations | **11 revisions, head = `f3a6d9b2e8c5`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 `d7f1e3a9c2b4`; M13 `e5b8c1d4f7a2`; M14 kitchen timestamps). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
 | Tables | 14: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings`, `stock_movements` |
 | Models | 14 modules in `app/models/` |
-| Services | 15 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`) |
+| Services | 16 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`; M14: `kitchen`) |
 | Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
 | Audit events | 31 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
@@ -2482,10 +2484,94 @@ parameters; no `|safe`; no secrets or debug output. Customers see only an
 
 ---
 
+## Milestone 14 — Kitchen operations ✅
+
+Baseline: SQLite **665 passed, 7 skipped**; MySQL test DB **671 passed, 1
+skipped**. A focused kitchen screen — no new statuses, no new write path.
+
+### Design
+
+- **Queue** (`app/services/kitchen.py::queue`): orders in PENDING /
+  CONFIRMED / PREPARING / READY, grouped into four columns, **oldest first**.
+  SERVED / COMPLETED / CANCELLED leave the board. Items and table are
+  eager-loaded — a flat 3 queries however long the queue (tested).
+- **Actions**: one forward step per column (confirm → start preparing → mark
+  ready). Each button posts to the **existing** `POST
+  /staff/orders/<id>/status` route, so CSRF, the transition allow-list, the
+  atomic conditional UPDATE (M10), the paid/stock rules (M11/M13) and the
+  `order_status_changed` audit all apply unchanged. Serving/completing and
+  cancelling stay on the full staff order page. The route gained
+  `return_to=kitchen` — an **allow-list of one named page**, never a URL, so
+  it cannot become an open redirect (tested with four hostile values).
+- **Timestamps**: new nullable `orders.preparing_at` / `orders.ready_at`,
+  set by the database clock **inside the same conditional UPDATE** that
+  moves the order to PREPARING / READY — so only the winning transition
+  stamps them, and later steps never rewrite them. Existing orders keep NULL
+  (their timing was never recorded).
+- **Card**: order number, age (red after 30 min), source and table, cooking
+  / ready time, each item with quantity. **No customer data** — no username,
+  email or anything else (tested). Notes: orders have no notes field, so
+  none are shown (#37).
+- **Stats** (header): prepared today (count of `ready_at` today), average
+  preparation time (`ready_at − preparing_at`, today), longest-waiting active
+  order. Deliberately minimal.
+- Wall-screen friendly: `<meta http-equiv="refresh" content="30">` via a new
+  `head` block in `base.html`; no JavaScript.
+
+| Route | Role |
+| --- | --- |
+| `GET /staff/kitchen` | STAFF, ADMIN (customer 403, anonymous 401) |
+
+Nav: **Kitchen** for staff/admin.
+
+### Concurrency
+
+Unchanged mechanism, now also covering the stamps: the MySQL cancel-vs-
+start-preparing race test (15 rounds) was **strengthened** to assert that a
+cancelled order has no `preparing_at` and a preparing one has it — stable
+over 3 runs. A SQLite stale-view test shows a losing kitchen tap leaves no
+stamp.
+
+### Migration
+
+**`f3a6d9b2e8c5`** (`down_revision = e5b8c1d4f7a2`): two nullable DateTime
+columns on `orders`; no audit change. **Not applied to live
+`quickjunctiondb` yet (#34).**
+
+### Tests
+
+`tests/test_kitchen.py` (**14**): queue grouping, oldest-first, finished
+orders hidden; query count flat; stamps set on PREPARING / READY and never
+rewritten; a losing (stale) transition stamps nothing; average prep time,
+prepared-today (yesterday excluded) and longest-waiting; empty stats; RBAC
+(401 / 403 / staff 200 / admin 200); board shows items, quantities,
+table/source, refresh — no customer name or email; kitchen buttons drive
+the real workflow, audit, and return to the board; `return_to` allow-list
+vs four hostile values; skipping a step is rejected and audited; customer
+403 on kitchen actions; CSRF; cancelled orders leave the board.
+
+**Non-vacuity:** removing the `preparing_at` stamp fails the timestamp test;
+removing the status filter from the queue fails 2 tests. Restored.
+
+**Results:** SQLite **679 passed, 7 skipped** (665 + 14), 24 warnings.
+MySQL test DB **685 passed, 1 skipped** (#32), 18 warnings, 341 s. 0
+failures. No existing assertion was weakened (one MySQL race test gained two
+assertions).
+
+### Security review
+
+Kitchen route `require_role(STAFF, ADMIN)`; all state changes go through the
+existing CSRF-protected, role-gated, allow-listed, atomic status route;
+`return_to` is a fixed allow-list; no customer PII in the view; no `|safe`;
+no new SQL outside the ORM.
+
+---
+
 ## Next milestone
 
-**M14 — Kitchen operations** (per the fast-track plan). Also apply
-`d7f1e3a9c2b4` and `e5b8c1d4f7a2` to the live database after a backup (#34).
+**M15 — UI/UX overhaul** (per the fast-track plan). Also apply
+`d7f1e3a9c2b4`, `e5b8c1d4f7a2` and `f3a6d9b2e8c5` to the live database after
+a backup (#34).
 
 Carried over:
 

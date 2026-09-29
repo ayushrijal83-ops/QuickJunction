@@ -103,9 +103,11 @@ def test_customer_cancel_vs_start_preparing_exactly_one_wins(app, db):
         row = _db.session.get(Order, order_id)
         if winner == "cancel":
             assert row.status == OrderStatus.CANCELLED and row.cancelled_at and row.cancelled_by_id == customer_id
+            assert row.preparing_at is None  # M14: the losing kitchen action stamped nothing
         else:
             assert row.status == OrderStatus.PREPARING
             assert row.cancelled_at is None and row.cancellation_actor is None
+            assert row.preparing_at is not None  # M14: stamped by the winning UPDATE itself
 
     assert sum(outcomes.values()) == ROUNDS
 

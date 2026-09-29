@@ -147,6 +147,13 @@ class Order(db.Model):
     # Cancellation record. All four stay NULL unless status is CANCELLED
     # (and for orders cancelled before these columns existed).
     cancelled_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True)
+
+    # Kitchen timing (M14): stamped by the database clock inside the same
+    # conditional UPDATE that moves the order to PREPARING / READY, so only
+    # the transition that actually wins sets them. NULL for orders that never
+    # reached that step (and for orders prepared before M14).
+    preparing_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True)
     cancelled_by_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )

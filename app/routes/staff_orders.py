@@ -18,7 +18,7 @@ order's real current status regardless of what was posted.
 
 from __future__ import annotations
 
-from flask import Blueprint, abort, flash, redirect, render_template, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.models.audit_log import AuditEvent
 from app.models.user import Role
@@ -111,10 +111,14 @@ def order_status_update(order_id: int):
 
     actor = get_current_user()
     form = OrderStatusForm()
+    # Where to go afterwards. An allow-list of one named page, never a URL, so
+    # this cannot be turned into an open redirect.
+    back = (redirect(url_for("kitchen.board")) if request.form.get("return_to") == "kitchen"
+            else redirect(url_for("staff_orders.order_detail", order_id=order.id)))
 
     if not form.validate_on_submit():
         flash("Could not update the order status.", "error")
-        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+        return back
 
     previous = order.status
     try:
@@ -138,7 +142,7 @@ def order_status_update(order_id: int):
         for messages in exc.errors.values():
             for message in messages:
                 flash(message, "error")
-        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+        return back
 
     record_event(
         AuditEvent.ORDER_STATUS_CHANGED,
@@ -150,7 +154,7 @@ def order_status_update(order_id: int):
                   "actor": actor.role.value},
     )
     flash(f"Order #{order.id} is now {order.status.value}.", "success")
-    return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    return back
 
 
 def _flash_payment_errors(exc: PaymentError) -> None:

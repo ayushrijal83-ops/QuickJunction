@@ -17,6 +17,7 @@ from app.routes.auth import auth_bp
 from app.routes.cart import cart_bp
 from app.routes.health import health_bp
 from app.routes.inventory import inventory_bp
+from app.routes.kitchen import kitchen_bp
 from app.routes.main import main_bp
 from app.routes.menu import menu_bp
 from app.routes.orders import orders_bp
@@ -42,5 +43,6 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(preferences_bp)
     app.register_blueprint(tables_bp)
     app.register_blueprint(inventory_bp)
+    app.register_blueprint(kitchen_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(reservations_bp)

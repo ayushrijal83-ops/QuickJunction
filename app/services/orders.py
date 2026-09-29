@@ -282,6 +282,10 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
     CLEANING in the same transaction when nothing else is active there.
     """
     values: dict = {"status": new_status}
+    if new_status == OrderStatus.PREPARING:
+        values["preparing_at"] = sa.func.now()
+    elif new_status == OrderStatus.READY:
+        values["ready_at"] = sa.func.now()
     if new_status == OrderStatus.CANCELLED:
         values.update(
             cancelled_at=sa.func.now(),
