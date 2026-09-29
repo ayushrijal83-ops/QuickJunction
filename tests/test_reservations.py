@@ -15,7 +15,7 @@ from app.extensions import db as _db
 from app.models.audit_log import AuditEvent, AuditLog
 from app.models.order import OrderStatus
 from app.models.reservation import Reservation, ReservationStatus
-from app.models.restaurant_table import RestaurantTable, TableStatus
+from app.models.restaurant_table import TableStatus
 from app.models.user import Role
 from app.services.reservations import (
     ReservationError,

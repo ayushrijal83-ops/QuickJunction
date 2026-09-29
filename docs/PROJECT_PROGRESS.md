@@ -4,8 +4,15 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-08-18 (end of Milestone 09)
-Current state: **Milestone 09 complete — demo-ready, session replay closed.**
+Last updated: 2026-09-29 (end of Milestone 10)
+Current state: **Milestone 10 complete — restaurant operations, reservations,
+customer cancellation and sales reporting.**
+
+> **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
+> Operations, Customer Dashboard, Table Reservation, Customer Order
+> Cancellation & Sales Analytics". This document already has a Milestone 08
+> (finalization), so the work is recorded as **Milestone 10** to keep history
+> unambiguous.
 
 > **Document history:** this file did not exist until the end of Milestone
 > 04. Milestones 01–03 below were reconstructed by reading the repository
@@ -30,9 +37,10 @@ Current state: **Milestone 09 complete — demo-ready, session replay closed.**
 | 07.1 | Dataset rebalance (60→150) + V2 retrain + 3-way evaluation | ✅ Complete |
 | 08 | Finalization: Bootstrap UI, MySQL E2E, security audit, demo readiness | ✅ Complete |
 | 09 | Security hardening: server-side session revocation | ✅ Complete |
-| — | Payment gateway, production deployment | ⬜ Not started |
+| 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete |
+| — | Payment capture/refunds, tax/discounts, production deployment | ⬜ Not started |
 
-**Test suite: 239 passing, 0 failing** (`pytest`; in-memory SQLite for
+**Test suite: 587 passing, 0 failing** (as of M10; `pytest`; in-memory SQLite for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1127,8 +1135,8 @@ No schema change was made in M08; no migration was added.
 | 7 | No security headers (HSTS, CSP, `X-Frame-Options`, …) | required before real users |
 | 8 | Audit log retention not enforced in code | `audit_logs` holds IPs; needs a purge policy |
 | 9 | `tests/__init__.py` exists solely to stop a stray `tests` package in site-packages from shadowing the local one | environment-specific workaround, not a project need |
-| 10 | Order status changes have no concurrency guard — two staff moving the same order simultaneously both read the same current status, and the second write wins | rare double-transition under real concurrent kitchen use |
-| 11 | `CANCELLED` sets a status and nothing else — no refund, restock, notification, or customer-initiated cancellation | cancellation is not operationally complete |
+| 10 | ~~Order status changes have no concurrency guard~~ — **closed in M10**: every transition is a conditional `UPDATE … WHERE status = <expected>` | — |
+| 11 | `CANCELLED` now records who/when/why and customers can self-cancel (M10), but there is still no refund, restock or notification — no payment exists to refund | cancellation is not operationally complete |
 | 12 | The staff queue is unpaginated and unfiltered — every order, every load | degrades once order volume is non-trivial |
 | 13 | `migrations/env.py` uses `db.get_engine()`, deprecated in Flask-SQLAlchemy 3.1 (12 warnings in the suite) — pre-existing, from the Flask-Migrate template | breaks on Flask-SQLAlchemy 3.2 |
 | 14 | The TF-IDF corpus is re-vectorised on every `/recommendations` request | fine at tens–hundreds of items; needs caching before a real catalogue |
@@ -1148,6 +1156,8 @@ No schema change was made in M08; no migration was added.
 | 26a | Logout revokes **all** of that user's sessions, not just the current device — a deliberate consequence of using one counter instead of per-session state | logging out on a phone signs the account out on a laptop too |
 | 29 | **Test-harness weakness**: the pytest `app` fixture holds one application context open, so `g.current_user` persists across requests and clients within a test. Production is unaffected (one context per request), but identity-switching tests can pass for the wrong reason unless they clear it | older suites not yet audited for this |
 | 27 | AI explanation takes ~9 s per request on CPU after the model is loaded (23 s including first load) | acceptable on its own route; would not be acceptable inline |
+| 30 | Migration `b5e2f8c41a07` verified on SQLite and its MySQL DDL reviewed offline, but **not yet applied to the live MySQL server** | run `flask db upgrade` on MySQL before relying on M10 there |
+| 31 | No payment/tax/discount/refund records; sales treat `completed` as paid and report those three figures as 0.00 ("not recorded") | reports are revenue-accurate but cannot show real tax or refunds |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
@@ -1156,8 +1166,10 @@ Full ranked pre-production list: `docs/SECURITY.md` §17.
 
 ## Not implemented — do not assume these exist
 
-Payment gateway / card processing · refunds · customer-initiated
-cancellation · **AI chatbot / conversational assistant** (M07 built
+*(M10 added customer-initiated cancellation and a sales dashboard; the rest
+of this list stands.)*
+Payment gateway / card processing / any payment record · refunds · tax ·
+discounts · profit/expense accounting · **AI chatbot / conversational assistant** (M07 built
 explanation-only inference, not a chat surface) · advanced analytics ·
 reporting dashboard · deployment configuration · styled frontend
 (Bootstrap/JS — every page is plain unstyled HTML) · password reset ·
@@ -1167,21 +1179,24 @@ email verification · staff queue pagination/filtering.
 
 ---
 
-## Exact current state (verified at end of M05)
+## Exact current state (verified at end of M10)
 
 | Item | Value |
 | --- | --- |
-| Tests | **239 passing, 0 failing, 0 skipped**, 12 warnings (all the pre-existing `env.py` deprecation) |
-| Test files | foundation 10, auth 29, menu 26, orders 28, migrations 4, staff orders 20, recommendations 26, llm 32, dataset_v2 22, ui 24, session revocation 18 |
-| Migrations | **5 revisions, head = `2d9f3b20045f`** (M09 added `users.session_version`) |
-| Tables | 9: `users`, `audit_logs`, `categories`, `menu_items`, `ingredients`, `menu_item_ingredients`, `customer_preferences`, `orders`, `order_items` |
-| Models | 10 modules in `app/models/` |
-| Services | 10 modules in `app/services/` |
-| Blueprints | 10: health, main, auth, account, menu, admin_menu, cart, orders, staff_orders, preferences |
-| Audit events | 16 |
+| Tests | **587 passing, 0 failing, 0 skipped**, 24 warnings (all the pre-existing `env.py` deprecation) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1 |
+| Migrations | **7 revisions, head = `b5e2f8c41a07`** (Phase 3 `7c4e1a9b52d3` staff approval; M10 tables/reservations/orders) |
+| Tables | 11: previous 9 + `restaurant_tables`, `reservations` |
+| Models | 11 modules in `app/models/` |
+| Services | 12 modules in `app/services/` (M10: `tables`, `sales`, `reservations`) |
+| Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
+| Audit events | 24 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
 | Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
-| Order statuses | 6 (`pending`, `confirmed`, `preparing`, `ready`, `completed`, `cancelled`) |
+| Order statuses | 7 (`pending`, `confirmed`, `preparing`, `ready`, `served`, `completed`, `cancelled`) — `served` added in M10 |
+| Order sources | 4 (`dine_in`, `takeaway`, `delivery`, `online`) |
+| Table statuses | 5 (`available`, `occupied`, `reserved`, `cleaning`, `out_of_service`) |
+| Reservation statuses | 4 (`confirmed`, `completed`, `no_show`, `cancelled`) |
 | Roles | 3 (`admin`, `staff`, `customer`) |
 | Sessions | signed cookie (user id + version); server-side revocation via `users.session_version` |
 | Recommendation engine | deterministic TF-IDF + cosine similarity, in-process; **no LLM** |
@@ -1637,11 +1652,281 @@ preserved.
 
 ---
 
+## Milestone 10 — Restaurant operations, reservations, cancellation, sales ✅
+
+Brief title: "M08 — Restaurant Operations, Customer Dashboard, Table
+Reservation, Customer Order Cancellation & Sales Analytics" (see numbering
+note at the top). Built by **extending** the existing order, audit, RBAC and
+UI architecture — no second order, audit, sales or user system.
+
+**Baseline before changes: 497 passing.** After: **587 passing, 0 failing.**
+
+### Order lifecycle
+
+```
+PENDING   -> CONFIRMED | CANCELLED
+CONFIRMED -> PREPARING | CANCELLED
+PREPARING -> READY     | CANCELLED      (staff/admin only)
+READY     -> SERVED    | COMPLETED      (SERVED new in M10: dine-in step)
+SERVED    -> COMPLETED
+COMPLETED, CANCELLED -> terminal
+```
+
+`served` was **added**, not substituted: `READY -> COMPLETED` is kept for
+takeaway/delivery and so no existing flow changed.
+
+**Concurrency guard (closes known issue #10).** Every transition — staff and
+customer — is one conditional `UPDATE orders SET … WHERE id = ? AND status IN
+(<expected>)`, and the caller checks `rowcount`. A customer cancel racing a
+cook's "start preparing" is serialised by the database (InnoDB row lock);
+exactly one matches and the other is rejected with "changed by someone else".
+`PREPARING + CANCELLED` or any lost update is impossible.
+(`app/services/orders.py::_apply_transition`)
+
+### Customer order cancellation
+
+`POST /orders/<id>/cancel` (`login_required`, CSRF). Rules, all server-side:
+
+| Case | Result |
+| --- | --- |
+| own order, `pending`/`confirmed` | cancelled (302) |
+| own order, `preparing`/`ready`/`served`/`completed` | 409 (JSON) / flash (HTML), unchanged |
+| already cancelled | 409 "already cancelled" |
+| someone else's order, or nonexistent | **404** (no existence leak, same as M04 IDOR rule) |
+| anonymous | 401 |
+| reason > 255 chars | rejected, unchanged |
+
+Ownership is enforced twice — `get_order_for_user` in the route and
+`user_id = ?` inside the UPDATE. Staff cancellation (including from
+`PREPARING`) is unchanged; customers cannot reach `/staff/*` (403).
+
+**Cancellation record** — new nullable columns on `orders`:
+`cancelled_at` (DB clock), `cancelled_by_id` (FK users, RESTRICT),
+`cancellation_actor` (`customer`/`staff`/`admin`, from the actor's server-side
+role), `cancellation_reason` (≤ 255, optional). Audit reuses the existing
+`order_status_changed` / `order_status_change_rejected` events, now with an
+`"actor"` key in metadata. Orders cancelled before M10 keep NULLs — who
+cancelled them was never recorded.
+
+### Restaurant tables
+
+`RestaurantTable` (`restaurant_tables`): unique `name`, `capacity`
+(CHECK 1–50), `status` (CHECK-constrained enum), timestamps.
+
+```
+AVAILABLE      -> OCCUPIED | RESERVED | OUT_OF_SERVICE
+RESERVED       -> OCCUPIED | AVAILABLE | OUT_OF_SERVICE
+OCCUPIED       -> CLEANING | AVAILABLE
+CLEANING       -> AVAILABLE | OUT_OF_SERVICE
+OUT_OF_SERVICE -> AVAILABLE
+```
+
+| Route | Role |
+| --- | --- |
+| `GET /staff/tables` — board: status counts, each table's newest active order with items + total | STAFF, ADMIN |
+| `POST /staff/tables/<id>/status` | STAFF, ADMIN |
+| `GET/POST /admin/tables/new`, `/admin/tables/<id>/edit` | ADMIN |
+
+Audit: `table_created`, `table_updated`, `table_status_changed`.
+
+### Order source / table association
+
+`orders.source` (`dine_in`/`takeaway`/`delivery`/`online`, NOT NULL, existing
+rows backfilled `online` — the web checkout was the only channel) and
+`orders.table_id` (FK, RESTRICT). Rule enforced in
+`resolve_order_channel()` **and** by `ck_orders_source_table`:
+dine-in **requires** a table; every other source **must not** have one.
+Dine-in rejects CLEANING/OUT_OF_SERVICE tables and marks the table OCCUPIED.
+Checkout has an order-type radio + table select. **History is preserved:**
+`table_id` is never cleared, so a completed order still shows its table after
+the table is freed (tested).
+
+### Reservations
+
+`Reservation` (`reservations`) — separate from `Order`. Columns: `user_id`,
+`table_id`, `reservation_date`, `reservation_time`, `guest_count`, `status`,
+`holds_slot`, `reserved_at`, `updated_at`.
+
+**Ownership.** `Authenticated user → reservation.user_id`. The form has no
+owner field; routes pass `get_current_user()`; a POSTed `user_id` /
+`customer_id` / `X-User-Id` is never read (tested). Customer lookups are
+ownership-scoped in the query → someone else's reservation is **404**.
+
+**Timestamps.** `reservation_date` + `reservation_time` = the requested
+booking slot (restaurant wall-clock). `reserved_at` = when the booking was
+made, `server_default=now()` — never client-supplied. `reserved_at` doubles as
+the row's creation time, so there is no separate `created_at`.
+
+**Slot rule.** No slot policy existed, so the smallest deterministic one:
+fixed, non-overlapping **2-hour slots starting 11:00, 13:00, 15:00, 17:00,
+19:00, 21:00**. One reservation = one table × one slot. Any other time
+(e.g. 19:30) is rejected, so "overlapping time" and "same slot" coincide.
+Bookings must be in the future (DB clock) and ≤ 60 days ahead; guests
+1..table capacity; OUT_OF_SERVICE tables cannot be booked.
+
+**Double-booking strategy.** Enforced by the database, not by
+check-then-insert: `UNIQUE uq_reservations_table_slot (table_id,
+reservation_date, reservation_time, holds_slot)`. `holds_slot` is TRUE while
+the booking is live and NULL once cancelled; NULLs are distinct in unique
+indexes on both MySQL and SQLite, so cancelling frees the slot but two live
+bookings can never both commit. The service simply inserts and turns the
+IntegrityError into "just been booked". A test with **two real threads on
+two connections** booking the same slot yields exactly one success.
+
+**Table state vs reservation state.** `restaurant_tables.status` is *current*
+floor state only. Future availability (`available_tables(date, slot,
+guests)`) looks at slot bookings, capacity and OUT_OF_SERVICE — it ignores
+OCCUPIED/CLEANING (a table busy now can be booked for tonight), and a booking
+never changes a table's current status. The `reserved` table status means
+"being held on the floor right now", set by staff.
+
+**Reservation lifecycle:** created `CONFIRMED` (availability is checked at
+booking, so no approval step) → `COMPLETED` | `NO_SHOW` | `CANCELLED`
+(staff); customer may cancel own `CONFIRMED` bookings before the slot starts.
+Transitions use the same conditional-UPDATE pattern as orders.
+
+| Route | Role |
+| --- | --- |
+| `GET /reservations/new?reservation_date&reservation_time&guest_count` — slot search, free tables | CUSTOMER |
+| `POST /reservations` → confirmation page (table, date, time, guests, reserved by, reserved at, status) | CUSTOMER |
+| `GET /reservations`, `GET /reservations/<id>`, `POST /reservations/<id>/cancel` | CUSTOMER (own only) |
+| `GET /staff/reservations` (today onward), `POST /staff/reservations/<id>/status` | STAFF, ADMIN |
+
+Staff see the customer's **username only** — the existing privacy convention
+from the order queue (no email). Audit: `reservation_created`,
+`reservation_status_changed` (with `actor`).
+
+### Customer dashboard
+
+Every login already lands on `/account/` (pinned by
+`test_staff_approval::test_10b`), which was the role-aware landing page. For
+customers it now **is** the customer dashboard: tiles (recommendations,
+preferences, menu, book a table, my reservations, my orders) plus recent own
+orders with a "can cancel" hint, upcoming own reservations, and tables free
+right now (with a note that later availability is a separate search). Staff
+and admin pages are unchanged (tested). No login routing changed.
+
+### Sales reporting
+
+`GET /admin/reports` (**ADMIN only**; staff and customers 403), query-string
+filters: `range=today|week|month|last_month|custom&start=&end=` or
+`month=YYYY-MM` (monthly statement). No sales table — every figure is
+recomputed from `orders` (`app/services/sales.py`).
+
+**Formulas.** No payment, tax, discount or refund data exists in the system
+(`total == subtotal` since M04), so:
+
+| Figure | Definition |
+| --- | --- |
+| Recognised sale / "paid order" | order with status `completed` (the bill is settled at completion; no payment record exists) |
+| Gross sales | Σ `subtotal` of recognised sales (checkout-time snapshots, never current menu prices) |
+| Discounts | 0.00 — not recorded; labelled "not recorded" |
+| Tax | 0.00 — not recorded; labelled "not recorded" |
+| Refunds | 0.00 — nothing is ever collected before completion, so nothing to refund |
+| Net sales | gross − discounts − refunds |
+| Collected | Σ `total` of recognised sales |
+| Average order value | net ÷ recognised order count (0 when none) |
+
+Cancelled orders are **never** sales; pending/confirmed/preparing/ready/served
+are counted as pending. The brief's example (1,000 + 1,500 completed, 2,000
+cancelled) reports **2,500**, tested. Labelled revenue, **not profit** — no
+cost data exists.
+
+Dashboard: today's and this month's sales, net sales and AOV for the range,
+orders placed / paid / cancelled / pending, financial breakdown, sales by
+order type (count, net, %), current table-status counts, daily breakdown with
+trend bars, sales by table (all tables, including zero rows; only dine-in
+orders carry a table), and sales by hour.
+
+**Dates.** Grouped by `created_at` (when the order was placed). "Today" comes
+from the **database clock** (`app/utils/clock.py`) — the same clock that
+stamps `created_at` — so no second timezone system. Ranges are
+`[start 00:00, day-after-end 00:00)`; boundary tests cover 23:59:59 and
+00:00:00 across a month end. Custom ranges ≤ 366 days; bad input falls back
+to this month with a message.
+
+### Migration
+
+**`b5e2f8c41a07`** (`down_revision = 7c4e1a9b52d3`), hand-written: creates
+`restaurant_tables` and `reservations`; adds the six `orders` columns, two
+FKs, `ix_orders_table_id`, `ix_orders_created_at` and three CHECKs; widens
+`ck_orders_status` for `served` and `ck_audit_logs_event_type` for 5 events.
+Downgrade maps `served` → `ready`, deletes the 5 new audit event rows (same
+policy as earlier revisions) and drops everything; no order row is lost.
+
+Verified: `tests/test_migrations.py` (migrated schema == models across all 11
+tables, round trip) and `tests/test_ops_migration.py` (pre-existing orders
+backfilled `online`/NULL, DB rejects dine-in without table, `served`
+accepted, downgrade keeps both orders). MySQL DDL rendered offline
+(`flask db upgrade --sql`) and reviewed. **Not yet applied to a live MySQL
+server** — see known issue #30.
+
+### Indexes
+
+`ix_orders_created_at` (report ranges), `ix_orders_table_id` (board, table
+report), `ix_reservations_user_id` (my reservations),
+`ix_reservations_date_time` (staff list, availability); the unique slot index
+also serves table lookups. `orders.source`/`status` not indexed — reports
+already filter by date first. Staff queue now eager-loads `Order.table`.
+
+### Tests — 90 new
+
+| File | Tests | Covers |
+| --- | ---: | --- |
+| `test_restaurant_ops.py` | 43 | customer cancel matrix, ownership, 401/404/409, CSRF, reason length, UI button, staff/admin cancel recorded, lifecycle, **3 race tests**, tables CRUD/capacity/status + DB CHECKs, source/table rules + DB CHECK, historical table, table RBAC + audit, board |
+| `test_sales.py` | 17 | cancelled ≠ sales, gross/discount/tax/refund/net/collected/AOV, daily + monthly, presets, invalid ranges, hourly, by source/table, historical prices, month/midnight boundaries, served = pending, RBAC, "not profit" |
+| `test_reservations.py` | 29 | owner/slot/`reserved_at`, same/different table & slot, off-slot time, DB unique constraint, cancel frees slot, capacity/guests, out-of-service, date/time validation, slot-aware availability, staff transitions, **threaded concurrent booking**, owner spoofing, IDOR, CSRF, 409, RBAC, username-only staff view, dashboard own-data-only, staff/admin dashboards unchanged, `served` step |
+| `test_ops_migration.py` | 1 | migration against existing data, round trip |
+
+One existing test changed: `test_foundation.py` pins the set of tables and
+now includes the two new ones. No assertion was weakened.
+
+**Non-vacuity proven:** dropping the status condition from the conditional
+UPDATE fails exactly the three race tests; dropping
+`uq_reservations_table_slot` fails the four double-booking tests (including
+the threaded one). Both restored.
+
+**Harness finding:** Flask-SQLAlchemy picks `StaticPool` (one shared
+connection) whenever the configured URI is in-memory at `create_app` time, so
+overriding `app.config["SQLALCHEMY_DATABASE_URI"]` afterwards still shares one
+connection across threads. The concurrency test patches `TestingConfig`
+*before* `create_app` and asserts the pool is not `StaticPool`.
+
+### Security review (new code)
+
+Every new route has `require_role`/`customer_required`/`login_required`;
+all POSTs are CSRF-protected (tested on cancel routes); no identity is read
+from form/args/headers; IDOR returns 404 for orders and reservations; enum and
+numeric inputs validated in services and backed by DB CHECK/UNIQUE; no `|safe`
+in new templates (reasons rendered escaped); no PII beyond username on staff
+views; no new secrets, debug code or dependencies.
+
+### Known limitations (M10)
+
+- No payment, tax, discount or refund data — those rows read 0.00 until a
+  payments milestone adds real records (issue #31).
+- Table status is not auto-freed when a dine-in order completes; staff move
+  it OCCUPIED → CLEANING → AVAILABLE on the board.
+- Fixed 2-hour slots; no walk-in/reservation reconciliation (a booked table
+  is not blocked from dine-in checkout at that time).
+- Staff cannot place orders on a customer's behalf (no POS); dine-in orders
+  come from customer checkout.
+- Report and "today" dates follow the database clock (UTC on SQLite, the
+  server zone on MySQL) — correct as long as the MySQL server runs in
+  restaurant-local time.
+- `scripts/seed_demo.py` does not seed tables yet (an edit was declined during
+  the milestone); an admin adds them at `/admin/tables/new`.
+
+---
+
 ## Next milestone
 
-The AI line of work is complete: V4 is trained, evaluated, hardened and in
-production behind a deterministic guard. No V5 is planned, and the remaining
-items are unrelated to it:
+Recommended: **Payments** — a `Payment` record (method, amount, captured_at,
+refunded_amount) attached to orders, so "paid", refunds, tax and discounts
+become real figures in the existing reports instead of zeros; then auto-free
+tables on order completion and apply `b5e2f8c41a07` to the live MySQL server.
+
+Carried over:
 
 - `training/evaluate.py` still contains four scenarios the application cannot
   produce; retiring or re-pointing them is deferred work, not a blocker.
