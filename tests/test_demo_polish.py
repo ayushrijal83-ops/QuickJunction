@@ -218,7 +218,7 @@ def test_3e_currency_appears_on_order_pages(client, db):
     client.post("/checkout", data={})
 
     history = client.get("/orders").get_data(as_text=True)
-    assert f"{CURRENCY_SYMBOL}498.00" in history
+    assert f"{CURRENCY_SYMBOL}562.74" in history  # 498.00 + 13 % tax (M12)
 
 
 def test_3f_stored_prices_are_unchanged_by_display(client, db):

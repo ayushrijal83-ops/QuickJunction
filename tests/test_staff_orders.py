@@ -105,7 +105,7 @@ def test_5_staff_order_list_shows_operational_fields(client, db):
     assert f"#{order.id}" in body
     assert "lister" in body            # customer identifier
     assert "pending" in body           # status
-    assert "50.00" in body             # total, 12.50 x 4
+    assert "56.50" in body             # total, 12.50 x 4 + 13 % tax (M12)
     assert ">1<" in body               # item count (one distinct line)
     # The customer's email is not operational data and must not leak here.
     assert "lister@example.com" not in body
@@ -327,7 +327,7 @@ def test_15_status_changes_never_touch_price_snapshots(client, db):
         order.total,
     )
     assert original[1] == Decimal("77.00")
-    assert original[4] == Decimal("154.00")
+    assert original[4] == Decimal("174.02")  # 154.00 + 13 % tax (M12)
 
     # The live menu item changes underneath the order...
     menu_item = order_item.menu_item

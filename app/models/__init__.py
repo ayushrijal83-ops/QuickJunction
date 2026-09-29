@@ -14,8 +14,9 @@ from app.models.ingredient import Ingredient
 from app.models.menu_item_ingredient import MenuItemIngredient
 from app.models.menu_item import MenuItem
 from app.models.restaurant_table import RestaurantTable, TableStatus
-from app.models.order import CancellationActor, Order, OrderItem, OrderSource, OrderStatus
+from app.models.order import CancellationActor, DiscountType, Order, OrderItem, OrderSource, OrderStatus
 from app.models.payment import Payment, PaymentMethod
+from app.models.pricing_settings import PricingSettings
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import Role, User
 
@@ -25,6 +26,7 @@ __all__ = [
     "AuditLog",
     "Category",
     "CustomerPreference",
+    "DiscountType",
     "Ingredient",
     "MenuItem",
     "MenuItemIngredient",
@@ -34,6 +36,7 @@ __all__ = [
     "OrderStatus",
     "Payment",
     "PaymentMethod",
+    "PricingSettings",
     "Reservation",
     "ReservationStatus",
     "RestaurantTable",

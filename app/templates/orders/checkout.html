@@ -53,8 +53,11 @@
           <dl class="row mb-3">
             <dt class="col-7 fw-normal">Subtotal</dt>
             <dd class="col-5 text-end qj-price mb-1">{{ cart.subtotal | money }}</dd>
+            {% set tax_rate, tax_amount, total = pricing_preview %}
+            <dt class="col-7 fw-normal">Tax ({{ tax_rate }}%)</dt>
+            <dd class="col-5 text-end qj-price mb-1">{{ tax_amount | money }}</dd>
             <dt class="col-7">Total</dt>
-            <dd class="col-5 text-end qj-price h5 mb-0">{{ cart.subtotal | money }}</dd>
+            <dd class="col-5 text-end qj-price h5 mb-0">{{ total | money }}</dd>
           </dl>
 
           {% if cart.has_unavailable %}

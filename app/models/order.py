@@ -55,6 +55,11 @@ class CancellationActor(str, enum.Enum):
     ADMIN = "admin"
 
 
+class DiscountType(str, enum.Enum):
+    PERCENT = "percent"
+    FIXED = "fixed"
+
+
 class Order(db.Model):
     __tablename__ = "orders"
     __table_args__ = (
@@ -68,6 +73,17 @@ class Order(db.Model):
         sa.CheckConstraint(
             "(source = 'dine_in' AND table_id IS NOT NULL) OR (source <> 'dine_in' AND table_id IS NULL)",
             name="ck_orders_source_table",
+        ),
+        # M12 pricing: the stored figures must always add up, whoever writes them.
+        # Half-cent tolerance, not "=": SQLite stores NUMERIC as binary float
+        # (498.00 + 64.74 can miss by one ulp); MySQL DECIMAL is exact, and any
+        # real pricing error is at least a cent, so the guard loses nothing.
+        sa.CheckConstraint(
+            "discount_amount >= 0 AND discount_amount <= subtotal", name="ck_orders_discount_within_subtotal"
+        ),
+        sa.CheckConstraint("tax_amount >= 0", name="ck_orders_tax_nonnegative"),
+        sa.CheckConstraint(
+            "ABS(total - (subtotal - discount_amount + tax_amount)) < 0.005", name="ck_orders_total_formula"
         ),
     )
 
@@ -88,11 +104,32 @@ class Order(db.Model):
     )
 
     subtotal: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), nullable=False)
-    # Equal to subtotal in this milestone -- no tax, discount, or delivery
-    # fee exists yet. Kept as its own column (rather than derived) because
-    # the brief requires it and a future fee/discount milestone needs a
-    # place to diverge from subtotal without a schema change.
+    # subtotal - discount_amount + tax_amount (M12; ck_orders_total_formula).
+    # The amount a payment is taken for.
     total: Mapped[Decimal] = mapped_column(sa.Numeric(10, 2), nullable=False)
+
+    # Pricing snapshot (M12). Written at checkout / when staff discount the
+    # order and never recomputed from current settings, so a later change to
+    # the tax rate or discount cap cannot alter a past order. Orders placed
+    # before M12 carry zero discount and zero tax -- which is what they were
+    # charged.
+    discount_type: Mapped[DiscountType | None] = mapped_column(
+        enum_column(DiscountType, 16, name="ck_orders_discount_type"), nullable=True
+    )
+    discount_value: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 2), nullable=True)  # % or amount
+    discount_amount: Mapped[Decimal] = mapped_column(
+        sa.Numeric(10, 2), nullable=False, server_default="0", default=Decimal("0.00")
+    )
+    discount_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    discounted_by_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    tax_rate: Mapped[Decimal] = mapped_column(
+        sa.Numeric(5, 2), nullable=False, server_default="0", default=Decimal("0.00")
+    )  # percent charged on this order
+    tax_amount: Mapped[Decimal] = mapped_column(
+        sa.Numeric(10, 2), nullable=False, server_default="0", default=Decimal("0.00")
+    )
 
     # Orders placed before sources existed were all web checkouts, hence the
     # ONLINE default (also what the migration backfills).

@@ -71,7 +71,8 @@ def test_database_configuration_loads(app: Flask) -> None:
         assert db.engine is not None
         # Milestone 02 added auth/audit; Milestone 03 added the menu data
         # layer; Milestone 04 added cart/order placement/order history;
-        # Milestone 10 added restaurant tables and reservations; Milestone 11 payments.
+        # Milestone 10 added restaurant tables and reservations; Milestone 11
+        # payments; Milestone 12 pricing settings.
         assert set(db.metadata.tables) == {
             "users",
             "audit_logs",
@@ -85,6 +86,7 @@ def test_database_configuration_loads(app: Flask) -> None:
             "restaurant_tables",
             "reservations",
             "payments",
+            "pricing_settings",
         }
 
 

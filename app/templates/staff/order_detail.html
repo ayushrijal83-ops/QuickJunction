@@ -45,6 +45,20 @@
               <th scope="row" colspan="3" class="text-end fw-normal">Subtotal</th>
               <td class="text-end qj-price">{{ order.subtotal | money }}</td>
             </tr>
+            {% if order.discount_amount > 0 %}
+              <tr>
+                <th scope="row" colspan="3" class="text-end fw-normal">
+                  Discount
+                  {% if order.discount_type and order.discount_type.value == "percent" %}({{ order.discount_value }}%){% endif %}
+                  <div class="small text-secondary">&ldquo;{{ order.discount_reason }}&rdquo;</div>
+                </th>
+                <td class="text-end qj-price">&minus;{{ order.discount_amount | money }}</td>
+              </tr>
+            {% endif %}
+            <tr>
+              <th scope="row" colspan="3" class="text-end fw-normal">Tax ({{ order.tax_rate }}%)</th>
+              <td class="text-end qj-price">{{ order.tax_amount | money }}</td>
+            </tr>
             <tr>
               <th scope="row" colspan="3" class="text-end">Total</th>
               <td class="text-end qj-price fw-semibold">{{ order.total | money }}</td>
@@ -53,6 +67,44 @@
         </table>
       </div>
     </div>
+
+    {# Only unpaid, unfinished orders can be discounted; app/services/pricing.py
+       re-checks everything, including the role's cap, on every POST. #}
+    {% if not order.payment and order.status.value not in ("completed", "cancelled") %}
+      <div class="card shadow-sm">
+        <div class="card-header bg-white"><strong>Discount</strong></div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('staff_orders.discount_order', order_id=order.id) }}"
+                class="row g-2 align-items-end" novalidate>
+            {{ discount_form.csrf_token }}
+            <div class="col-sm-3">
+              <label class="form-label small" for="discount_type">Type</label>
+              <select class="form-select form-select-sm" id="discount_type" name="discount_type">
+                <option value="percent">Percent (%)</option>
+                <option value="fixed">Fixed amount</option>
+              </select>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label small" for="discount_value">Value</label>
+              <input class="form-control form-control-sm" id="discount_value" name="discount_value"
+                     inputmode="decimal" value="{{ order.discount_value or 0 }}">
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label small" for="discount_reason">Reason</label>
+              <input class="form-control form-control-sm" id="discount_reason" name="discount_reason" maxlength="255"
+                     value="{{ order.discount_reason or '' }}">
+            </div>
+            <div class="col-sm-2 d-grid">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Apply</button>
+            </div>
+          </form>
+          <p class="small text-secondary mb-0 mt-2">
+            {% if current_user.role.value == "admin" %}Admins may discount up to 100%.{% else %}Staff may discount up to {{ staff_max_discount }}% of the subtotal.{% endif %}
+            A reason is required; 0 removes the discount. Tax is recalculated at this order's rate ({{ order.tax_rate }}%).
+          </p>
+        </div>
+      </div>
+    {% endif %}
   </div>
 
   <div class="col-lg-4">

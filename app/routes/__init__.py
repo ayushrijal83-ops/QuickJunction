@@ -11,6 +11,7 @@ from flask import Flask
 
 from app.routes.account import account_bp
 from app.routes.admin_menu import admin_menu_bp
+from app.routes.admin_settings import admin_settings_bp
 from app.routes.admin_staff import admin_staff_bp
 from app.routes.auth import auth_bp
 from app.routes.cart import cart_bp
@@ -32,6 +33,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(account_bp)
     app.register_blueprint(menu_bp)
     app.register_blueprint(admin_menu_bp)
+    app.register_blueprint(admin_settings_bp)
     app.register_blueprint(admin_staff_bp)
     app.register_blueprint(cart_bp)
     app.register_blueprint(orders_bp)

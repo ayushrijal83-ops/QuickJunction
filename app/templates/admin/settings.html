@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, submit %}
+{% block title %}Settings &mdash; Quick Junction Admin{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <h1 class="h3 mb-1">Pricing settings</h1>
+    <p class="text-secondary">
+      Current: tax <strong>{{ tax_rate }}%</strong>, staff maximum discount <strong>{{ staff_max }}%</strong>.
+      Changes apply to orders placed or discounted afterwards; existing orders keep the rate they were charged.
+    </p>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.tax_rate, value=form.tax_rate.data or tax_rate, inputmode="decimal",
+                   help="0 to 50. Applied to the subtotal after any discount.") }}
+          {{ field(form.staff_max_discount, value=form.staff_max_discount.data or staff_max, inputmode="decimal",
+                   help="0 to 100, as a percentage of the order subtotal. Admins may always discount up to 100%.") }}
+          {{ submit("Save settings") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

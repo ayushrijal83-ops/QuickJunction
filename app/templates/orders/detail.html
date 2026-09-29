@@ -67,6 +67,12 @@
         <dl class="row mb-0">
           <dt class="col-7 fw-normal">Subtotal</dt>
           <dd class="col-5 text-end qj-price mb-1">{{ order.subtotal | money }}</dd>
+          {% if order.discount_amount > 0 %}
+            <dt class="col-7 fw-normal">Discount</dt>
+            <dd class="col-5 text-end qj-price mb-1">&minus;{{ order.discount_amount | money }}</dd>
+          {% endif %}
+          <dt class="col-7 fw-normal">Tax ({{ order.tax_rate }}%)</dt>
+          <dd class="col-5 text-end qj-price mb-1">{{ order.tax_amount | money }}</dd>
           <dt class="col-7">Total</dt>
           <dd class="col-5 text-end qj-price h5 mb-0">{{ order.total | money }}</dd>
         </dl>

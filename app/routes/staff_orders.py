@@ -23,9 +23,10 @@ from flask import Blueprint, abort, flash, redirect, render_template, url_for
 from app.models.audit_log import AuditEvent
 from app.models.user import Role
 from app.models.payment import PaymentMethod
-from app.routes.forms import OrderStatusForm, PaymentForm, RefundForm
+from app.routes.forms import DiscountForm, OrderStatusForm, PaymentForm, RefundForm
 from app.services.audit import record_event
 from app.services.payments import PaymentError, record_payment, refund_payment
+from app.services.pricing import PricingError, apply_discount, current_settings
 from app.services.orders import (
     OrderStatusError,
     allowed_next_statuses,
@@ -60,7 +61,45 @@ def order_detail(order_id: int):
         payment_form=PaymentForm(),
         refund_form=RefundForm(),
         payment_methods=list(PaymentMethod),
+        discount_form=DiscountForm(),
+        staff_max_discount=current_settings()[1],
     )
+
+
+@staff_orders_bp.post("/orders/<int:order_id>/discount")
+@require_role(Role.STAFF, Role.ADMIN)
+def discount_order(order_id: int):
+    """STAFF within the configured cap, ADMIN up to 100 % -- the cap is
+    enforced in app/services/pricing.py from the actor's server-side role."""
+    order = get_order_for_staff(order_id)
+    if order is None:
+        abort(404)
+    form = DiscountForm()
+    if not form.validate_on_submit():
+        flash("Could not apply the discount.", "error")
+        return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    actor = get_current_user()
+    try:
+        order = apply_discount(order, form.discount_type.data, form.discount_value.data,
+                               form.discount_reason.data, actor)
+    except PricingError as exc:
+        for messages in exc.errors.values():
+            for message in messages:
+                flash(message, "error")
+        return redirect(url_for("staff_orders.order_detail", order_id=order_id))
+    record_event(
+        AuditEvent.ORDER_DISCOUNT_APPLIED,
+        success=True,
+        user_id=actor.id,
+        ip_address=client_ip(),
+        user_agent=user_agent(),
+        metadata={"order_id": order.id,
+                  "type": order.discount_type.value if order.discount_type else None,
+                  "value": str(order.discount_value) if order.discount_value is not None else None,
+                  "amount": str(order.discount_amount), "total": str(order.total)},
+    )
+    flash(f"Order #{order.id} now totals {order.total}.", "success")
+    return redirect(url_for("staff_orders.order_detail", order_id=order.id))
 
 
 @staff_orders_bp.post("/orders/<int:order_id>/status")

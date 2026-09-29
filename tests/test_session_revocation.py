@@ -340,4 +340,4 @@ def test_10_checkout_flow_still_works_end_to_end(app, client, db):
     resp = client.post("/checkout", data={}, follow_redirects=False)
     assert resp.status_code == 302
     body = client.get("/orders").get_data(as_text=True)
-    assert "498.00" in body
+    assert "562.74" in body  # 498.00 + 13 % tax (M12)

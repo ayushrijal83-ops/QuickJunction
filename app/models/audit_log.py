@@ -77,6 +77,11 @@ class AuditEvent(str, enum.Enum):
     PAYMENT_RECORDED = "payment_recorded"
     PAYMENT_REFUNDED = "payment_refunded"
 
+    # Pricing (M12). user_id is the acting staff/admin member; the order id
+    # and discount figures, or the old/new settings, live in metadata_json.
+    ORDER_DISCOUNT_APPLIED = "order_discount_applied"
+    PRICING_SETTINGS_CHANGED = "pricing_settings_changed"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

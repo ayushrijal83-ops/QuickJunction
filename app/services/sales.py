@@ -13,10 +13,12 @@ records no costs, so profit cannot be computed):
   never are -- and cannot hold money, since a paid order must be refunded in
   full before it can be cancelled.
 - **Gross sales** -- sum of ``subtotal`` over recognised sales.
-- **Discounts, tax** -- not recorded anywhere (``total == subtotal`` since
-  M04). Reported as 0.00 and labelled "not recorded" rather than invented.
+- **Discounts** -- sum of the order's ``discount_amount`` snapshot (M12).
+- **Tax** -- sum of the order's ``tax_amount`` snapshot (M12), at the rate
+  each order was charged -- never recomputed from the current setting. Tax is
+  collected on behalf of the tax authority, so it is not part of net sales.
 - **Refunds** -- sum of ``payments.refunded_amount`` over recognised sales.
-- **Net sales** -- gross - discounts - refunds.
+- **Net sales** -- gross - discounts - refunds (excludes tax).
 - **Paid orders** -- recognised sales that have a payment row.
 - **Collected** -- sum of ``amount - refunded_amount`` of the payments on
   recognised sales. ``Report.prepaid`` separately shows money already taken
@@ -77,6 +79,8 @@ class Totals:
     def add(self, row) -> None:
         self.orders += 1
         self.gross += row.subtotal
+        self.discounts += row.discount_amount
+        self.tax += row.tax_amount
         if row.amount is not None:
             self.paid += 1
             self.refunds += row.refunded_amount
@@ -143,8 +147,8 @@ def _rows(start: date, end: date):
     # ponytail: aggregates in Python over one column-only query; move to SQL
     # GROUP BY if a single report ever spans 100k+ orders.
     return db.session.execute(
-        sa.select(Order.status, Order.created_at, Order.subtotal, Order.source, Order.table_id,
-                  Payment.amount, Payment.refunded_amount)
+        sa.select(Order.status, Order.created_at, Order.subtotal, Order.discount_amount, Order.tax_amount,
+                  Order.source, Order.table_id, Payment.amount, Payment.refunded_amount)
         .outerjoin(Payment, Payment.order_id == Order.id)
         .where(Order.created_at >= lo, Order.created_at < hi)
     ).all()

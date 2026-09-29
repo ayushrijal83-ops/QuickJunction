@@ -27,6 +27,7 @@ from app.services.orders import (
     get_order_for_user,
     list_orders_for_user,
 )
+from app.services.pricing import preview
 from app.services.tables import seatable_tables
 from app.utils.authorization import get_current_user, login_required
 from app.utils.cart import clear_cart, get_cart
@@ -43,7 +44,8 @@ def checkout_page():
     # Offered for dine-in only; the service re-checks the chosen table anyway.
     tables = seatable_tables()
     return render_template("orders/checkout.html", cart=cart_view, form=CheckoutForm(),
-                           tables=tables, sources=list(OrderSource))
+                           tables=tables, sources=list(OrderSource),
+                           pricing_preview=preview(cart_view.subtotal))  # display only; checkout recomputes
 
 
 @orders_bp.post("/checkout")

@@ -197,8 +197,10 @@ def test_14_correct_server_calculated_total(client, db):
     user = login_as_new(client, username="total_customer")
 
     order = checkout(user.id, {str(item.id): 3})
-    assert order.total == Decimal("59.97")
-    assert order.total == order.subtotal  # no tax/fee in this milestone
+    assert order.subtotal == Decimal("59.97")
+    # M12: 13 % default tax, half-up to the cent: 59.97 x 0.13 = 7.7961 -> 7.80
+    assert (order.tax_rate, order.tax_amount, order.total) == (Decimal("13.00"), Decimal("7.80"), Decimal("67.77"))
+    assert order.total == order.subtotal - order.discount_amount + order.tax_amount
 
 
 def test_15_client_price_manipulation_ignored(client, db):
@@ -236,9 +238,10 @@ def test_17_client_total_manipulation_ignored(client, db):
     login_as_new(client, username="total_hacker")
     add_to_cart(client, item.id, 2)
 
-    client.post("/checkout", data={"total": "0.01"}, follow_redirects=False)
+    client.post("/checkout", data={"total": "0.01", "tax_amount": "0", "discount_amount": "100"},
+                follow_redirects=False)
     order = _db.session.query(Order).one()
-    assert order.total == Decimal("100.00")
+    assert (order.discount_amount, order.total) == (Decimal("0.00"), Decimal("113.00"))  # 100 + 13 % tax
 
 
 def test_18_price_snapshot_stored(client, db):
@@ -397,7 +400,8 @@ def test_27_decimal_monetary_calculation_has_no_float_drift(client, db):
 
     _db.session.expire_all()
     reloaded = _db.session.get(Order, order.id)
-    assert str(reloaded.total) == "30.30"
+    assert str(reloaded.tax_amount) == "3.94"   # 30.30 x 0.13 = 3.939 -> 3.94 (half-up)
+    assert str(reloaded.total) == "34.24"
 
 
 def test_28_cart_cleared_after_successful_checkout(client, db):

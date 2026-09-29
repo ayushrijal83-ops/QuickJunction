@@ -67,10 +67,10 @@
       <table class="table mb-0">
         <tbody>
           <tr><th scope="row" class="fw-normal">Gross sales</th><td class="text-end qj-price">{{ report.totals.gross | money }}</td></tr>
-          <tr><th scope="row" class="fw-normal">Discounts <span class="small text-secondary">(not recorded)</span></th><td class="text-end qj-price">&minus;{{ report.totals.discounts | money }}</td></tr>
+          <tr><th scope="row" class="fw-normal">Discounts</th><td class="text-end qj-price">&minus;{{ report.totals.discounts | money }}</td></tr>
           <tr><th scope="row" class="fw-normal">Refunds</th><td class="text-end qj-price">&minus;{{ report.totals.refunds | money }}</td></tr>
           <tr class="table-light"><th scope="row">Net sales</th><td class="text-end qj-price fw-semibold">{{ report.totals.net | money }}</td></tr>
-          <tr><th scope="row" class="fw-normal">Tax <span class="small text-secondary">(not recorded)</span></th><td class="text-end qj-price">{{ report.totals.tax | money }}</td></tr>
+          <tr><th scope="row" class="fw-normal">Tax <span class="small text-secondary">(collected for the tax authority; not in net sales)</span></th><td class="text-end qj-price">{{ report.totals.tax | money }}</td></tr>
           <tr><th scope="row" class="fw-normal">Collected <span class="small text-secondary">(payments on completed orders, net of refunds)</span></th><td class="text-end qj-price">{{ report.totals.collected | money }}</td></tr>
           <tr><th scope="row" class="fw-normal">Paid in advance <span class="small text-secondary">(orders not completed yet)</span></th><td class="text-end qj-price">{{ report.prepaid | money }}</td></tr>
         </tbody>

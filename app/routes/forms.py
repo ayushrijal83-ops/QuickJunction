@@ -150,6 +150,22 @@ class PaymentForm(FlaskForm):
     submit = SubmitField("Record payment")
 
 
+class DiscountForm(FlaskForm):
+    """Type, value and reason only -- the amount, tax and total are always
+    computed server-side (app/services/pricing.py)."""
+
+    discount_type = StringField(validators=[DataRequired(), Length(max=16)])
+    discount_value = StringField("Discount", validators=[DataRequired(), Length(max=12)])
+    discount_reason = StringField("Reason", validators=[Optional(), Length(max=255)])
+    submit = SubmitField("Apply discount")
+
+
+class PricingSettingsForm(FlaskForm):
+    tax_rate = StringField("Tax rate (%)", validators=[DataRequired(), Length(max=8)])
+    staff_max_discount = StringField("Staff maximum discount (%)", validators=[DataRequired(), Length(max=8)])
+    submit = SubmitField("Save settings")
+
+
 class RefundForm(FlaskForm):
     amount = StringField("Refund amount", validators=[DataRequired(), Length(max=12)])
     reason = StringField("Reason", validators=[Optional(), Length(max=255)])

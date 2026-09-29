@@ -136,7 +136,8 @@ def test_m10_customer_staff_admin_flow(app, db):
     _db.session.commit()
     _db.session.expire_all()
     done = _db.session.get(Order, second.id)
-    assert (done.total, done.items[0].unit_price_snapshot, done.table.name) == (two_burgers, Decimal("385.00"), "T01")
+    # total includes the 13 % tax snapshotted at checkout (M12): 770.00 + 100.10
+    assert (done.total, done.items[0].unit_price_snapshot, done.table.name) == (Decimal("870.10"), Decimal("385.00"), "T01")
     assert _db.session.get(Order, dine_in.id).cancellation_reason == "Changed plans"
     mine = _db.session.get(Reservation, mine.id)
     r = req(cust, "post", f"/reservations/{mine.id}/cancel")

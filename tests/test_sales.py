@@ -56,8 +56,10 @@ def test_cancelled_and_unfinished_orders_are_not_sales(buyer):
 
     report = build_report(today, today, "Today")
     t = report.totals
-    assert (t.orders, t.gross, t.net, t.collected, t.paid) == (2, D("2500.00"), D("2500.00"), D("1000.00"), 1)
-    assert (t.discounts, t.tax, t.refunds) == (D("0.00"),) * 3
+    # collected is the real payment: 1000.00 + 13 % tax (M12); gross/net exclude tax
+    assert (t.orders, t.gross, t.net, t.collected, t.paid) == (2, D("2500.00"), D("2500.00"), D("1130.00"), 1)
+    # M12: tax is the orders' own 13 % snapshot on the 2,500.00 of completed sales
+    assert (t.discounts, t.tax, t.refunds) == (D("0.00"), D("325.00"), D("0.00"))
     assert report.unpaid_completed == 1
     assert t.average == D("1250.00")
     assert (report.placed, report.cancelled, report.active) == (4, 1, 1)

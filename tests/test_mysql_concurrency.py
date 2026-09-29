@@ -220,3 +220,44 @@ def test_two_full_refunds_cannot_overdraw(app, db):
         assert sorted(map(str, results)) == ["ok", "refused"], results
         _db.session.rollback()
         assert _db.session.get(Payment, payment_id).refunded_amount == Decimal(full)
+
+
+# --- Milestone 12: pricing ---------------------------------------------------------
+
+
+def test_discount_vs_payment_payment_always_matches_final_total(app, db):
+    """Both may succeed (discount first, then payment at the new total), or the
+    payment wins and the discount is refused -- but a payment must never be
+    taken at a total that then changes underneath it."""
+    from app.models.payment import Payment
+    from app.services.payments import PaymentError, record_payment
+    from app.services.pricing import PricingError, apply_discount
+
+    customer, (a, b), place = _paid_order_fixture()
+    outcomes = set()
+    for _ in range(ROUNDS):
+        order_id = place(customer).id
+
+        def pay():
+            try:
+                record_payment(_db.session.get(Order, order_id), "cash", _db.session.get(User, a))
+                return "paid"
+            except PaymentError:
+                return "pay-refused"
+
+        def discount():
+            try:
+                apply_discount(_db.session.get(Order, order_id), "percent", "10", "race", _db.session.get(User, b))
+                return "discounted"
+            except PricingError:
+                return "discount-refused"
+
+        results = [str(r) for r in _race(app, pay, discount)]
+        assert "paid" in results, results  # the payment itself is never blocked by a discount
+        outcomes.add(tuple(sorted(results)))
+        _db.session.rollback()
+        order = _db.session.get(Order, order_id)
+        payment = _db.session.query(Payment).filter_by(order_id=order_id).one()
+        assert payment.amount == order.total, (payment.amount, order.total, results)
+        assert (order.discount_amount > 0) == ("discounted" in results)
+    assert outcomes <= {("discount-refused", "paid"), ("discounted", "paid")}

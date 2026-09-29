@@ -52,10 +52,10 @@ def test_payment_amount_is_the_server_side_total(client, db):
     r = client.post(f"/staff/orders/{order.id}/payment", data={"method": "card", "amount": "1.00", "total": "1.00"})
     assert r.status_code == 302
     p = _db.session.query(Payment).one()
-    assert (p.order_id, p.method, p.amount, p.refunded_amount) == (order.id, PaymentMethod.CARD, D("1155.00"), D("0.00"))
+    assert (p.order_id, p.method, p.amount, p.refunded_amount) == (order.id, PaymentMethod.CARD, D("1305.15"), D("0.00"))  # 1155.00 + 13 % tax
     assert p.recorded_by_id == cook.id and p.captured_at is not None
     assert audit(AuditEvent.PAYMENT_RECORDED) == [
-        {"order_id": order.id, "payment_id": p.id, "method": "card", "amount": "1155.00"}]
+        {"order_id": order.id, "payment_id": p.id, "method": "card", "amount": "1305.15"}]
 
 
 def test_invalid_method_and_double_payment_rejected(db):
@@ -111,11 +111,12 @@ def test_payment_rbac_and_csrf(app, client, db):
 
 def test_partial_then_full_refund_never_exceeds_amount(db):
     p = record_payment(place(customer(), price="100.00", qty=2), "cash", member())
+    assert p.amount == D("226.00")  # 200.00 + 13 % tax
     assert refund_payment(p, "50", "cold fries") == D("50.00")
     assert (p.refunded_amount, p.refund_reason, p.fully_refunded) == (D("50.00"), "cold fries", False)
     with pytest.raises(PaymentError):
-        refund_payment(p, "150.01", None)
-    refund_payment(p, "150.00", None)
+        refund_payment(p, "176.01", None)
+    refund_payment(p, "176.00", None)
     assert p.fully_refunded and p.net_amount == D("0.00")
     with pytest.raises(PaymentError):
         refund_payment(p, "0.01", None)
@@ -205,7 +206,7 @@ def test_report_figures_come_from_payments(db):
     for o in (completed_paid, prepaid, refunded_then_cancelled):
         record_payment(o, "wallet", cook)
     refund_payment(completed_paid.payment, "50.00", "missing side")
-    refund_payment(refunded_then_cancelled.payment, "999.00", None)
+    refund_payment(refunded_then_cancelled.payment, str(refunded_then_cancelled.payment.amount), None)
     update_order_status(refunded_then_cancelled, OrderStatus.CANCELLED)
     for o in (completed_paid, completed_unpaid):
         set_status(o, OrderStatus.COMPLETED)
@@ -213,8 +214,9 @@ def test_report_figures_come_from_payments(db):
     report = build_report(today, today, "Today")
     t = report.totals
     assert (t.orders, t.gross, t.refunds, t.net) == (2, D("800.00"), D("50.00"), D("750.00"))
-    assert (t.paid, t.collected) == (1, D("450.00"))
-    assert (report.unpaid_completed, report.prepaid, report.cancelled) == (1, D("200.00"), 1)
+    # payments include 13 % tax (M12): 565.00 - 50.00 refunded; prepaid 226.00
+    assert (t.paid, t.collected) == (1, D("515.00"))
+    assert (report.unpaid_completed, report.prepaid, report.cancelled) == (1, D("226.00"), 1)
     assert report.totals.average == D("375.00")
 
 
@@ -247,4 +249,4 @@ def test_release_never_overrides_a_non_occupied_table(db):
 
 def test_money_is_decimal_not_float(db):
     p = record_payment(place(customer(), price="0.10", qty=3), "cash", member())
-    assert isinstance(p.amount, Decimal) and p.amount == D("0.30")  # 3 x 0.10 exactly
+    assert isinstance(p.amount, Decimal) and p.amount == D("0.34")  # 3 x 0.10 + 0.039 tax -> 0.04

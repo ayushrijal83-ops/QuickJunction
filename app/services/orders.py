@@ -36,6 +36,7 @@ from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import Role, User
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available_menu_item
 from app.services.errors import ValidationError
+from app.services.pricing import current_settings, price
 from app.services.tables import UNSEATABLE_STATUSES, release_table_if_idle
 
 MAX_DISTINCT_LINES = 30
@@ -137,6 +138,9 @@ def checkout(
     # Re-validated here, not only in the route: the channel rule is a
     # business rule, and callers other than the checkout route exist.
     source, table_id = resolve_order_channel(source, table_id)
+    # Read before the order is built: a query here would autoflush a
+    # half-priced order row and trip ck_orders_total_formula.
+    tax_rate = current_settings()[0]
 
     order = Order(
         user_id=user_id,
@@ -166,8 +170,10 @@ def checkout(
                 )
             )
 
-        order.subtotal = subtotal
-        order.total = subtotal  # no tax, discount, or delivery fee in this milestone
+        # Tax at today's configured rate, snapshotted on the order (M12);
+        # checkout never discounts -- only staff can, later, on an unpaid order.
+        tax_amount, total = price(subtotal, Decimal("0.00"), tax_rate)
+        order.subtotal, order.tax_rate, order.tax_amount, order.total = subtotal, tax_rate, tax_amount, total
         if table_id is not None:
             # A party ordering at a table means it is in use. Freeing it again
             # (CLEANING -> AVAILABLE) is a staff action on the table board.

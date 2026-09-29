@@ -4,9 +4,10 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-29 (end of Milestone 11)
-Current state: **Milestone 11 complete — payments and refunds on top of M10's
-restaurant operations, reservations, cancellation and sales reporting.**
+Last updated: 2026-09-30 (end of Milestone 12)
+Current state: **Milestone 12 complete — tax and discount pricing on top of
+M11 payments/refunds and M10 restaurant operations, reservations,
+cancellation and sales reporting.**
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
 > Operations, Customer Dashboard, Table Reservation, Customer Order
@@ -38,10 +39,11 @@ restaurant operations, reservations, cancellation and sales reporting.**
 | 08 | Finalization: Bootstrap UI, MySQL E2E, security audit, demo readiness | ✅ Complete |
 | 09 | Security hardening: server-side session revocation | ✅ Complete |
 | 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete (MySQL-verified) |
-| 11 | Payments, admin refunds, paid-order cancellation rule, automatic table release | ✅ Complete |
-| — | Tax/discounts, payment gateway, production deployment | ⬜ Not started |
+| 11 | Payments, admin refunds, paid-order cancellation rule, automatic table release | ✅ Complete (live MySQL-verified) |
+| 12 | Tax (configurable, snapshotted) + staff/admin discounts | ✅ Complete (not yet applied to live DB) |
+| 13–16 | Inventory, kitchen operations, UI overhaul, final audit | ⬜ Planned |
 
-**Test suite: 608 passing, 5 skipped (MySQL-only), 0 failing on SQLite; 612 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M11; `pytest`; in-memory SQLite by default for
+**Test suite: 640 passing, 6 skipped (MySQL-only), 0 failing on SQLite; 645 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M12; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -1159,7 +1161,8 @@ No schema change was made in M08; no migration was added.
 | 27 | AI explanation takes ~9 s per request on CPU after the model is loaded (23 s including first load) | acceptable on its own route; would not be acceptable inline |
 | 30 | ~~Migration `b5e2f8c41a07` not yet applied to live MySQL~~ — **closed**: applied to MySQL 8.0.46 and verified (see "M10 final verification") | — |
 | 32 | Downgrading **all the way to base** fails on MySQL: pre-M10 revisions `abf997064564`, `8d5ba0171efe`, `d8f3bfd0e2a9` drop foreign-key-backed indexes before their tables in `downgrade()` (MySQL 1553). Upgrades and the M10 downgrade are unaffected; left unedited as historical migrations | only matters for a full teardown by downgrade; fix is deleting those `drop_index` lines (downgrade-only) if wanted |
-| 31 | ~~No payment/refund records~~ — **payments and refunds closed in M11**; **tax and discounts are still not recorded** (0.00 "not recorded") pending a decision on the rules | reports cannot show tax or discounts |
+| 31 | ~~No payment/refund/tax/discount records~~ — **payments and refunds closed in M11; tax and discounts closed in M12** | — |
+| 34 | Migration `d7f1e3a9c2b4` (M12 pricing) verified on SQLite and the MySQL test database, **not yet applied to live `quickjunctiondb`** | back up, then `flask db upgrade`, before using M12 there |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
 
@@ -1186,15 +1189,15 @@ email verification · staff queue pagination/filtering.
 
 | Item | Value |
 | --- | --- |
-| Tests | SQLite **608 passed, 5 skipped**; MySQL **612 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
-| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 5 (MySQL-only); M11 added payments 20 |
+| Tests | SQLite **640 passed, 6 skipped**; MySQL **645 passed, 1 skipped**; 0 failing (warnings: the pre-existing `env.py` deprecation only) |
+| Test files | earlier rows as listed per milestone; M10 added restaurant_ops 43, sales 17, reservations 29, ops_migration 1, m10_end_to_end 1, mysql_concurrency 6 (MySQL-only, incl. M11/M12 races); M11 added payments 20; M12 added pricing 32 |
 | Running tests on MySQL | `TEST_DATABASE_URL=mysql+pymysql://…/quickjunction_test pytest` — must be a disposable `*_test` database; the fixtures refuse anything else |
-| Migrations | **8 revisions, head = `c3a9d7e21f58`** (M10 `b5e2f8c41a07`; M11 payments). Live `quickjunctiondb` also at `c3a9d7e21f58` |
-| Tables | 12: previous 9 + `restaurant_tables`, `reservations`, `payments` |
-| Models | 12 modules in `app/models/` |
-| Services | 13 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`) |
+| Migrations | **9 revisions, head = `d7f1e3a9c2b4`** (M10 `b5e2f8c41a07`; M11 `c3a9d7e21f58`; M12 pricing). Live `quickjunctiondb` at `c3a9d7e21f58` (#34) |
+| Tables | 13: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings` |
+| Models | 13 modules in `app/models/` |
+| Services | 14 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`) |
 | Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
-| Audit events | 26 |
+| Audit events | 28 |
 | Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
 | Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
 | Order statuses | 7 (`pending`, `confirmed`, `preparing`, `ready`, `served`, `completed`, `cancelled`) — `served` added in M10 |
@@ -2212,13 +2215,149 @@ discounts not recorded (#31); full downgrade-to-base on MySQL (#32).
 
 ---
 
+## Milestone 12 — Tax + discounts ✅
+
+First milestone of the fast-track plan (M12 tax/discounts → M13 inventory →
+M14 kitchen → M15 UI → M16 final audit). Baseline: SQLite **608 passed, 5
+skipped**; MySQL test DB **612 passed, 1 skipped**.
+
+### Pricing formula (`app/services/pricing.py` — the only place it lives)
+
+```
+discounted_subtotal = subtotal - discount_amount
+tax_amount          = discounted_subtotal x tax_rate / 100   (ROUND_HALF_UP to 0.01)
+total               = discounted_subtotal + tax_amount
+```
+
+Decimal end to end. Percentage discounts: `subtotal x pct / 100`, half-up.
+A discount can never exceed the subtotal.
+
+### Configuration
+
+`PricingSettings` (`pricing_settings`, one row, id 1), seeded by the
+migration with **tax 13.00 %** and **staff maximum discount 20.00 %** — the
+application's configured defaults, not a legal claim. Defaults live once, in
+`app/models/pricing_settings.py`; no `0.13` anywhere else. DB CHECKs: tax
+0–50 %, staff cap 0–100 %. Admin edits them at **`/admin/settings`**
+(`require_role(ADMIN)`, CSRF, validated server-side, audited as
+`pricing_settings_changed` with old → new).
+
+### Order snapshot (never recomputed)
+
+New `orders` columns: `discount_type` (`percent`/`fixed`), `discount_value`,
+`discount_amount`, `discount_reason`, `discounted_by_id`, `tax_rate`,
+`tax_amount`. Checkout snapshots today's tax rate with zero discount;
+`total` now equals the formula above. A later discount re-prices using the
+**order's own `tax_rate`**, never the current setting (tested by changing the
+rate to 5 % and discounting an old 13 % order). Menu price changes never
+reach an order. Existing orders were backfilled with discount 0 and tax 0 —
+exactly what they were charged.
+
+DB CHECKs: `discount_amount` between 0 and `subtotal`; `tax_amount >= 0`;
+`ck_orders_total_formula`: `ABS(total - (subtotal - discount_amount +
+tax_amount)) < 0.005` — a half-cent tolerance because SQLite stores NUMERIC
+as binary float (on MySQL DECIMAL it is exact; any real error is ≥ 1 cent).
+
+### Discounts — who and when
+
+| Actor | May discount |
+| --- | --- |
+| Customer | never (no route; checkout ignores posted discount/tax/total fields — tested) |
+| STAFF | up to `staff_max_discount` % of the subtotal; a fixed amount is measured as a % too |
+| ADMIN | up to 100 % |
+
+Every non-zero discount needs a reason (≤ 255 chars); value 0 removes the
+discount. Only **unpaid** orders that are not completed/cancelled can be
+discounted. Route: `POST /staff/orders/<id>/discount` (STAFF, ADMIN; CSRF;
+only type/value/reason are read from the form — forged `discount_amount`,
+`tax_amount`, `total`, `discounted_by_id` are ignored, tested). Audited as
+`order_discount_applied` with type, value, amount and new total.
+
+### Payments, refunds, cancellation
+
+Unchanged code paths: payment still takes the server-side `order.total`,
+which now includes discount and tax. Refunds remain bounded by the actual
+payment. Paid-order cancellation rules unchanged.
+
+**Real bug found by the MySQL race test and fixed.** `apply_discount` locked
+the order row but checked "already paid?" via `locked.payment` — a lazy load,
+which under MySQL REPEATABLE READ is a *snapshot* read and could miss a
+payment committed after the transaction's first read. The race test caught
+it immediately (payment 226.00 recorded, then a discount moved the total to
+203.40). Fixed with a locking `SELECT … FOR UPDATE` on `payments`. SQLite
+could never show this. (`record_payment`'s similar `locked.payment` read is
+already backstopped by the UNIQUE `order_id`; the cancel guard is a
+`NOT EXISTS` inside the UPDATE, a locking read — neither is exposed.)
+
+### Reporting
+
+Reports now read the snapshots: **Discounts** = Σ `discount_amount`, **Tax**
+= Σ `tax_amount` (each order's own rate), **Net sales** = gross − discounts −
+refunds (tax excluded — collected for the tax authority). The "not recorded"
+labels are gone. Changing settings after the fact does not move any reported
+figure (tested).
+
+### UI
+
+Staff order page: subtotal / discount (with reason) / tax (rate) / total and a
+discount form (unpaid, unfinished orders only; shows the role's cap).
+Customer order page: the same breakdown. Checkout: tax preview at the current
+rate (display only — recomputed server-side). Admin nav: **Settings**.
+
+### Migration
+
+**`d7f1e3a9c2b4`** (`down_revision = c3a9d7e21f58`): creates and seeds
+`pricing_settings`; adds the 7 order columns, FK `discounted_by_id → users`
+(RESTRICT) and 4 CHECKs; widens the audit allow-list by 2 events. Downgrade
+drops the FK before the columns (MySQL-safe, see #32). Schema-match and
+round-trip tests pass on SQLite and MySQL. **Not applied to live
+`quickjunctiondb` yet (#34).**
+
+### Tests
+
+- `tests/test_pricing.py` (**32**): default snapshot; percentage, fixed and
+  zero discounts; half-up rounding (0.065 → 0.07, 4.9995 → 5.00); staff cap
+  exactly / just over (percent and fixed); admin 100 %; 6 invalid/excessive
+  values; reason required and bounded; DB CHECKs; settings changes never
+  touch past orders and re-pricing uses the order's own rate; menu repricing;
+  5 invalid settings; settings page 401/403/403/admin + audit; discount route
+  401/403 + forged fields ignored + audit; customer cannot self-discount at
+  checkout; CSRF; payment takes the discounted taxed total and locks pricing;
+  stale discount after payment refused; completed/cancelled not
+  discountable; refunds bounded by the payment; report uses snapshots after
+  settings change; order and checkout pages show the breakdown.
+- `tests/test_mysql_concurrency.py` (+1, MySQL only): discount vs payment —
+  the payment always equals the order's final total; stable over 5 runs
+  after the fix (failed every run before it).
+- **Existing tests updated** (behaviour change, not weakening): 13 assertions
+  that hard-coded "total == subtotal" (no tax existed) now assert the exact
+  taxed values, e.g. 59.97 → tax 7.80 → 67.77, 498.00 → 562.74, and one M11
+  report assertion now expects tax 325.00 instead of 0.00.
+  `test_17_client_total_manipulation_ignored` was strengthened to also forge
+  `tax_amount` and `discount_amount`.
+
+**Non-vacuity:** removing the paid-order check and the staff cap from
+`apply_discount` fails exactly the 3 matching tests; restored.
+
+**Results:** SQLite **640 passed, 6 skipped** (608 + 32; +1 MySQL-only
+skip), 24 warnings. MySQL test DB **645 passed, 1 skipped** (#32), 18
+warnings, 417 s. 0 failures.
+
+### Security review
+
+New routes: discount `require_role(STAFF, ADMIN)`, settings
+`require_role(ADMIN)`; both CSRF-protected. Only type/value/reason (and the
+two settings values) come from the client; every amount is computed
+server-side from the locked order row. Caps enforced from the actor's
+server-side role. Row lock + locking payment read close the discount/payment
+race. No raw/f-string SQL, no `|safe`, no debug output, no secrets.
+
+---
+
 ## Next milestone
 
-Recommended: **Tax & discounts** — decide the rules first (VAT rate and
-whether prices are tax-inclusive, service charge, who may apply a discount
-and how much), then store them on the order at checkout as snapshots
-alongside `subtotal`, so `total` diverges from `subtotal` for the first time
-and the report's tax/discount rows become real.
+**M13 — Inventory / stock** (per the fast-track plan). Also apply
+`d7f1e3a9c2b4` to the live database after a backup (#34).
 
 Carried over:
 
