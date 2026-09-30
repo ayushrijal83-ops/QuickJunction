@@ -103,3 +103,6 @@ Desktop.ini
 
 # Local password list
 PASSWORDS.txt
+
+# Microsoft Office lock files (created while a document is open)
+~$*

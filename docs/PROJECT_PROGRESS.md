@@ -3030,3 +3030,94 @@ payments, a refund, stock and reservations. In Chrome:
   not on physical devices.
 
 > **Quick Junction feature development and UI development are complete. Project is frozen for final documentation/demo/presentation.**
+
+
+---
+
+# Windows Setup Automation (fresh-machine installation)
+
+Setup tooling only: **no application code, model, migration or route changed.** The
+goal is that a new Windows 11 PC goes: install Python + MySQL (guide) → copy/clone →
+run `setup_quick_junction.bat` → fresh `quick_junction` database with the dedicated
+`qj_user` account → full migration chain → verified → ready to run.
+
+## Facts verified from the repository before writing anything
+
+| Question | Answer (source) |
+| --- | --- |
+| Python | **3.10 or 3.11** — scikit-learn 1.7.2 and scipy 1.15.3 require >= 3.10; numpy 1.24.3 has no wheels for 3.12+ (`requirements.txt`, package metadata) |
+| MySQL | 8.0, tested on **8.0.46** (the final 8.0 release; 8.0 reached end of life April 2026). 8.4 LTS **not tested** |
+| Driver | **PyMySQL 1.2** (`mysql+pymysql://`). A brand-new `caching_sha2_password` account connected through PyMySQL without the `cryptography` package (probe account created and dropped) — no dependency change needed |
+| Required variables | `SECRET_KEY`, `DATABASE_URL` (`BaseConfig.validate`); `.env` is loaded with `load_dotenv`, which does not override variables already set |
+| Database / account | `quick_junction` / `qj_user` (`.env.example`); root is warned about in development and refused in production (`database_uses_root`) |
+| Schema from empty | yes — 11 revisions, single head **`f3a6d9b2e8c5`**; `d7f1e3a9c2b4` seeds `pricing_settings` |
+| Seed data | optional (`scripts/seed_demo.py`, idempotent, refuses production) |
+| First admin | no admin registration and no admin-creation command: demo seed (development) or promote a registered user with SQL |
+| Folders | none to create — `logs/` is created by `configure_logging`; no upload directory exists |
+| Other services | none; the local LLM is optional and development mode warms it up, so all database steps run with `LLM_WARMUP=false` |
+
+## Files created
+
+- **`setup_quick_junction.bat`** (root) — checks Windows, Python 3.11/3.10, MySQL; creates
+  `.venv`; installs `requirements.txt`; runs the database setup; prints the start
+  command. Does not launch the app; never deletes data.
+- **`scripts/setup_database.bat`** — database part only (non-destructive).
+- **`scripts/reset_database.bat`** — **destructive**, requires typing
+  `RESET QUICK JUNCTION`; drops/recreates only the Quick Junction database.
+- **`scripts/find_mysql.bat`** — shared detection: PATH, `%ProgramFiles%\MySQL\MySQL Server *`,
+  the `MySQL*` Windows service, or a path the user types.
+- **`scripts/db_setup.py`** — the logic (`setup` / `verify` / `reset`): admin login via
+  PyMySQL (`getpass`, never printed or saved); `CREATE DATABASE` only if missing
+  (utf8mb4); `qj_user` at `127.0.0.1` and `localhost` with **SELECT, INSERT, UPDATE,
+  DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES on that database only** (not `ALL`, no
+  global grants); random 32-character password written only to `.env`; `flask db upgrade`;
+  checks revision = repository head, all 14 model tables InnoDB/utf8mb4, foreign keys,
+  CHECK constraints, the seeded pricing row; starts the app and requests `/health` and
+  `/menu`; optional demo data. Stops at the first failure with a hint.
+- **`docs/DATABASE_SETUP_GUIDE.md`** — 20-section beginner guide (Python and MySQL 8.4 /
+  8.0 installer choices marked REQUIRED/OPTIONAL/NOT REQUIRED, `.env`, migrations,
+  verification, first admin, 14 troubleshooting items, checklist, architecture, security,
+  backup/restore, development vs production).
+- **`.gitattributes`** — `*.bat text eol=crlf`, so batch files keep CRLF on checkout.
+
+README: short "Quick Setup on Windows" section; also corrected two stale lines (head
+`38297b707b89` → `f3a6d9b2e8c5`, "221 tests" → 725) and a corrupted `.venv\Scripts\activate`
+line (a control character had replaced `\a`).
+
+## Testing actually performed (2026-09-30, this machine)
+
+Environment: Windows 11, **Python 3.10.11**, **MySQL 8.0.46** (service MySQL80). A fresh
+copy of the repository (tracked and new files only — no `.env`, `.venv`, `models/`) was
+made in a scratch folder. To avoid touching anything real, the database and account names
+were overridden to **`qj_setup_test` / `qj_setup_user`** (`QJ_DB_NAME` / `QJ_DB_USER`);
+the MySQL administrator password was supplied through `QJ_MYSQL_ADMIN_PASSWORD` so the run
+could be automated.
+
+| Test | Result |
+| --- | --- |
+| `setup_quick_junction.bat` on the fresh copy | **passed**: .venv created, requirements installed, database + both account hosts created, `.env` created, **11 migrations applied as the least-privilege account**, head `f3a6d9b2e8c5` verified, 14 tables InnoDB/utf8mb4, 19 FKs, 37 CHECKs, pricing row, smoke test, demo data |
+| Re-run via `scripts/setup_database.bat` | **passed**: database kept, 0 migrations applied, `.env` byte-identical |
+| Real server from the fresh `.env` (no overrides) | `/health`, `/menu` 200; admin sign-in over HTTP with CSRF; dashboard, reports, audit, kitchen 200; audit log recorded the sign-in; no root warning |
+| `reset_database.bat`, wrong phrase | refused, nothing deleted (exit 1) |
+| `reset_database.bat`, `RESET QUICK JUNCTION` | dropped and rebuilt only `qj_setup_test`, 11 migrations, verified |
+| Wrong admin password / unreachable port | clean stop with a hint (exit 1) |
+| `db_setup.py verify` | passed |
+| Password leak check | generated application password absent from all captured output |
+| pytest in the fresh copy | 725 collected: **713 passed, 12 skipped, 0 failed** (7 MySQL-only + 5 that need `models/`) |
+| pytest in the main repository | **718 passed, 7 skipped, 0 failed** |
+| Live `quickjunctiondb` | row counts, max audit id and head `f3a6d9b2e8c5` **identical** before and after |
+| Clean-up | `qj_setup_test` and `qj_setup_user` dropped; server back to its original databases and accounts |
+
+## Known setup limitations
+
+- Tested on this development machine with a fresh copy of the project, **not** on a
+  separate, newly installed Windows PC; MySQL 8.4 LTS was not tested.
+- The interactive prompts (administrator username, hidden `getpass` password) were not
+  exercised by the automated runs, which used the environment-variable path; the reset
+  phrase prompt was exercised through standard input.
+- The script cannot install Python or MySQL; those are manual steps (guide sections 3–4).
+- `qj_user` also runs migrations, so it holds schema privileges on its database; a
+  separate migration account is recommended for production (guide section 18).
+- No admin-creation command exists; the first admin comes from demo data or SQL.
+- The older `setup.bat` / `setup.ps1` (winget installs, `GRANT ALL`, launches the app)
+  are still in the repository; `setup_quick_junction.bat` is the documented path.

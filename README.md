@@ -10,6 +10,25 @@ and no network call at inference time.
 
 ---
 
+## Quick Setup on Windows
+
+1. Install **Python 3.11** (or 3.10 — not 3.12+) and **MySQL Server 8**, exactly as
+   described in [`docs/DATABASE_SETUP_GUIDE.md`](docs/DATABASE_SETUP_GUIDE.md)
+   sections 3–5. Write down the MySQL root password.
+2. Copy or clone this folder, then double-click **`setup_quick_junction.bat`**. It
+   creates `.venv`, installs `requirements.txt`, creates the `quick_junction` database
+   and the `qj_user` account (never root), writes `.env`, runs every migration and
+   verifies the result. It asks for the MySQL root password once and never deletes
+   data; it is safe to run again.
+3. Start the application: `.venv\Scripts\python run.py`, then open
+   <http://127.0.0.1:5000>.
+
+Database only: `scripts\setup_database.bat`. Check an installation:
+`.venv\Scripts\python scripts\db_setup.py verify`. Start over (**deletes all
+data**): `scriptseset_database.bat`. Problems: the guide's Troubleshooting section.
+
+---
+
 ## 1. What Quick Junction is
 
 A final-year-project-scale but production-shaped Flask application covering
@@ -263,7 +282,7 @@ Optional AI settings (all have working defaults):
 
 ```bash
 flask db upgrade                            # apply
-flask db current                            # should print 38297b707b89 (head)
+flask db current                            # should print f3a6d9b2e8c5 (head)
 flask db downgrade                          # roll back one
 ```
 
@@ -276,7 +295,7 @@ guesses, and its guesses can drop columns.
 pytest
 ```
 
-**221 tests.** The suite uses in-memory SQLite (and a temporary on-disk
+**725 tests** (final version). The suite uses in-memory SQLite (and a temporary on-disk
 SQLite for the migration tests), so it needs no MySQL server and touches no
 real data. The language model is disabled in the testing configuration and is
 never loaded by the suite.
@@ -348,7 +367,7 @@ project is developed and tested on 3.10.11.
 
 ```bash
 python -m venv .venv
-.venv\Scriptsctivate          # Windows
+.venv\Scripts\activate          # Windows
 source .venv/bin/activate       # Linux / macOS
 ```
 
