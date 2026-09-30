@@ -313,7 +313,7 @@ def test_order_pages_show_the_breakdown(app, client, db):
     order = apply_discount(thousand(), "percent", "10", "promo", member())
     login(client, "diner")
     body = client.get(f"/orders/{order.id}").get_data(as_text=True)
-    assert "Discount" in body and "100.00" in body and "Tax (13.00%)" in body and "1017.00" in body
+    assert "Discount" in body and "100.00" in body and "Tax (13.00%)" in body and "1,017.00" in body
     staff = app.test_client()
     login(staff, "cook")
     body = staff.get(f"/staff/orders/{order.id}").get_data(as_text=True)

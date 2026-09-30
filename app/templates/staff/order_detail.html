@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Order #{{ order.id }} &mdash; Quick Junction Staff{% endblock %}
 
+{% from "partials/_dashboard.html" import steps %}
+{% block ops_context %}Service &middot; order detail{% endblock %}
 {% block content %}
 <nav aria-label="breadcrumb">
   <ol class="breadcrumb">
@@ -9,15 +11,22 @@
   </ol>
 </nav>
 
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-  <h1 class="h3 mb-0">Order #{{ order.id }}</h1>
-  {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">{{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %} &middot; {{ order.created_at.strftime("%d %b %Y, %H:%M") }}</div>
+    <h1>Order #{{ order.id }}</h1>
+  </div>
+  <div class="d-flex flex-wrap gap-2 align-items-center">
+    {% if order.payment or order.status.value != "cancelled" %}{% with payment = order.payment %}{% include "partials/_payment_badge.html" %}{% endwith %}{% endif %}
+    {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+  </div>
 </div>
+{% if order.status.value != "cancelled" %}<div class="qj-panel p-3 p-md-4 mb-4">{{ steps(order) }}</div>{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-8">
-    <div class="card shadow-sm mb-4">
-      <div class="card-header bg-white"><strong>Items</strong></div>
+    <div class="card mb-4">
+      <div class="card-header"><strong>Items</strong></div>
       <div class="table-responsive">
         <table class="table align-middle mb-0">
           <thead class="table-light">
@@ -71,8 +80,8 @@
     {# Only unpaid, unfinished orders can be discounted; app/services/pricing.py
        re-checks everything, including the role's cap, on every POST. #}
     {% if not order.payment and order.status.value not in ("completed", "cancelled") %}
-      <div class="card shadow-sm">
-        <div class="card-header bg-white"><strong>Discount</strong></div>
+      <div class="card">
+        <div class="card-header"><strong>Discount</strong></div>
         <div class="card-body">
           <form method="post" action="{{ url_for('staff_orders.discount_order', order_id=order.id) }}"
                 class="row g-2 align-items-end" novalidate>
@@ -108,9 +117,9 @@
   </div>
 
   <div class="col-lg-4">
-    <div class="card shadow-sm mb-4">
+    <div class="card mb-4">
       <div class="card-body">
-        <h2 class="h6 text-uppercase text-secondary">Order details</h2>
+        <h2 class="qj-eyebrow mb-3">Order details</h2>
         <dl class="row mb-0 small">
           <dt class="col-5 fw-normal text-secondary">Customer</dt>
           <dd class="col-7">{{ order.customer.username }}</dd>
@@ -135,23 +144,27 @@
       </div>
     </div>
 
-    <div class="card shadow-sm mb-4">
-      <div class="card-header bg-white"><strong>Payment</strong></div>
+    <div class="card mb-4">
+      <div class="card-header"><strong>Payment</strong></div>
       <div class="card-body">
         {% set p = order.payment %}
         {% if p %}
           <dl class="row mb-0 small">
             <dt class="col-5 fw-normal text-secondary">Paid</dt>
-            <dd class="col-7 qj-price">{{ p.amount | money }} &middot; {{ p.method.value }}</dd>
+            <dd class="col-7"><span class="qj-price">{{ p.amount | money }}</span> &middot; {{ p.method.value }}</dd>
             <dt class="col-5 fw-normal text-secondary">At</dt>
             <dd class="col-7">{{ p.captured_at.strftime("%d %b %Y, %H:%M") }}</dd>
             {% if p.refunded_amount > 0 %}
               <dt class="col-5 fw-normal text-secondary">Refunded</dt>
-              <dd class="col-7 qj-price">{{ p.refunded_amount | money }}{% if p.refund_reason %}<br><span class="text-secondary">&ldquo;{{ p.refund_reason }}&rdquo;</span>{% endif %}</dd>
+              <dd class="col-7"><span class="qj-price">{{ p.refunded_amount | money }}</span>{% if p.refund_reason %}<br><span class="text-secondary">&ldquo;{{ p.refund_reason }}&rdquo;</span>{% endif %}</dd>
             {% endif %}
           </dl>
           {% if current_user.role.value == "admin" and not p.fully_refunded %}
-            <form method="post" action="{{ url_for('staff_orders.refund_order_payment', order_id=order.id) }}" class="mt-3" novalidate>
+            <div class="qj-danger-zone">
+            <div class="qj-danger-zone__title mb-2"><i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Refund (admin)</div>
+            <form method="post" action="{{ url_for('staff_orders.refund_order_payment', order_id=order.id) }}" novalidate
+                  data-confirm="Refund this payment?" data-confirm-body="The refund is recorded against order #{{ order.id }} and appears in sales reports. This cannot be undone."
+                  data-confirm-ok="Issue refund" data-confirm-cancel="Go back">
               {{ refund_form.csrf_token }}
               <div class="input-group input-group-sm mb-1">
                 <span class="input-group-text">Refund</span>
@@ -160,6 +173,7 @@
               <input class="form-control form-control-sm mb-1" name="reason" maxlength="255" placeholder="Reason (optional)" aria-label="Refund reason">
               <button class="btn btn-sm btn-outline-danger w-100" type="submit">Refund</button>
             </form>
+            </div>
           {% endif %}
         {% elif order.status.value == "cancelled" %}
           <p class="mb-0 text-secondary">Cancelled &mdash; nothing to collect.</p>
@@ -178,8 +192,8 @@
       </div>
     </div>
 
-    <div class="card shadow-sm">
-      <div class="card-header bg-white"><strong>Update status</strong></div>
+    <div class="card">
+      <div class="card-header"><strong>Update status</strong></div>
       <div class="card-body">
         {% if next_statuses %}
           <p class="small text-secondary">
@@ -190,7 +204,8 @@
              the order's real status on every POST. #}
           <div class="d-grid gap-2">
             {% for status in next_statuses %}
-              <form method="post" action="{{ url_for('staff_orders.order_status_update', order_id=order.id) }}">
+              <form method="post" action="{{ url_for('staff_orders.order_status_update', order_id=order.id) }}"
+                    {% if status.value == "cancelled" %}data-confirm="Cancel order #{{ order.id }}?" data-confirm-body="The customer will see it as cancelled by the restaurant. This action cannot be undone." data-confirm-ok="Cancel order" data-confirm-cancel="Keep order"{% endif %}>
                 {{ form.csrf_token }}
                 <input type="hidden" name="status" value="{{ status.value }}">
                 {% if status.value == "cancelled" %}

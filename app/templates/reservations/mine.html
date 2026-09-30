@@ -1,39 +1,35 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import empty %}
 {% block title %}My reservations &mdash; Quick Junction{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-  <h1 class="h3 mb-0">My reservations</h1>
-  <a class="btn btn-primary" href="{{ url_for('reservations.new') }}">Book a table</a>
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">Your evenings</div>
+    <h1>My reservations</h1>
+  </div>
+  <a class="btn btn-primary" href="{{ url_for('reservations.new') }}"><i class="bi bi-calendar-plus me-1" aria-hidden="true"></i>Book a table</a>
 </div>
 
 {% if reservations %}
-  <div class="card shadow-sm">
-    <div class="table-responsive">
-      <table class="table align-middle mb-0">
-        <thead class="table-light">
-          <tr><th scope="col">Table</th><th scope="col">Date</th><th scope="col">Time</th><th scope="col" class="text-center">Guests</th><th scope="col">Reserved at</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
-        </thead>
-        <tbody>
-          {% for r in reservations %}
-            <tr>
-              <td>{{ r.table.name }}</td>
-              <td>{{ r.reservation_date.strftime("%a %d %b %Y") }}</td>
-              <td>{{ r.reservation_time.strftime("%H:%M") }}</td>
-              <td class="text-center">{{ r.guest_count }}</td>
-              <td class="text-secondary small">{{ r.reserved_at.strftime("%d %b %Y, %H:%M") }}</td>
-              <td>{% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}</td>
-              <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('reservations.detail', reservation_id=r.id) }}">View</a></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+  <div class="row g-3">
+    {% for r in reservations %}
+      <div class="col-md-6 col-xl-4">
+        <a class="qj-panel qj-tile d-flex gap-3 p-3 h-100" href="{{ url_for('reservations.detail', reservation_id=r.id) }}">
+          <span class="qj-ticket__date" aria-hidden="true"><span><small>{{ r.reservation_date.strftime("%b") }}</small><b>{{ r.reservation_date.day }}</b></span></span>
+          <span class="flex-grow-1">
+            <span class="d-flex justify-content-between align-items-start gap-2">
+              <span class="fw-semibold">{{ r.table.name }}</span>
+              {% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}
+            </span>
+            <span class="d-block">{{ r.reservation_date.strftime("%a %d %b %Y") }} &middot; {{ r.reservation_time.strftime("%H:%M") }}</span>
+            <span class="d-block small text-secondary">{{ r.guest_count }} guest{{ "s" if r.guest_count != 1 }} &middot; booked {{ r.reserved_at.strftime("%d %b %Y, %H:%M") }}</span>
+          </span>
+        </a>
+      </div>
+    {% endfor %}
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white">
-    <h2 class="h5">No reservations yet</h2>
-    <p class="mb-0">Book a table and it will appear here.</p>
-  </div>
+  {{ empty("calendar-heart", "No reservations yet", "Book a table and it will appear here. Find your perfect table and make your next visit special.", "Reserve a table", url_for('reservations.new')) }}
 {% endif %}
 {% endblock %}

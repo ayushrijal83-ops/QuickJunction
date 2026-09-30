@@ -1,10 +1,13 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import empty %}
 {% block title %}Tables &mdash; Quick Junction Staff{% endblock %}
+{% block ops_context %}Floor plan{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+<div class="qj-page-header">
   <div>
-    <h1 class="h3 mb-1">Tables</h1>
+    <div class="qj-eyebrow">Floor</div>
+    <h1>Tables</h1>
     <p class="text-secondary mb-0">
       {% for status, n in counts.items() %}
         {{ n }} {{ status.value.replace("_", " ") }}{% if not loop.last %} &middot; {% endif %}
@@ -12,60 +15,62 @@
     </p>
   </div>
   {% if current_user.role.value == "admin" %}
-    <a class="btn btn-primary" href="{{ url_for('tables.new') }}">Add table</a>
+    <a class="btn btn-primary" href="{{ url_for('tables.new') }}"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add table</a>
   {% endif %}
 </div>
 
+<div class="qj-panel d-flex flex-wrap align-items-center justify-content-between gap-3 px-3 py-2 mb-4">
+  <div class="qj-legend" aria-label="Legend">
+    {% for status, n in counts.items() %}
+      <span><span class="qj-dot qj-fill--{{ status.value }}" aria-hidden="true"></span>{{ status.value.replace("_", " ") | capitalize }} <strong class="qj-num">{{ n }}</strong></span>
+    {% endfor %}
+  </div>
+</div>
+
 {% if tables %}
-  <div class="row g-3">
+  <div class="qj-floor">
     {% for table in tables %}
       {% set order = active_orders.get(table.id) %}
-      <div class="col-sm-6 col-lg-4">
-        <div class="card shadow-sm h-100">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-              <div>
-                <h2 class="h5 mb-0">{{ table.name }}</h2>
-                <span class="small text-secondary">{{ table.capacity }} seats</span>
-              </div>
-              {% with status = table.status %}{% include "partials/_table_status_badge.html" %}{% endwith %}
-            </div>
-
-            {% if order %}
-              <div class="border rounded p-2 mb-2 small">
-                <div class="d-flex justify-content-between">
-                  <a href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}" class="fw-semibold">Order #{{ order.id }}</a>
-                  {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
-                </div>
-                <ul class="list-unstyled mb-1 mt-1">
-                  {% for item in order.items %}<li>{{ item.item_name_snapshot }} &times; {{ item.quantity }}</li>{% endfor %}
-                </ul>
-                <div class="text-end qj-price fw-semibold">{{ order.total | money }}</div>
-              </div>
-            {% endif %}
-
-            <div class="d-flex flex-wrap gap-1">
-              {# Only legal transitions render; app/services/tables.py re-checks every POST. #}
-              {% for next in transitions[table.status] | sort(attribute="value") %}
-                <form method="post" action="{{ url_for('tables.set_status', table_id=table.id) }}">
-                  {{ form.csrf_token }}
-                  <input type="hidden" name="status" value="{{ next.value }}">
-                  <button type="submit" class="btn btn-sm btn-outline-secondary">{{ next.value.replace("_", " ") | capitalize }}</button>
-                </form>
-              {% endfor %}
-              {% if current_user.role.value == "admin" %}
-                <a class="btn btn-sm btn-link ms-auto" href="{{ url_for('tables.edit', table_id=table.id) }}">Edit</a>
-              {% endif %}
-            </div>
+      <article class="qj-tablecard qj-tablecard--{{ table.status.value }}" aria-labelledby="table-{{ table.id }}">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+          <div>
+            <h2 class="qj-tablecard__name mb-0" id="table-{{ table.id }}">{{ table.name }}</h2>
+            <div class="qj-seats" aria-hidden="true">{% for _ in range(table.capacity) %}<i></i>{% endfor %}</div>
+            <span class="small text-secondary">{{ table.capacity }} seats</span>
           </div>
+          {% with status = table.status %}{% include "partials/_table_status_badge.html" %}{% endwith %}
         </div>
-      </div>
+
+        {% if order %}
+          <div class="rounded-3 p-2 px-3 mb-3 small" style="background: var(--qj-surface-2)">
+            <div class="d-flex justify-content-between align-items-center gap-2">
+              <a href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}" class="fw-semibold text-decoration-none">Order #{{ order.id }}</a>
+              {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+            </div>
+            <ul class="list-unstyled mb-1 mt-2">
+              {% for item in order.items %}<li>{{ item.item_name_snapshot }} &times; {{ item.quantity }}</li>{% endfor %}
+            </ul>
+            <div class="text-end qj-price fw-semibold">{{ order.total | money }}</div>
+          </div>
+        {% endif %}
+
+        <div class="d-flex flex-wrap gap-1 mt-auto">
+          {# Only legal transitions render; app/services/tables.py re-checks every POST. #}
+          {% for next in transitions[table.status] | sort(attribute="value") %}
+            <form method="post" action="{{ url_for('tables.set_status', table_id=table.id) }}">
+              {{ form.csrf_token }}
+              <input type="hidden" name="status" value="{{ next.value }}">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">{{ next.value.replace("_", " ") | capitalize }}</button>
+            </form>
+          {% endfor %}
+          {% if current_user.role.value == "admin" %}
+            <a class="btn btn-sm btn-ghost ms-auto" href="{{ url_for('tables.edit', table_id=table.id) }}"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Edit</a>
+          {% endif %}
+        </div>
+      </article>
     {% endfor %}
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white">
-    <h2 class="h5">No tables yet</h2>
-    <p class="mb-0">An admin can add the restaurant's tables here.</p>
-  </div>
+  {{ empty("grid-3x3-gap", "No tables yet", "An admin can add the restaurant's tables here.") }}
 {% endif %}
 {% endblock %}

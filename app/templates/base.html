@@ -1,143 +1,279 @@
 {# Shared layout for every page.
 
-   Bootstrap is vendored under app/static/vendor/ rather than loaded from a
-   CDN: this project is offline-first (local model, no external services), so
-   a CDN would add a runtime dependency on the public internet that nothing
-   else here has.
+   Two shells, one design system:
+   - guests and customers get a glass top navigation (restaurant site);
+   - staff and admin get a sidebar (operations console).
+
+   Everything is served from this origin -- Bootstrap, icons, fonts and
+   photos are vendored under app/static/ rather than loaded from a CDN: the
+   project is offline-first and the CSP allows 'self' only.
 
    Autoescaping is on and no template in this project uses |safe -- every
-   value below is rendered as text, including menu names and AI output. #}
+   value below is rendered as text, including menu names and AI output.
+   There is no inline script: behaviour lives in static/js/. #}
+{% set role = current_user.role.value if current_user else none %}
+{% set ops = role in ("staff", "admin") %}
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}Quick Junction{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
   {% block head %}{% endblock %}
+  <link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
-<body class="d-flex flex-column min-vh-100 bg-body-tertiary">
+<body class="d-flex flex-column min-vh-100 {% block body_class %}{% endblock %}">
 <a class="visually-hidden-focusable qj-skip-link" href="#main">Skip to content</a>
 
 {# One nav link. `section` is the blueprint (or endpoint prefix) that marks
    the link current, so a sub-page such as an order detail still highlights
-   "Orders". #}
-{% macro nav(endpoint, label, section=none) -%}
+   "Orders". aria-current must directly follow href (asserted by tests). #}
+{% macro nav(endpoint, label, section=none, icon=none) -%}
   {% set here = request.endpoint or "" %}
   {% set current = here == endpoint or (section and here.startswith(section)) %}
-  <li class="nav-item"><a class="nav-link" href="{{ url_for(endpoint) }}"{% if current %} aria-current="page"{% endif %}>{{ label }}</a></li>
+  <li class="nav-item"><a class="nav-link" href="{{ url_for(endpoint) }}"{% if current %} aria-current="page"{% endif %}>{% if icon %}<i class="bi bi-{{ icon }}" aria-hidden="true"></i>{% endif %}<span>{{ label }}</span></a></li>
 {%- endmacro %}
 
-<nav class="navbar navbar-expand-lg navbar-dark qj-navbar" aria-label="Main">
-  <div class="container">
-    <a class="navbar-brand fw-semibold" href="{{ url_for('main.home') }}"><span class="qj-mark" aria-hidden="true">&#9679;</span> Quick Junction</a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
-            data-bs-target="#nav" aria-controls="nav" aria-expanded="false"
-            aria-label="Toggle navigation">
-      <span class="navbar-toggler-icon"></span>
-    </button>
+{% macro brand(dark=false) -%}
+  <a class="qj-brand" href="{{ url_for('main.home') }}" aria-label="Quick Junction home">
+    <span class="qj-brand__mark" aria-hidden="true">Q</span>
+    <span class="qj-brand__word" aria-hidden="true"><span>QUICK</span><span>JUNCTION</span></span>
+  </a>
+{%- endmacro %}
 
-    <div class="collapse navbar-collapse" id="nav">
-      {# Display convenience only. Every route re-checks the role server-side
-         via require_role -- hiding a link is not the control
-         (docs/SECURITY.md). Each role sees only links it may use. #}
-      <ul class="navbar-nav me-auto">
-        {% set role = current_user.role.value if current_user else none %}
-        {% if role %}{{ nav("account.index", "Dashboard") }}{% endif %}
-        {% if role in (none, "customer") %}
-          {{ nav("menu.index", "Menu", "menu.") }}
-        {% endif %}
-        {% if role == "customer" %}
-          {# Suggestions and preferences are a customer-only feature. #}
-          {{ nav("preferences.recommendations", "For you", "preferences.") }}
-          {{ nav("orders.history", "My orders", "orders.") }}
-          {{ nav("reservations.mine", "Reservations", "reservations.") }}
-        {% elif role in ("staff", "admin") %}
-          {{ nav("staff_orders.order_list", "Orders", "staff_orders.") }}
-          {{ nav("kitchen.board", "Kitchen", "kitchen.") }}
-          {{ nav("tables.board", "Tables", "tables.") }}
-          {{ nav("reservations.staff_list", "Reservations", "reservations.staff") }}
-          {{ nav("inventory.stock", "Inventory", "inventory.") }}
-        {% endif %}
-        {% if role == "admin" %}
-          {% set admin_here = (request.endpoint or "").split(".")[0] in ("admin_menu", "admin_staff", "reports", "admin_settings", "admin_views") %}
-          <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"
-               {% if admin_here %}aria-current="page"{% endif %}>Manage</a>
-            <ul class="dropdown-menu">
-              <li><a class="dropdown-item" href="{{ url_for('reports.sales') }}">Sales reports</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('admin_views.payments') }}">Payments &amp; refunds</a></li>
-              <li><hr class="dropdown-divider"></li>
-              <li><a class="dropdown-item" href="{{ url_for('admin_menu.menu_list') }}">Menu &amp; recipes</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('admin_staff.staff_list') }}">Users (staff accounts)</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('admin_settings.pricing') }}">Settings</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('admin_views.audit') }}">Audit log</a></li>
-            </ul>
-          </li>
-        {% endif %}
-      </ul>
+{% macro theme_toggle(extra="") -%}
+  <button type="button" class="qj-icon-btn {{ extra }}" data-theme-toggle aria-pressed="false" title="Switch theme">
+    <i class="bi bi-moon-stars" aria-hidden="true"></i><span class="visually-hidden">Dark theme</span>
+  </button>
+{%- endmacro %}
 
-      <ul class="navbar-nav align-items-lg-center">
-        {% if role in (none, "customer") %}
-          <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('cart.index') }}"{% if (request.endpoint or "").startswith("cart.") %} aria-current="page"{% endif %}>
-              Cart{% if cart_count %} <span class="badge text-bg-primary">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}
-            </a>
-          </li>
-        {% endif %}
-        {% if current_user %}
-          <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('account.index') }}" title="Your dashboard">
-              {{ current_user.username }}
-              <span class="badge text-bg-secondary text-uppercase">{{ current_user.role.value }}</span>
-            </a>
-          </li>
-          <li class="nav-item">
-            <form method="post" action="{{ url_for('auth.logout') }}" class="d-inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-outline-light btn-sm ms-lg-2">Log out</button>
-            </form>
-          </li>
-        {% else %}
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.login') }}">Sign in</a></li>
-          <li class="nav-item">
-            <a class="btn btn-primary btn-sm ms-lg-2" href="{{ url_for('auth.register') }}">Register</a>
-          </li>
-        {% endif %}
-      </ul>
-    </div>
-  </div>
-</nav>
+{% macro logout_form(classes) -%}
+  <form method="post" action="{{ url_for('auth.logout') }}" class="d-inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="{{ classes }}"><i class="bi bi-box-arrow-right me-1" aria-hidden="true"></i>Log out</button>
+  </form>
+{%- endmacro %}
 
 {# Announces asynchronous status changes to screen readers. #}
 <div id="global-status" class="visually-hidden" role="status" aria-live="polite"></div>
 
-<main id="main" class="container py-4 flex-grow-1" tabindex="-1">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      {# Flash categories used in this app: success, error. #}
-      <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">
-        {{ message }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+{% if ops %}
+{# ====================== Operations shell (staff / admin) ====================== #}
+<div class="qj-ops">
+  {# offcanvas below lg, a fixed column from lg up. Display convenience only:
+     every route re-checks the role server-side (docs/SECURITY.md). #}
+  <aside class="qj-sidebar offcanvas-lg offcanvas-start" id="sidebar" tabindex="-1" aria-label="Sidebar">
+    <div class="qj-sidebar__inner">
+      <div class="d-flex align-items-center justify-content-between">
+        {{ brand() }}
+        <button type="button" class="btn-close btn-close-white d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#sidebar" aria-label="Close menu"></button>
       </div>
-    {% endfor %}
-  {% endwith %}
 
-  {% block content %}{% endblock %}
+      <nav aria-label="Main">
+        <div class="qj-sidebar__group">Overview</div>
+        <ul class="nav flex-column">
+          {{ nav("account.index", "Dashboard", none, "grid-1x2") }}
+        </ul>
+        <div class="qj-sidebar__group">Service</div>
+        <ul class="nav flex-column">
+          {{ nav("staff_orders.order_list", "Orders", "staff_orders.", "receipt") }}
+          {{ nav("kitchen.board", "Kitchen", "kitchen.", "fire") }}
+          {{ nav("tables.board", "Tables", "tables.", "grid-3x3-gap") }}
+          {{ nav("reservations.staff_list", "Reservations", "reservations.staff", "calendar-event") }}
+          {{ nav("inventory.stock", "Inventory", "inventory.", "box-seam") }}
+        </ul>
+        {% if role == "admin" %}
+          <div class="qj-sidebar__group">Business</div>
+          <ul class="nav flex-column">
+            {{ nav("reports.sales", "Sales reports", "reports.", "graph-up-arrow") }}
+            {{ nav("admin_views.payments", "Payments & refunds", "admin_views.payments", "credit-card") }}
+          </ul>
+          <div class="qj-sidebar__group">Manage</div>
+          <ul class="nav flex-column">
+            {{ nav("admin_menu.menu_list", "Menu & recipes", "admin_menu.", "journal-text") }}
+            {{ nav("admin_staff.staff_list", "Users (staff accounts)", "admin_staff.", "people") }}
+            {{ nav("admin_settings.pricing", "Settings", "admin_settings.", "sliders") }}
+            {{ nav("admin_views.audit", "Audit log", "admin_views.audit", "shield-check") }}
+          </ul>
+        {% endif %}
+      </nav>
+
+      <div class="qj-sidebar__user mt-4">
+        <span class="qj-avatar" aria-hidden="true">{{ current_user.username[:1] }}</span>
+        <div class="flex-grow-1 min-w-0">
+          <div class="fw-semibold text-truncate text-white">{{ current_user.username }}</div>
+          <div class="qj-role">{{ role }}</div>
+        </div>
+        {{ logout_form("btn btn-sm btn-ghost px-2") }}
+      </div>
+    </div>
+  </aside>
+
+  <div class="qj-ops__main">
+    <header class="qj-ops__topbar navbar">
+      <button class="qj-icon-btn d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="Open menu">
+        <i class="bi bi-list" aria-hidden="true"></i>
+      </button>
+      <span class="d-lg-none">{{ brand() }}</span>
+      <span class="qj-date d-none d-lg-inline">{% block ops_context %}Operations console{% endblock %}</span>
+      <div class="ms-auto d-flex align-items-center gap-2">
+        {{ theme_toggle() }}
+        <a class="d-flex align-items-center gap-2 text-decoration-none text-reset" href="{{ url_for('account.index') }}" title="Your dashboard">
+          <span class="qj-avatar" aria-hidden="true">{{ current_user.username[:1] }}</span>
+          <span class="d-none d-sm-block lh-sm"><span class="d-block fw-semibold small">{{ current_user.username }}</span><span class="qj-role">{{ role }}</span></span>
+        </a>
+      </div>
+    </header>
+
+    <main id="main" class="qj-main" tabindex="-1">
+      <div class="container-fluid qj-container px-3 px-lg-4 px-xxl-5">
+{% else %}
+{# ====================== Restaurant shell (guest / customer) ====================== #}
+<header class="qj-topnav navbar navbar-expand-lg">
+  <div class="container">
+    <nav class="qj-topnav__bar qj-glass w-100" aria-label="Main">
+      {{ brand() }}
+      <button class="navbar-toggler ms-auto" type="button" data-bs-toggle="collapse"
+              data-bs-target="#nav" aria-controls="nav" aria-expanded="false"
+              aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="nav">
+        {# Display convenience only. Every route re-checks the role
+           server-side via require_role -- hiding a link is not the control
+           (docs/SECURITY.md). Each role sees only links it may use. #}
+        <ul class="navbar-nav mx-lg-auto gap-lg-1">
+          {% if role %}{{ nav("account.index", "Dashboard") }}{% endif %}
+          {{ nav("menu.index", "Menu", "menu.") }}
+          {% if role == "customer" %}
+            {# Suggestions and preferences are a customer-only feature. #}
+            {{ nav("preferences.recommendations", "For you", "preferences.") }}
+            {{ nav("orders.history", "My orders", "orders.") }}
+            {{ nav("reservations.mine", "Reservations", "reservations.") }}
+          {% endif %}
+        </ul>
+
+        <ul class="navbar-nav align-items-lg-center gap-1">
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('cart.index') }}"{% if (request.endpoint or "").startswith("cart.") %} aria-current="page"{% endif %}>
+              <i class="bi bi-bag me-1" aria-hidden="true"></i>Cart{% if cart_count %}<span class="qj-cart-count">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}
+            </a>
+          </li>
+          <li class="nav-item">{{ theme_toggle() }}</li>
+          {% if current_user %}
+            <li class="nav-item dropdown">
+              <a class="nav-link d-flex align-items-center gap-2" href="{{ url_for('account.index') }}" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Your account">
+                <span class="qj-avatar" aria-hidden="true">{{ current_user.username[:1] }}</span>
+                <span>{{ current_user.username }}</span>
+              </a>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><span class="dropdown-item-text small"><span class="qj-role">{{ role }}</span></span></li>
+                <li><a class="dropdown-item" href="{{ url_for('account.index') }}"><i class="bi bi-house me-2" aria-hidden="true"></i>My account</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('preferences.preferences') }}"><i class="bi bi-sliders me-2" aria-hidden="true"></i>Taste preferences</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li>{{ logout_form("dropdown-item") }}</li>
+              </ul>
+            </li>
+          {% else %}
+            <li class="nav-item"><a class="nav-link" href="{{ url_for('auth.login') }}">Sign in</a></li>
+            <li class="nav-item">
+              <a class="btn btn-primary btn-sm ms-lg-1" href="{{ url_for('auth.register') }}">Register</a>
+            </li>
+          {% endif %}
+        </ul>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="qj-main" tabindex="-1">
+  {% block hero %}{% endblock %}
+  <div class="container qj-container">
+{% endif %}
+
+    {% block content %}{% endblock %}
+
+{% if ops %}
+      </div>
+    </main>
+  </div>
+</div>
+{% else %}
+  </div>
 </main>
 
-<footer class="border-top bg-white py-3 mt-auto">
-  <div class="container text-secondary small d-flex flex-wrap justify-content-between gap-2">
-    <span>Quick Junction &mdash; restaurant management</span>
-    {% if not current_user or current_user.role.value == "customer" %}
-      <span>Recommendations are computed locally. AI explanations are advisory only.</span>
-    {% endif %}
+<footer class="qj-footer">
+  <div class="container">
+    <div class="row g-4 align-items-start">
+      <div class="col-md-5">
+        {{ brand() }}
+        <p class="mt-3 mb-0">Seasonal plates, honest prices and a table waiting for you &mdash; order ahead or book in seconds.</p>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="qj-eyebrow text-white-50 mb-2">Visit</div>
+        <ul class="list-unstyled mb-0 d-grid gap-1">
+          <li><a href="{{ url_for('menu.index') }}">Menu</a></li>
+          <li><a href="{{ url_for('reservations.new') if role == 'customer' else url_for('auth.login') }}">Book a table</a></li>
+          <li><a href="{{ url_for('cart.index') }}">Cart</a></li>
+        </ul>
+      </div>
+      <div class="col-6 col-md-4 small">
+        <div class="qj-eyebrow text-white-50 mb-2">Good to know</div>
+        <p class="mb-0">Recommendations are computed locally. AI explanations are advisory only.</p>
+      </div>
+    </div>
+    <div class="border-top border-secondary border-opacity-25 mt-4 pt-3 small d-flex flex-wrap justify-content-between gap-2">
+      <span>&copy; Quick Junction &mdash; restaurant management</span>
+      <span>Photography: Unsplash</span>
+    </div>
   </div>
 </footer>
+{% endif %}
+
+{# Flash messages as toasts. Rendered server-side so they are readable
+   without JavaScript; app.js adds auto-dismiss. Categories: success, error. #}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="qj-toasts" aria-live="polite">
+      {% for category, message in messages %}
+        <div class="qj-toast qj-toast--{{ 'error' if category == 'error' else 'success' }}" role="{{ 'alert' if category == 'error' else 'status' }}">
+          <span class="qj-toast__icon" aria-hidden="true"><i class="bi bi-{{ 'exclamation-lg' if category == 'error' else 'check-lg' }}"></i></span>
+          <div class="qj-toast__body">{{ message }}</div>
+          <button type="button" class="btn-close btn-sm" data-toast-close aria-label="Dismiss"></button>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+{# One confirmation dialog for every destructive form (form[data-confirm]);
+   filled in and shown by app.js. #}
+<div class="modal fade" id="qj-confirm" tabindex="-1" aria-labelledby="qj-confirm-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body p-4 text-center">
+        <div class="qj-error__icon mb-3" aria-hidden="true"><i class="bi bi-exclamation-triangle"></i></div>
+        <h2 class="h4 mb-2" id="qj-confirm-title" data-confirm-title>Are you sure?</h2>
+        <p class="text-secondary mb-4" data-confirm-body>This cannot be undone.</p>
+        <div class="d-flex flex-wrap justify-content-center gap-2">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-confirm-cancel>Go back</button>
+          <button type="button" class="btn btn-danger" data-confirm-ok>Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}"></script>
-{# Loading feedback for the one slow navigation (the AI explanation page).
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{# Loading feedback for slow navigations and submit-once buttons.
    Progressive enhancement: everything works without it. #}
 <script src="{{ url_for('static', filename='js/loading.js') }}" defer></script>
 </body>

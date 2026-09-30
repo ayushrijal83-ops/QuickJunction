@@ -1,4 +1,5 @@
 {# Fallback for status codes without a dedicated page (405, 429, ...). #}
 {% extends "errors/_layout.html" %}
+{% block icon %}exclamation-diamond{% endblock %}
 {% block title %}Error {{ status }} &mdash; Quick Junction{% endblock %}
 {% block heading %}That request could not be completed{% endblock %}

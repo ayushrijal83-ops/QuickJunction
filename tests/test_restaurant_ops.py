@@ -410,5 +410,5 @@ def test_admin_creates_table_and_board_shows_active_order(client, db):
     order = place(customer(), price="385.00", qty=3, source=OrderSource.DINE_IN, table_id=table.id)
     body = client.get("/staff/tables").get_data(as_text=True)
     assert f"Order #{order.id}" in body
-    assert "1305.15" in body  # 1155.00 + 13 % tax (M12)
+    assert "1,305.15" in body  # 1155.00 + 13 % tax (M12)
     assert "occupied" in body

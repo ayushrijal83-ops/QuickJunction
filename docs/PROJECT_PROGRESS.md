@@ -4,8 +4,10 @@
 actually been implemented and verified against the repository. If a
 feature is not listed here as complete, assume it does not exist.
 
-Last updated: 2026-09-30 (end of Milestone 16 — final)
-Current state: **Milestone 16 complete — final integration, security and
+Last updated: 2026-09-30 (Final UI/UX Transformation — project frozen)
+Current state: **Final UI/UX Transformation complete — development frozen
+for documentation/demo/presentation** (see [Final UI/UX Transformation](#final-uiux-transformation)).
+Before that: **Milestone 16 complete — final integration, security and
 demo audit done. Quick Junction is feature-complete for the fast-track plan
 (M10–M16) and demo-ready; the live MySQL database is on the current schema.**
 See [Final state](#final-state-end-of-m16) at the end of this document.
@@ -46,8 +48,9 @@ See [Final state](#final-state-end-of-m16) at the end of this document.
 | 14 | Kitchen screen: queue, one-tap workflow, prep timestamps and timings | ✅ Complete (not yet applied to live DB) |
 | 15 | UI/UX overhaul: design system, role nav, dashboards, admin payments + audit views | ✅ Complete (no schema change) |
 | 16 | Final integration, security and demo audit | ✅ Complete |
+| Final UI | UI/UX transformation: design system, imagery, sidebar shell, dark mode, Nepali Rs. format, redesigned dashboards/reports | ✅ Complete (no schema change) |
 
-**Test suite: 710 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 716 passing, 1 skipped, 0 failing on MySQL 8.0.46** (end of M16; `pytest`; in-memory SQLite by default for
+**Test suite: 718 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 724 passing, 1 skipped, 0 failing on MySQL 8.0.46** (after the Final UI pass; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
 **MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
@@ -2832,3 +2835,198 @@ Least-privilege MySQL account and a production deployment config (#28);
 pagination on the long lists (#12/#39); optional kitchen notes (#37);
 cleaning up #32 and #13; ingredient costs if profit reporting is wanted
 (#36).
+
+---
+
+# Final UI/UX Transformation
+
+Presentation layer only. **No model, migration, business rule, route,
+guard, payment/refund/inventory/order/reservation logic or security control
+changed.** Two small presentation-side additions: `app/services/dashboard.py`
+also passes a 7-day `build_report(...)` to the admin dashboard (the existing
+report service — no new query logic) for its charts, and
+`app/utils/imagery.py` picks a decorative photo per dish.
+Baseline: SQLite **710 passed, 7 skipped**; MySQL test DB **716 passed, 1 skipped**.
+
+## Design system (`app/static/css/app.css`, one sectioned stylesheet)
+
+- **Palette** (tokens on `:root`, redefined for dark): charcoal ink
+  `#1d1a17` on warm cream `#f6f1e9`, soft surface `#fffcf7`, terracotta brand
+  `#b4462b` (AA on white), muted gold `#c28a2c` (text variant `#87590f` for
+  AA on cream), sage `#3f7a5a` for success, muted red for destructive.
+  Bootstrap's own variables point at the tokens, so every existing utility
+  follows the theme.
+- **Typography**: Fraunces (display: headings, hero, KPI numbers) + Inter
+  (UI, tables, forms). Both OFL, vendored as variable `woff2` (84 KB total),
+  with system fallbacks.
+- **Icons**: Bootstrap Icons 1.11.3 (MIT), vendored — one icon set everywhere.
+- **Glass** only where it has a job: top navigation, hero service strip, menu
+  toolbar, reservation search panel, ops top bar. Cards are solid surfaces.
+- **Components**: page header; KPI tile (icon, label, value, note — the value
+  is sized to its tile with container queries so amounts never clip);
+  universal status badge (`qj-status`: icon + text, never colour alone) for
+  orders, tables, reservations, payments (**new `_payment_badge.html`**: Paid /
+  Unpaid / Partially refunded / Fully refunded) and stock; order progress
+  stepper; empty states (icon, sentence, next action); receipt-style totals;
+  segmented control; toasts; confirmation modal; server-rendered bar charts
+  with tooltips and screen-reader text; meters; stacked distribution bar.
+- **Buttons**: primary, secondary, success, destructive, ghost, glass — one
+  radius, one hover behaviour.
+- **Brand**: "Q" mark + stacked QUICK / JUNCTION wordmark (navbar, sidebar,
+  footer) and an SVG favicon.
+- **Dark mode**: Bootstrap 5.3 `data-bs-theme`; follows the system preference;
+  the toggle is remembered in `localStorage` (`static/js/theme.js` runs before
+  first paint, so there is no flash).
+
+## Nepali currency format
+
+The `money` filter renders Nepali style — **`Rs. 1,23,456.78`** (South Asian
+lakh grouping, non-breaking space so an amount never wraps) instead of
+`₹123456.78`. Presentation only: still pure `Decimal`, still quantised to two
+places. Tests that pinned four-digit amounts were updated to the grouped form
+(`1,540.00`, `1,017.00`, `1,305.15`, `1,234.00`); the money-format test gained
+lakh and crore cases. The underlying values are unchanged.
+
+## Layout
+
+- **Guests and customers**: sticky glass top navigation (transparent over hero
+  photos) and a full footer.
+- **Staff and admin**: dark sidebar (Overview / Service / Business / Manage
+  groups, icons, active state, user box, logout) that becomes an off-canvas
+  drawer below 992 px, plus a slim glass top bar with context, theme toggle and
+  profile. Same links per role as M15 (the nav tests are unchanged).
+
+## Customer experience
+
+Home: full-bleed restaurant hero with a glass service strip, value props, dish
+cards and a reservation call-to-action band. Menu: photo hero, sticky glass
+toolbar with **live dish search** (client-side filter of what is on the page)
+and category pills, photo food cards (category tag, veg/non-veg mark with
+text, cuisine, spice, price, quantity + Add). Dish detail: large photo, fact
+tiles, order panel. Dashboard: time-of-day greeting, quick-action tiles, a dark
+"current order" spotlight with progress stepper, photo recommendation cards,
+reservation tickets and free tables. Cart with dish thumbnails; checkout;
+order detail (stepper, receipt totals, payment badge, cancel in a separated
+danger zone with confirmation). Reservations: photo hero, glass search panel,
+**visual table picker** (radio cards with seat dots — one form posting exactly
+the fields the old per-table buttons posted; the server still re-checks),
+ticket-style history, photo detail card. Sign in / register: split screen
+with photography.
+
+## Staff experience
+
+Dashboard: greeting, five KPIs (active orders, occupied tables, reservations,
+low stock, orders today), kitchen columns, table distribution bar, today's
+reservations, low-stock meters — still **no money** for staff. Kitchen
+display: large tickets per lane with an age badge; 15+ min is **warm**, 30+
+min **late** (text label as well as colour); large one-tap buttons. Tables:
+floor grid with a status stripe, seat dots, the active order and a legend.
+Inventory: KPIs (tracked, low, out of stock, used recently), stock-vs-minimum
+meters, row tints, status badges (zero stock now reads "out of stock"). Order
+queue and order detail with payment badges, stepper and a separated refund
+zone.
+
+## Admin experience
+
+Admin dashboard: sales KPIs, a **7-day revenue chart**, **order activity by
+hour**, sales by order type, table occupancy and management shortcuts.
+**Sales report redesigned**: range segmented control (Today / This week /
+This month / Last month) plus a collapsible custom-range and monthly-statement
+panel; a dark headline with net sales, average order, today/month and a
+**gross → discounts → refunds → net breakdown bar**; KPI rows; net sales per
+day chart; ranked order-type mix; revenue-by-hour chart; ranked sales by
+table; tables now; and the full daily statement table with a sticky header.
+Payments page with payment badges.
+
+## Imagery
+
+23 Unsplash photos (Unsplash License), fetched once and re-encoded to WebP
+(cards 720 px, 20–130 KB; scenes ≤1600 px, ≤250 KB; 2.2 MB on disk in total —
+a page only loads what it shows, and cards lazy-load with fixed dimensions to
+avoid layout shift). They are **vendored under `app/static/img/`, not
+hotlinked**, so the CSP stays `img-src 'self'` and the site still works
+offline. One mapping lives in `app/utils/imagery.py` (dish keyword → cuisine →
+fallback; word-start matching so "steak" never matches "tea"); photo ids are
+in `app/static/img/CREDITS.md`. Photos are decorative (`alt=""`); dish names
+carry the meaning.
+
+## Interaction
+
+`static/js/app.js` (about 150 lines, progressive enhancement): theme toggle;
+toast auto-dismiss (flash messages are rendered server-side as toasts, so
+they still read without JS); a **confirmation modal for destructive forms**
+(`form[data-confirm]`: customer cancel, reservation cancel, clear cart,
+staff/admin cancel, refund) that re-submits with the same submitter, so the
+request is identical; the menu live filter. `loading.js` is unchanged. Motion
+is CSS only (150–600 ms) and is disabled under `prefers-reduced-motion`.
+
+## Accessibility
+
+Skip link, landmarks, `aria-current` on navigation, `aria-current="step"` on
+the stepper, visible focus rings everywhere (cards too, via
+`:has(:focus-visible)`), a labelled search field, charts that expose each
+value as text, status never by colour alone, and AA contrast verified (below).
+
+## Security preserved
+
+CSP unchanged (`script-src 'self'`, `img-src 'self' data:`, `font-src 'self'`)
+— nothing external is loaded. No inline script, no `on*=` handler and no
+`|safe` (the existing template scan still passes). CSRF tokens on every form,
+RBAC, route sweep and no-store caching are unchanged. The staff dashboard
+still shows no currency.
+
+## Tests
+
+Six new tests in `tests/test_final_ui.py` (vendored assets served; every image
+the helper can choose exists and is under 300 KB; CSP still self-only; menu
+shows photos and Nepali prices with no `₹`; destructive forms carry a
+confirmation; sidebar shell only for staff/admin) plus two new money-format
+cases. Changed assertions (presentation only, behaviour identical): the four
+grouped amounts above, and `"Welcome, alice"` → the time-of-day greeting
+(`", <em>alice</em>."`).
+
+**Results:** SQLite **718 passed, 7 skipped, 0 failed** (725 collected).
+MySQL test DB (`quickjunction_test`): **724 passed, 1 skipped (#32), 0 failed (725 collected)**.
+
+## Browser verification (scratch SQLite DB — never the live `quickjunctiondb`)
+
+Migrated from empty, seeded with `scripts/seed_demo.py` plus demo orders,
+payments, a refund, stock and reservations. In Chrome:
+
+- **Customer**: sign in → dashboard → menu (search "vegan" → 7 dishes) → Add →
+  cart (toast) → clear-cart dialog (kept) → checkout → order placed → order
+  detail → book a table (visual picker, T03) → reservation confirmed → cancel
+  order #9 through the confirmation dialog.
+- **Staff**: dashboard → kitchen → *Start preparing* on #5 (moved lanes) →
+  tables → inventory.
+- **Admin**: dashboard → sales reports (week and month) → order #1 → refund
+  Rs. 50 through the confirmation dialog → payments (partially refunded
+  badge) → settings, audit, menu and staff pages.
+- **Automated contrast audit** of all rendered text (WCAG ratio below 3
+  flagged) on every customer, public, staff and admin page in **light and
+  dark**; the checker was proven with an injected low-contrast probe. Found
+  and fixed: the desktop sidebar rendered transparent (Bootstrap
+  `offcanvas-lg`) — light text on a light background; the gold wordmark on
+  cream (2.7:1); dish tags and one kitchen lane label in dark mode; white on
+  sage button in dark mode. Re-run: **0 findings**.
+- **Clipping/overflow audit** at 1440 / 1280 / 1024 / 768 / 390 px: found and
+  fixed clipped KPI amounts on the sales report and payments header, chart
+  tooltips widening the page, a no-wrap payment line and the report headline
+  at 1024 px. Re-run: **0 page overflow, 0 clipped values**.
+- Console: **0 JavaScript errors, 0 CSP violations**; the theme preference
+  persists.
+
+## Known limitations
+
+- "Popular menu items" and "recent activity" are not on the admin dashboard:
+  no existing service provides them, and new queries are out of scope for a
+  presentation pass (the audit log page covers activity).
+- Menu search filters the items already on the page (the whole menu or one
+  category); it is not a server-side search.
+- Photos are matched by keyword, so a new dish may get a generic plate photo
+  until a keyword is added in `app/utils/imagery.py`.
+- The test browser window could not be resized; small viewports were checked
+  by rendering pages in a fixed-width same-origin frame (390 / 768 / 1024 px),
+  not on physical devices.
+
+> **Quick Junction feature development and UI development are complete. Project is frozen for final documentation/demo/presentation.**

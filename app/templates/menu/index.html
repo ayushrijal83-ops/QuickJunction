@@ -1,34 +1,52 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import empty %}
 {% block title %}Menu &mdash; Quick Junction{% endblock %}
+{% block body_class %}qj-has-hero{% endblock %}
+
+{% block hero %}
+<section class="qj-hero qj-hero--band" aria-labelledby="menu-title">
+  <img class="qj-hero__img" src="{{ scene_image('dashboard') }}" alt="" fetchpriority="high" width="1600" height="900">
+  <div class="container qj-reveal">
+    <p class="qj-eyebrow mb-2">The menu</p>
+    <h1 id="menu-title">Discover something <em>delicious</em>.</h1>
+    <p class="lead mb-0">Everything below is available to order right now &mdash; plated fresh, priced honestly.</p>
+  </div>
+</section>
+{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-  <div>
-    <h1 class="h3 mb-1">Menu</h1>
-    <p class="text-secondary mb-0">Everything below is available to order right now.</p>
+<div class="qj-toolbar qj-glass">
+  <div class="qj-search">
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <label class="visually-hidden" for="menu-search">Search dishes on this page</label>
+    <input class="form-control" type="search" id="menu-search" placeholder="Search dishes, cuisines, diets&hellip;"
+           autocomplete="off" data-filter="#menu-grid" data-filter-empty="#menu-no-match">
   </div>
+  <nav class="qj-pills" aria-label="Menu categories">
+    <a class="qj-pill" href="{{ url_for('menu.index') }}"{% if not selected_category_id %} aria-current="page"{% endif %}>All</a>
+    {% for category in categories %}
+      <a class="qj-pill" href="{{ url_for('menu.index', category_id=category.id) }}"{% if selected_category_id == category.id %} aria-current="page"{% endif %}>{{ category.name }}</a>
+    {% endfor %}
+  </nav>
   {% if current_user %}
-    <a class="btn btn-outline-primary" href="{{ url_for('preferences.recommendations') }}">Recommended for you</a>
+    <a class="btn btn-outline-primary ms-lg-auto" href="{{ url_for('preferences.recommendations') }}"><i class="bi bi-stars me-1" aria-hidden="true"></i>Recommended for you</a>
   {% endif %}
 </div>
 
-<nav class="mb-4" aria-label="Menu categories">
-  <a class="btn btn-sm {{ 'btn-primary' if not selected_category_id else 'btn-outline-secondary' }}"
-     href="{{ url_for('menu.index') }}">All</a>
-  {% for category in categories %}
-    <a class="btn btn-sm {{ 'btn-primary' if selected_category_id == category.id else 'btn-outline-secondary' }}"
-       href="{{ url_for('menu.index', category_id=category.id) }}">{{ category.name }}</a>
-  {% endfor %}
-</nav>
-
 {% if items %}
-  <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3">
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xxl-4 g-4" id="menu-grid">
     {% for item in items %}
-      <div class="col">{% include "partials/_menu_card.html" %}</div>
+      <div class="col" data-filter-text="{{ (item.name ~ ' ' ~ item.category.name ~ ' ' ~ item.cuisine.value ~ ' ' ~ item.dietary_type.value ~ ' ' ~ (item.description or '')) | lower | replace('_', ' ') }}">
+        {% include "partials/_menu_card.html" %}
+      </div>
     {% endfor %}
   </div>
+  <div id="menu-no-match" hidden>
+    {{ empty("search", "No dish matches that search", "Try a different word — a cuisine, a diet such as “vegan”, or part of a dish name.") }}
+  </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white">
+  <div class="qj-empty">
+    <div class="qj-empty__icon" aria-hidden="true"><i class="bi bi-egg-fried"></i></div>
     <h2 class="h5">Nothing available here</h2>
     <p class="mb-3">There are no items available in this category right now.</p>
     <a class="btn btn-outline-primary" href="{{ url_for('menu.index') }}">Show the whole menu</a>

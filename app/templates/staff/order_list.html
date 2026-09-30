@@ -1,19 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Order queue &mdash; Quick Junction Staff{% endblock %}
 
+{% block ops_context %}Service &middot; order queue{% endblock %}
+
 {% block content %}
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+<div class="qj-page-header">
   <div>
-    <h1 class="h3 mb-1">Order queue</h1>
+    <div class="qj-eyebrow">Service</div>
+    <h1>Order queue</h1>
     <p class="text-secondary mb-0">All customer orders, newest first.</p>
   </div>
-  <span class="badge text-bg-primary">Staff view</span>
+  <a class="btn btn-primary" href="{{ url_for('kitchen.board') }}"><i class="bi bi-fire me-1" aria-hidden="true"></i>Kitchen display</a>
 </div>
 
 {% if orders %}
-  <div class="card shadow-sm">
-    <div class="table-responsive">
-      <table class="table align-middle mb-0">
+  <div class="card">
+    <div class="table-responsive qj-scroll">
+      <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
             <th scope="col">Order</th>
@@ -39,10 +42,10 @@
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
               <td class="text-center">{{ order.items | length }}</td>
               <td class="text-end qj-price">{{ order.total | money }}</td>
-              <td>{% if order.payment %}<span class="badge text-bg-success">{{ order.payment.method.value }}</span>{% else %}<span class="text-secondary small">&mdash;</span>{% endif %}</td>
+              <td>{% with payment = order.payment %}{% include "partials/_payment_badge.html" %}{% endwith %}{% if order.payment %} <span class="small text-secondary">{{ order.payment.method.value }}</span>{% endif %}</td>
               <td class="text-end">
-                <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open</a>
+                <a class="btn btn-sm btn-outline-secondary"
+                   href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open <i class="bi bi-chevron-right" aria-hidden="true"></i></a>
               </td>
             </tr>
           {% endfor %}
@@ -51,7 +54,8 @@
     </div>
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white">
+  <div class="qj-empty">
+    <div class="qj-empty__icon" aria-hidden="true"><i class="bi bi-receipt"></i></div>
     <h2 class="h5">No orders yet</h2>
     <p class="mb-0">Orders placed by customers will appear here.</p>
   </div>

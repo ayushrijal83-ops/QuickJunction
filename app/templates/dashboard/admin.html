@@ -1,31 +1,98 @@
 {% extends "dashboard/staff.html" %}
-{% from "partials/_dashboard.html" import kpi, action %}
+{% from "partials/_dashboard.html" import kpi, action, section %}
 {% block dash_title %}Admin dashboard{% endblock %}
 {% block eyebrow %}Admin dashboard{% endblock %}
+{% block subtitle %}Here&rsquo;s what&rsquo;s happening in the restaurant today.{% endblock %}
 
-{# The business view: sales figures are ADMIN-only, from app/services/sales. #}
+{# The business view: sales figures are ADMIN-only, from app/services/sales.
+   Charts are server-rendered bars from the same report -- no chart library,
+   no client-side data fetch. #}
 {% block business %}
-<h2 class="h6 qj-eyebrow mb-2">Sales</h2>
-<div class="row g-3 mb-3">
-  {{ kpi("Today's net sales", today.totals.net | money, today.totals.orders ~ " completed", url_for('reports.sales', range='today'), "accent") }}
-  {{ kpi("This month", month.net | money, month.orders ~ " completed", url_for('reports.sales')) }}
+<h2 class="qj-eyebrow mb-2">Sales</h2>
+<div class="row g-3 mb-3 qj-reveal qj-reveal-2">
+  {{ kpi("Today's net sales", today.totals.net | money, today.totals.orders ~ " completed", url_for('reports.sales', range='today'), "accent", "cash-coin") }}
+  {{ kpi("This month", month.net | money, month.orders ~ " completed", url_for('reports.sales'), "", "calendar3") }}
   {{ kpi("Collected today", today.totals.collected | money, today.totals.paid ~ " paid · " ~ today.unpaid_completed ~ " unpaid",
-         url_for('admin_views.payments'), "warn" if today.unpaid_completed else "") }}
-  {{ kpi("Refunds this month", month.refunds | money, none, url_for('admin_views.payments')) }}
+         url_for('admin_views.payments'), "warn" if today.unpaid_completed else "", "wallet2") }}
+  {{ kpi("Average order", today.totals.average | money, "completed orders today", url_for('reports.sales', range='today'), "", "receipt-cutoff") }}
 </div>
-<div class="row g-3 mb-4">
-  {{ kpi("Orders today", today.placed, today.active ~ " in progress") }}
-  {{ kpi("Cancelled today", today.cancelled) }}
-  {{ kpi("Paid in advance", today.prepaid | money, "orders not yet completed") }}
-  {{ kpi("Staff accounts", pending_staff ~ " pending", "awaiting approval", url_for('admin_staff.staff_list'), "warn" if pending_staff else "") }}
+<div class="row g-3 mb-4 qj-reveal qj-reveal-3">
+  {{ kpi("Orders today", today.placed, today.active ~ " in progress", url_for('staff_orders.order_list'), "", "bag-check") }}
+  {{ kpi("Cancelled today", today.cancelled, none, none, "", "x-circle") }}
+  {{ kpi("Paid in advance", today.prepaid | money, "orders not yet completed", none, "", "hourglass-split") }}
+  {{ kpi("Refunds this month", month.refunds | money, none, url_for('admin_views.payments'), "", "arrow-counterclockwise") }}
 </div>
-<div class="d-flex flex-wrap gap-2 mb-4">
-  {{ action("Sales reports", url_for('reports.sales')) }}
-  {{ action("Payments & refunds", url_for('admin_views.payments')) }}
-  {{ action("Menu & recipes", url_for('admin_menu.menu_list')) }}
-  {{ action("Settings", url_for('admin_settings.pricing')) }}
-  {{ action("Audit log", url_for('admin_views.audit')) }}
+
+<div class="row g-4 mb-4">
+  <div class="col-xl-8">
+    <div class="card h-100">
+      {{ section("Revenue trend · last 7 days", "Sales reports", url_for('reports.sales', range='week'), "graph-up-arrow") }}
+      <div class="card-body">
+        {% set peak = week.daily | map(attribute=2) | map(attribute="net") | max %}
+        <div class="d-flex flex-wrap gap-4 mb-3">
+          <div><div class="qj-kpi__label">Net sales</div><div class="qj-kpi__value qj-price">{{ week.totals.net | money }}</div></div>
+          <div><div class="qj-kpi__label">Completed orders</div><div class="qj-kpi__value">{{ week.totals.orders }}</div></div>
+          <div><div class="qj-kpi__label">Average order</div><div class="qj-kpi__value qj-price">{{ week.totals.average | money }}</div></div>
+        </div>
+        <div class="qj-chart" role="list" aria-label="Net sales per day, last 7 days">
+          {% for day, placed, t in week.daily %}
+            <div class="qj-chart__col" role="listitem" tabindex="0">
+              <span class="qj-chart__tip">{{ day.strftime("%a %d %b") }} · {{ t.net | money }} · {{ t.orders }} order{{ "s" if t.orders != 1 }}</span>
+              <span class="visually-hidden">{{ day.strftime("%A %d %B") }}: {{ t.net | money }} from {{ t.orders }} completed orders</span>
+              <div class="qj-chart__bar" style="height: {{ ((t.net * 100 / peak) if peak else 0) | round(1) }}%"></div>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="qj-chart__axis" aria-hidden="true">{% for day, placed, t in week.daily %}<span>{{ day.strftime("%a") }}</span>{% endfor %}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card h-100">
+      {{ section("Order activity · by hour", none, none, "clock") }}
+      <div class="card-body">
+        {% if week.by_hour %}
+          {% set hour_peak = week.by_hour | map(attribute=1) | map(attribute="orders") | max %}
+          <div class="qj-chart qj-chart--gold" role="list" aria-label="Completed orders per hour of day, last 7 days" style="height:150px">
+            {% for hour, t in week.by_hour %}
+              <div class="qj-chart__col" role="listitem" tabindex="0">
+                <span class="qj-chart__tip">{{ "%02d:00" | format(hour) }} · {{ t.orders }} order{{ "s" if t.orders != 1 }}</span>
+                <span class="visually-hidden">{{ "%02d:00" | format(hour) }}: {{ t.orders }} completed orders</span>
+                <div class="qj-chart__bar" style="height: {{ (t.orders * 100 / hour_peak) | round(1) }}%"></div>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="qj-chart__axis" aria-hidden="true">{% for hour, t in week.by_hour %}<span>{{ "%02d" | format(hour) }}</span>{% endfor %}</div>
+          <p class="small text-secondary mt-3 mb-0">Completed orders by the hour they were placed, over the last 7 days.</p>
+        {% else %}
+          <p class="text-secondary mb-0">No completed orders in the last 7 days yet.</p>
+        {% endif %}
+
+        <hr class="my-4">
+        <div class="qj-kpi__label mb-2">Sales by order type · today</div>
+        <ul class="qj-rank">
+          {% for source, t, pct in today.by_source %}
+            <li>
+              <div class="d-flex justify-content-between small mb-1"><span>{{ source.value.replace("_", "-") | capitalize }}</span><span class="qj-price">{{ t.net | money }} · {{ pct }}%</span></div>
+              <div class="qj-meter" aria-hidden="true"><span style="width: {{ pct }}%; background: var(--qj-brand)"></span></div>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
 </div>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+  <span class="qj-eyebrow me-2">Manage</span>
+  {{ action("Sales reports", url_for('reports.sales'), icon="graph-up-arrow") }}
+  {{ action("Payments & refunds", url_for('admin_views.payments'), icon="credit-card") }}
+  {{ action("Menu & recipes", url_for('admin_menu.menu_list'), icon="journal-text") }}
+  {{ action("Settings", url_for('admin_settings.pricing'), icon="sliders") }}
+  {{ action("Audit log", url_for('admin_views.audit'), icon="shield-check") }}
+  <a class="btn btn-sm {{ 'btn-primary' if pending_staff else 'btn-outline-secondary' }}" href="{{ url_for('admin_staff.staff_list') }}"><i class="bi bi-people me-1" aria-hidden="true"></i>Staff accounts: {{ pending_staff }} pending</a>
+</div>
+<h2 class="qj-eyebrow mb-2">Operations</h2>
 {% endblock %}
 
 {% block staff_footer %}{% endblock %}

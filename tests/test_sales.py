@@ -165,7 +165,7 @@ def test_admin_dashboard_and_statement_render(client, buyer):
     order(buyer, "1234.00", when=at(date(2026, 8, 15)))
     _login(client, "boss", Role.ADMIN)
     body = client.get("/admin/reports?month=2026-08").get_data(as_text=True)
-    assert "August 2026" in body and "1234.00" in body
+    assert "August 2026" in body and "1,234.00" in body
     # Revenue is never presented as profit (no cost data exists).
     assert "Revenue only" in body and "Profit" not in body
     assert client.get("/admin/reports?range=custom&start=2026-08-01&end=2026-08-31").status_code == 200

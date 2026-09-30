@@ -1,13 +1,20 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import empty %}
 {% block title %}My orders &mdash; Quick Junction{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">My orders</h1>
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">History</div>
+    <h1>My orders</h1>
+  </div>
+  <a class="btn btn-outline-primary" href="{{ url_for('menu.index') }}"><i class="bi bi-bag-plus me-1" aria-hidden="true"></i>Order again</a>
+</div>
 
 {% if orders %}
-  <div class="card shadow-sm">
+  <div class="card">
     <div class="table-responsive">
-      <table class="table align-middle mb-0">
+      <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
             <th scope="col">Order</th>
@@ -23,10 +30,10 @@
               <th scope="row" class="fw-semibold">Order #{{ order.id }}</th>
               <td class="text-secondary">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</td>
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
-              <td class="text-end qj-price">{{ order.total | money }}</td>
+              <td class="text-end qj-price fw-semibold">{{ order.total | money }}</td>
               <td class="text-end">
-                <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('orders.detail', order_id=order.id) }}">View</a>
+                <a class="btn btn-sm btn-outline-secondary"
+                   href="{{ url_for('orders.detail', order_id=order.id) }}">View <i class="bi bi-chevron-right" aria-hidden="true"></i></a>
               </td>
             </tr>
           {% endfor %}
@@ -35,10 +42,6 @@
     </div>
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white">
-    <h2 class="h5">No orders yet</h2>
-    <p class="mb-3">When you place an order it will appear here with its status.</p>
-    <a class="btn btn-primary" href="{{ url_for('menu.index') }}">Browse the menu</a>
-  </div>
+  {{ empty("bag", "No orders yet", "When you place an order it will appear here with its status.", "Browse the menu", url_for('menu.index')) }}
 {% endif %}
 {% endblock %}

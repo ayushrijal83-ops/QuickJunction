@@ -1,21 +1,28 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import kpi %}
 {% block title %}Kitchen &mdash; Quick Junction Staff{% endblock %}
 {# A wall screen: refresh every 30 s. Pure HTML; the page works without it. #}
 {% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
+{% block ops_context %}Kitchen display &middot; refreshes every 30 s{% endblock %}
 
 {% block content %}
 {% set labels = {"pending": "New", "confirmed": "Confirmed", "preparing": "Preparing", "ready": "Ready to serve"} %}
+{% set icons = {"pending": "inbox", "confirmed": "check2-square", "preparing": "fire", "ready": "bell"} %}
 {% set action_labels = {"confirmed": "Confirm", "preparing": "Start preparing", "ready": "Mark ready"} %}
-<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
+{% set active = namespace(n=0) %}
+{% for status in column_order %}{% set active.n = active.n + columns[status] | length %}{% endfor %}
+
+<div class="qj-page-header">
   <div>
-    <h1 class="h3 mb-1">Kitchen</h1>
-    <p class="text-secondary mb-0">Oldest first. Refreshes every 30 seconds.</p>
+    <div class="qj-eyebrow">Kitchen</div>
+    <h1><span class="qj-num">{{ active.n }}</span> active order{{ "s" if active.n != 1 }}</h1>
+    <p class="text-secondary mb-0">Oldest first. Refreshes every 30 seconds. Waiting 15+ min is marked <strong>warm</strong>, 30+ min <strong>late</strong>.</p>
   </div>
-  <div class="d-flex flex-wrap gap-3 small">
-    <div><span class="text-secondary">Prepared today</span><div class="h5 mb-0">{{ stats.prepared_today }}</div></div>
-    <div><span class="text-secondary">Average prep</span><div class="h5 mb-0">
+  <div class="qj-kitchen-head">
+    <div class="qj-kpi"><span class="qj-kpi__icon" aria-hidden="true"><i class="bi bi-check2-all"></i></span><div class="qj-kpi__label">Prepared today</div><div class="qj-kpi__value">{{ stats.prepared_today }}</div></div>
+    <div class="qj-kpi"><span class="qj-kpi__icon" aria-hidden="true"><i class="bi bi-stopwatch"></i></span><div class="qj-kpi__label">Average prep</div><div class="qj-kpi__value">
       {% if stats.average_prep is not none %}{{ minutes(stats.average_prep) }} min{% else %}&mdash;{% endif %}</div></div>
-    <div><span class="text-secondary">Longest waiting</span><div class="h5 mb-0">
+    <div class="qj-kpi {{ 'qj-kpi--warn' if stats.longest_active and minutes(now - stats.longest_active.created_at) >= 15 }}"><span class="qj-kpi__icon" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span><div class="qj-kpi__label">Longest waiting</div><div class="qj-kpi__value">
       {% if stats.longest_active %}#{{ stats.longest_active.id }} &middot; {{ minutes(now - stats.longest_active.created_at) }} min{% else %}&mdash;{% endif %}</div></div>
   </div>
 </div>
@@ -23,25 +30,27 @@
 <div class="row g-3">
   {% for status in column_order %}
     {% set orders = columns[status] %}
-    <div class="col-md-6 col-xl-3">
-      <h2 class="h6 text-uppercase text-secondary d-flex justify-content-between">
-        {{ labels[status.value] }} <span class="badge text-bg-secondary">{{ orders | length }}</span>
-      </h2>
-      {% for order in orders %}
-        {% set age = minutes(now - order.created_at) %}
-        <div class="card shadow-sm mb-2 {{ 'border-danger' if age >= 30 and status.value != 'ready' else '' }}">
-          <div class="card-body p-3">
-            <div class="d-flex justify-content-between align-items-start">
-              <a class="fw-semibold" href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">#{{ order.id }}</a>
-              <span class="small {{ 'text-danger fw-semibold' if age >= 30 else 'text-secondary' }}">{{ age }} min</span>
+    <section class="col-md-6 col-xxl-3" aria-labelledby="lane-{{ status.value }}">
+      <div class="qj-lane qj-lane--{{ status.value }} h-100">
+        <h2 class="qj-lane__head m-0" id="lane-{{ status.value }}">
+          <span><i class="bi bi-{{ icons[status.value] }} me-2" aria-hidden="true"></i>{{ labels[status.value] }}</span>
+          <span class="qj-lane__count">{{ orders | length }}<span class="visually-hidden"> orders</span></span>
+        </h2>
+        {% for order in orders %}
+          {% set age = minutes(now - order.created_at) %}
+          {% set urgency = "late" if age >= 30 and status.value != "ready" else ("warm" if age >= 15 and status.value != "ready" else "") %}
+          <article class="qj-kot {{ 'qj-kot--' ~ urgency if urgency }}" aria-label="Order {{ order.id }}">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <a class="qj-kot__id" href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">#{{ order.id }}</a>
+              <span class="qj-kot__age"><i class="bi bi-clock" aria-hidden="true"></i>{{ age }} min{% if urgency %} &middot; {{ urgency }}{% endif %}</span>
             </div>
-            <div class="small text-secondary mb-2">
-              {{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %}
+            <div class="small text-secondary mt-1">
+              <i class="bi bi-{{ 'grid-3x3-gap' if order.table else 'bag' }} me-1" aria-hidden="true"></i>{{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; <strong class="text-body">{{ order.table.name }}</strong>{% endif %}
               {% if order.preparing_at and status.value == "preparing" %} &middot; cooking {{ minutes(now - order.preparing_at) }} min{% endif %}
               {% if order.ready_at and status.value == "ready" %} &middot; ready {{ minutes(now - order.ready_at) }} min{% endif %}
             </div>
-            <ul class="list-unstyled mb-2">
-              {% for item in order.items %}<li><strong>{{ item.quantity }} &times;</strong> {{ item.item_name_snapshot }}</li>{% endfor %}
+            <ul class="qj-kot__items">
+              {% for item in order.items %}<li><strong>{{ item.quantity }} &times;</strong> <span>{{ item.item_name_snapshot }}</span></li>{% endfor %}
             </ul>
             {% set nxt = next_status.get(status) %}
             {% if nxt %}
@@ -50,17 +59,17 @@
                 {{ form.csrf_token }}
                 <input type="hidden" name="status" value="{{ nxt.value }}">
                 <input type="hidden" name="return_to" value="kitchen">
-                <button class="btn btn-sm btn-primary w-100" type="submit">{{ action_labels[nxt.value] }}</button>
+                <button class="btn {{ 'btn-success' if nxt.value == 'ready' else 'btn-primary' }} w-100 fw-bold text-uppercase" type="submit" data-submit-once>{{ action_labels[nxt.value] }}</button>
               </form>
             {% else %}
-              <a class="btn btn-sm btn-outline-secondary w-100" href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Serve / complete</a>
+              <a class="btn btn-outline-secondary w-100" href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Serve / complete</a>
             {% endif %}
-          </div>
-        </div>
-      {% else %}
-        <p class="small text-secondary">Nothing here.</p>
-      {% endfor %}
-    </div>
+          </article>
+        {% else %}
+          <p class="small text-secondary text-center my-4"><i class="bi bi-cup-hot d-block fs-4 mb-1" aria-hidden="true"></i>Nothing here.</p>
+        {% endfor %}
+      </div>
+    </section>
   {% endfor %}
 </div>
 {% endblock %}

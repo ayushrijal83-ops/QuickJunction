@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import steps %}
 {% block title %}Order #{{ order.id }} &mdash; Quick Junction{% endblock %}
 
 {% block content %}
@@ -9,27 +10,31 @@
   </ol>
 </nav>
 
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-  <h1 class="h3 mb-0">Order #{{ order.id }}</h1>
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">
+      Placed {{ order.created_at.strftime("%d %b %Y at %H:%M") }}
+      &middot; {{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %}
+    </div>
+    <h1>Order #{{ order.id }}</h1>
+  </div>
   {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
 </div>
 
-<p class="text-secondary">
-  Placed {{ order.created_at.strftime("%d %b %Y at %H:%M") }}
-  &middot; {{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %}
-</p>
-
 {% if order.status.value == "cancelled" and order.cancelled_at %}
-  <div class="alert alert-secondary">
-    Cancelled {{ "by you" if order.cancellation_actor and order.cancellation_actor.value == "customer" else "by the restaurant" }}
-    on {{ order.cancelled_at.strftime("%d %b %Y at %H:%M") }}{% if order.cancellation_reason %} &mdash; &ldquo;{{ order.cancellation_reason }}&rdquo;{% endif %}.
+  <div class="alert alert-secondary d-flex gap-2" role="status">
+    <i class="bi bi-x-circle" aria-hidden="true"></i>
+    <span>Cancelled {{ "by you" if order.cancellation_actor and order.cancellation_actor.value == "customer" else "by the restaurant" }}
+    on {{ order.cancelled_at.strftime("%d %b %Y at %H:%M") }}{% if order.cancellation_reason %} &mdash; &ldquo;{{ order.cancellation_reason }}&rdquo;{% endif %}.</span>
   </div>
+{% else %}
+  <div class="qj-panel p-3 p-md-4 mb-4">{{ steps(order) }}</div>
 {% endif %}
 
 <div class="row g-4">
   <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header bg-white"><strong>Items</strong></div>
+    <div class="card">
+      <div class="card-header"><h2 class="qj-section-title"><i class="bi bi-receipt me-2 text-secondary" aria-hidden="true"></i>Items</h2></div>
       <div class="table-responsive">
         <table class="table align-middle mb-0">
           <thead class="table-light">
@@ -45,7 +50,7 @@
                the current menu price. #}
             {% for item in order.items %}
               <tr>
-                <td>{{ item.item_name_snapshot }}</td>
+                <td class="fw-semibold">{{ item.item_name_snapshot }}</td>
                 <td class="text-end qj-price">{{ item.unit_price_snapshot | money }}</td>
                 <td class="text-center">{{ item.quantity }}</td>
                 <td class="text-end qj-price">{{ item.line_total | money }}</td>
@@ -61,43 +66,42 @@
   </div>
 
   <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h2 class="h6 text-uppercase text-secondary">Total</h2>
-        <dl class="row mb-0">
-          <dt class="col-7 fw-normal">Subtotal</dt>
-          <dd class="col-5 text-end qj-price mb-1">{{ order.subtotal | money }}</dd>
+    <div class="card">
+      <div class="card-body p-4">
+        <h2 class="qj-eyebrow mb-3">Total</h2>
+        <dl class="qj-summary">
+          <div><dt>Subtotal</dt><dd class="qj-price">{{ order.subtotal | money }}</dd></div>
           {% if order.discount_amount > 0 %}
-            <dt class="col-7 fw-normal">Discount</dt>
-            <dd class="col-5 text-end qj-price mb-1">&minus;{{ order.discount_amount | money }}</dd>
+            <div><dt>Discount</dt><dd class="qj-price">&minus;{{ order.discount_amount | money }}</dd></div>
           {% endif %}
-          <dt class="col-7 fw-normal">Tax ({{ order.tax_rate }}%)</dt>
-          <dd class="col-5 text-end qj-price mb-1">{{ order.tax_amount | money }}</dd>
-          <dt class="col-7">Total</dt>
-          <dd class="col-5 text-end qj-price h5 mb-0">{{ order.total | money }}</dd>
+          <div><dt>Tax ({{ order.tax_rate }}%)</dt><dd class="qj-price">{{ order.tax_amount | money }}</dd></div>
+          <div class="qj-summary__total"><dt>Total</dt><dd class="qj-price">{{ order.total | money }}</dd></div>
         </dl>
-        {% if order.payment %}
-          <p class="small mb-0 mt-2">
-            <span class="badge text-bg-success">Paid</span> {{ order.payment.method.value }}, {{ order.payment.captured_at.strftime("%d %b %Y %H:%M") }}
-            {% if order.payment.refunded_amount > 0 %}<br><span class="text-secondary">Refunded {{ order.payment.refunded_amount | money }}</span>{% endif %}
-          </p>
+        <div class="d-flex flex-wrap align-items-center gap-2 mt-3 small">
+          {% if order.payment or order.status.value != "cancelled" %}{% with payment = order.payment %}{% include "partials/_payment_badge.html" %}{% endwith %}{% endif %}
+          {% if order.payment %}
+            <span class="text-secondary">{{ order.payment.method.value }}, {{ order.payment.captured_at.strftime("%d %b %Y %H:%M") }}</span>
+          {% endif %}
+        </div>
+        {% if order.payment and order.payment.refunded_amount > 0 %}
+          <p class="small text-secondary mb-0 mt-2">Refunded {{ order.payment.refunded_amount | money }}</p>
         {% endif %}
       </div>
     </div>
 
     {# Shown only while cancellable; the server enforces the rule regardless. #}
     {% if can_cancel %}
-      <div class="card shadow-sm mt-3">
-        <div class="card-body">
-          <h2 class="h6 text-uppercase text-secondary">Changed your mind?</h2>
-          <p class="small text-secondary">You can cancel until the kitchen starts preparing your order.</p>
-          <form method="post" action="{{ url_for('orders.cancel', order_id=order.id) }}" novalidate>
-            {{ cancel_form.csrf_token }}
-            <input class="form-control form-control-sm mb-2" name="reason" maxlength="255"
-                   placeholder="Reason (optional)" aria-label="Cancellation reason">
-            <button type="submit" class="btn btn-outline-danger w-100">Cancel order</button>
-          </form>
-        </div>
+      <div class="qj-danger-zone">
+        <div class="qj-danger-zone__title mb-1">Changed your mind?</div>
+        <p class="small text-secondary">You can cancel until the kitchen starts preparing your order.</p>
+        <form method="post" action="{{ url_for('orders.cancel', order_id=order.id) }}" novalidate
+              data-confirm="Cancel order #{{ order.id }}?" data-confirm-body="The kitchen will not prepare it. This action cannot be undone."
+              data-confirm-ok="Cancel order" data-confirm-cancel="Keep order">
+          {{ cancel_form.csrf_token }}
+          <input class="form-control form-control-sm mb-2" name="reason" maxlength="255"
+                 placeholder="Reason (optional)" aria-label="Cancellation reason">
+          <button type="submit" class="btn btn-outline-danger w-100">Cancel order</button>
+        </form>
       </div>
     {% endif %}
   </div>

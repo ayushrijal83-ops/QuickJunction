@@ -1,16 +1,24 @@
 {% extends "base.html" %}
+{% from "partials/_dashboard.html" import kpi, empty %}
 {% block title %}Inventory &mdash; Quick Junction Staff{% endblock %}
+{% block ops_context %}Stock &amp; ingredients{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
+{% set tracked = ingredients | selectattr("is_active") | list %}
+{% set out = tracked | selectattr("current_quantity", "le", 0) | list %}
+{% set used = namespace(n=0) %}
+{% for i in tracked %}{% if totals.get(i.id, {}).get(MovementType.SALE, 0) != 0 %}{% set used.n = used.n + 1 %}{% endif %}{% endfor %}
+
+<div class="qj-page-header">
   <div>
-    <h1 class="h3 mb-1">Inventory</h1>
+    <div class="qj-eyebrow">Operations</div>
+    <h1>Inventory</h1>
     <p class="text-secondary mb-0">Quantities change only through recorded movements. Stock counts, not valuation &mdash; no cost data is stored.</p>
   </div>
   <div class="d-flex gap-2 align-items-end">
     <form method="get" class="d-flex gap-2 align-items-end">
       <div>
-        <label class="form-label small mb-0" for="days">Activity window</label>
+        <label class="form-label small mb-1" for="days">Activity window</label>
         <select class="form-select form-select-sm" id="days" name="days" data-autosubmit>
           {% for d in windows %}<option value="{{ d }}" {% if d == days %}selected{% endif %}>Last {{ d }} days</option>{% endfor %}
         </select>
@@ -18,27 +26,34 @@
       <noscript><button class="btn btn-sm btn-outline-secondary" type="submit">Show</button></noscript>
     </form>
     {% if current_user.role.value == "admin" %}
-      <a class="btn btn-sm btn-primary" href="{{ url_for('inventory.new') }}">Add ingredient</a>
+      <a class="btn btn-sm btn-primary" href="{{ url_for('inventory.new') }}"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add ingredient</a>
     {% endif %}
   </div>
 </div>
 
+<div class="row g-3 mb-4">
+  {{ kpi("Tracked ingredients", tracked | length, (ingredients | length - tracked | length) ~ " not tracked", none, "", "box-seam") }}
+  {{ kpi("Low stock", low | length, "at or below minimum", none, "warn" if low else "", "exclamation-triangle") }}
+  {{ kpi("Out of stock", out | length, "zero or short", none, "warn" if out else "", "slash-circle") }}
+  {{ kpi("Used recently", used.n, "ingredients sold in the last " ~ days ~ " days", none, "", "graph-down-arrow") }}
+</div>
+
 {% if low %}
-  <div class="alert alert-warning">
-    <strong>Low stock:</strong>
-    {% for i in low %}<a class="alert-link" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">{{ i.name }}</a> ({{ i.current_quantity | round(3) }} {{ i.unit.value }}){% if not loop.last %}, {% endif %}{% endfor %}
+  <div class="alert alert-warning d-flex gap-2" role="status">
+    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+    <div><strong>Low stock:</strong>
+    {% for i in low %}<a class="alert-link" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">{{ i.name }}</a> ({{ i.current_quantity | round(3) }} {{ i.unit.value }}){% if not loop.last %}, {% endif %}{% endfor %}</div>
   </div>
 {% endif %}
 
 {% if ingredients %}
-  <div class="card shadow-sm">
-    <div class="table-responsive">
-      <table class="table align-middle mb-0">
+  <div class="card">
+    <div class="table-responsive qj-scroll">
+      <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
           <tr>
             <th scope="col">Ingredient</th>
-            <th scope="col" class="text-end">In stock</th>
-            <th scope="col" class="text-end">Low at</th>
+            <th scope="col">Stock vs minimum</th>
             <th scope="col">Status</th>
             <th scope="col" class="text-end">Used</th>
             <th scope="col" class="text-end">Wasted</th>
@@ -49,20 +64,29 @@
         <tbody>
           {% for i in ingredients %}
             {% set t = totals.get(i.id, {}) %}
-            <tr {% if not i.is_active %}class="text-secondary"{% endif %}>
-              <td>{{ i.name }} <span class="small text-secondary">({{ i.unit.value }})</span></td>
-              <td class="text-end">{{ i.current_quantity | round(3) }}</td>
-              <td class="text-end">{{ i.minimum_quantity | round(3) }}</td>
+            {% set state = "inactive" if not i.is_active else ("short" if i.current_quantity < 0 else ("out" if i.current_quantity == 0 else ("low" if i.is_low else "ok"))) %}
+            {# Bar: stock against twice the minimum, so "at minimum" sits half-way. #}
+            {% set scale = i.minimum_quantity * 2 if i.minimum_quantity > 0 else (i.current_quantity if i.current_quantity > 0 else 1) %}
+            {% set pct = [[i.current_quantity * 100 / scale, 0] | max, 100] | min %}
+            <tr class="{{ 'text-secondary' if not i.is_active }} {{ 'qj-row--' ~ state if state in ('low', 'short', 'out') }}">
+              <td><span class="fw-semibold">{{ i.name }}</span> <span class="small text-secondary">({{ i.unit.value }})</span></td>
               <td>
-                {% if not i.is_active %}<span class="badge text-bg-light border">not tracked</span>
-                {% elif i.current_quantity < 0 %}<span class="badge text-bg-danger">short</span>
-                {% elif i.is_low %}<span class="badge text-bg-warning">low</span>
-                {% else %}<span class="badge text-bg-success">ok</span>{% endif %}
+                <div class="qj-stock">
+                  <div class="qj-stock__nums"><span><b>{{ i.current_quantity | round(3) }}</b> in stock</span><span>low at {{ i.minimum_quantity | round(3) }}</span></div>
+                  <div class="qj-meter {{ 'qj-meter--short' if state in ('short', 'out') else ('qj-meter--low' if state == 'low' else '') }}" aria-hidden="true"><span style="width: {{ pct | round(1) }}%"></span></div>
+                </div>
               </td>
-              <td class="text-end">{{ (-(t.get(MovementType.SALE, 0))) | round(3) }}</td>
-              <td class="text-end">{{ (-(t.get(MovementType.WASTE, 0))) | round(3) }}</td>
-              <td class="text-end">{{ (t.get(MovementType.PURCHASE, 0) + t.get(MovementType.RESTOCK, 0)) | round(3) }}</td>
-              <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">Open</a></td>
+              <td>
+                {% if state == "inactive" %}<span class="qj-status qj-status--inactive badge"><i class="bi bi-dash-circle" aria-hidden="true"></i>not tracked</span>
+                {% elif state == "short" %}<span class="qj-status qj-status--short badge"><i class="bi bi-x-octagon" aria-hidden="true"></i>short</span>
+                {% elif state == "out" %}<span class="qj-status qj-status--short badge"><i class="bi bi-slash-circle" aria-hidden="true"></i>out of stock</span>
+                {% elif state == "low" %}<span class="qj-status qj-status--low badge"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i>low</span>
+                {% else %}<span class="qj-status qj-status--ok badge"><i class="bi bi-check-circle" aria-hidden="true"></i>ok</span>{% endif %}
+              </td>
+              <td class="text-end qj-num">{{ (-(t.get(MovementType.SALE, 0))) | round(3) }}</td>
+              <td class="text-end qj-num">{{ (-(t.get(MovementType.WASTE, 0))) | round(3) }}</td>
+              <td class="text-end qj-num">{{ (t.get(MovementType.PURCHASE, 0) + t.get(MovementType.RESTOCK, 0)) | round(3) }}</td>
+              <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">Open</a></td>
             </tr>
           {% endfor %}
         </tbody>
@@ -70,6 +94,6 @@
     </div>
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white"><p class="mb-0">No ingredients yet.</p></div>
+  {{ empty("box-seam", "No ingredients yet", "Add the ingredients you track and record an opening purchase to start the stock ledger.") }}
 {% endif %}
 {% endblock %}

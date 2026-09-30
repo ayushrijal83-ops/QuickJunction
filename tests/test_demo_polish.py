@@ -170,8 +170,10 @@ def test_2f_next_cannot_loop_back_to_login(client, db):
     (Decimal("249.5"), "249.50"),       # needs padding to two places
     (Decimal("0"), "0.00"),             # zero
     (Decimal("0.00"), "0.00"),
-    (Decimal("1234.56"), "1234.56"),
-    (Decimal("99999.99"), "99999.99"),  # top of the DECIMAL(10,2) demo range
+    (Decimal("1234.56"), "1,234.56"),   # Nepali grouping: thousands...
+    (Decimal("99999.99"), "99,999.99"),
+    (Decimal("123456.78"), "1,23,456.78"),  # ...then lakhs (pairs of digits)
+    (Decimal("12345678.00"), "1,23,45,678.00"),  # crore
 ])
 def test_3_money_formats_decimals_exactly(value, expected):
     assert money(value) == f"{CURRENCY_SYMBOL}{expected}"

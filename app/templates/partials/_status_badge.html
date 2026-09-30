@@ -1,14 +1,8 @@
 {# Order status badge. Expects `status` (an OrderStatus member).
-   Every status has its own colour pair (Bootstrap 5.3's AA-contrast "subtle"
-   palette), but the colour is presentation only -- the authoritative status
-   is the text rendered inside the badge. #}
-{%- set _styles = {
-  "pending":   "bg-secondary-subtle text-secondary-emphasis border-secondary-subtle",
-  "confirmed": "bg-info-subtle text-info-emphasis border-info-subtle",
-  "preparing": "bg-warning-subtle text-warning-emphasis border-warning-subtle",
-  "ready":     "bg-primary-subtle text-primary-emphasis border-primary-subtle",
-  "served":    "bg-dark-subtle text-dark-emphasis border-dark-subtle",
-  "completed": "bg-success-subtle text-success-emphasis border-success-subtle",
-  "cancelled": "bg-danger-subtle text-danger-emphasis border-danger-subtle",
+   Every status has its own colour pair and icon, but both are redundant cues
+   -- the authoritative status is the text rendered inside the badge. #}
+{%- set _icons = {
+  "pending": "hourglass-split", "confirmed": "check2", "preparing": "fire", "ready": "bell",
+  "served": "cup-hot", "completed": "check2-all", "cancelled": "x-lg",
 } -%}
-<span class="badge border {{ _styles.get(status.value, 'bg-secondary-subtle text-secondary-emphasis') }} text-uppercase">{{ status.value }}</span>
+<span class="qj-status qj-status--{{ status.value }} badge"><i class="bi bi-{{ _icons.get(status.value, 'circle') }}" aria-hidden="true"></i>{{ status.value }}</span>

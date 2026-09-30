@@ -84,7 +84,7 @@ def test_full_demo_flow(app, db):
     g.pop("current_user", None)
     if go(cust, "get", "/account/").status_code != 200:
         go(cust, "post", "/login", username="alice", password=PW)
-    assert "Welcome, alice" in text(cust, "/account/")
+    assert ", <em>alice</em>." in text(cust, "/account/")  # time-of-day greeting (final UI)
     assert "Chicken Burger" in text(cust, "/menu")
     assert "Tax (13.00%)" in (go(cust, "post", "/cart/add", menu_item_id=burger.id, quantity=2) and text(cust, "/checkout"))
     go(cust, "post", "/checkout", source="dine_in", table_id=str(t01.id))

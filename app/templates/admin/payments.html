@@ -5,17 +5,17 @@
 <div class="qj-page-header">
   <div>
     <div class="qj-eyebrow">Manage</div>
-    <h1 class="h3">Payments &amp; refunds</h1>
+    <h1>Payments &amp; refunds</h1>
     <p class="text-secondary mb-0">Most recent {{ payments | length }} payments. Refunds are issued from the order page.</p>
   </div>
   <div class="d-flex gap-2">
-    <div class="qj-kpi"><div class="qj-kpi__label">Taken</div><div class="qj-kpi__value qj-price">{{ collected | money }}</div></div>
-    <div class="qj-kpi qj-kpi--warn"><div class="qj-kpi__label">Refunded</div><div class="qj-kpi__value qj-price">{{ refunded | money }}</div></div>
+    <div class="qj-kpi"><span class="qj-kpi__icon" aria-hidden="true"><i class="bi bi-wallet2"></i></span><div class="qj-kpi__label">Taken</div><div class="qj-kpi__value qj-price">{{ collected | money }}</div></div>
+    <div class="qj-kpi qj-kpi--warn"><span class="qj-kpi__icon" aria-hidden="true"><i class="bi bi-arrow-counterclockwise"></i></span><div class="qj-kpi__label">Refunded</div><div class="qj-kpi__value qj-price">{{ refunded | money }}</div></div>
   </div>
 </div>
 
 {% if payments %}
-  <div class="card shadow-sm">
+  <div class="card">
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
@@ -34,8 +34,8 @@
             <tr>
               <th scope="row"><a href="{{ url_for('staff_orders.order_detail', order_id=p.order_id) }}">#{{ p.order_id }}</a>
                 {% if p.order.table %}<span class="small text-secondary">&middot; {{ p.order.table.name }}</span>{% endif %}</th>
-              <td class="small text-secondary">{{ p.captured_at.strftime("%d %b %Y, %H:%M") }}</td>
-              <td>{{ p.method.value | capitalize }}</td>
+              <td class="small text-secondary text-nowrap">{{ p.captured_at.strftime("%d %b %Y, %H:%M") }}</td>
+              <td>{{ p.method.value | capitalize }}<div>{% with payment = p %}{% include "partials/_payment_badge.html" %}{% endwith %}</div></td>
               <td class="text-end qj-price">{{ p.amount | money }}</td>
               <td class="text-end qj-price">
                 {% if p.refunded_amount > 0 %}
@@ -52,6 +52,6 @@
     </div>
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white"><h2 class="h5">No payments yet</h2><p class="mb-0">Payments recorded at the counter appear here.</p></div>
+  <div class="qj-empty"><div class="qj-empty__icon" aria-hidden="true"><i class="bi bi-credit-card"></i></div><h2 class="h5">No payments yet</h2><p class="mb-0">Payments recorded at the counter appear here.</p></div>
 {% endif %}
 {% endblock %}

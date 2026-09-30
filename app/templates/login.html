@@ -8,47 +8,51 @@
 {% block title %}{{ portals[portal].title }} &mdash; Quick Junction{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8 col-lg-6 col-xl-5">
-    <h1 class="h3 text-center mb-3">Sign in to Quick Junction</h1>
+<div class="qj-auth qj-reveal my-lg-3">
+  <div class="qj-auth__visual">
+    <img src="{{ scene_image('auth') }}" alt="" width="1100" height="1375">
+    <div>
+      <p class="qj-eyebrow text-white-50 mb-3">Quick Junction</p>
+      <blockquote>&ldquo;Good food is the shortest way between two people.&rdquo;</blockquote>
+      <p class="mb-0 small opacity-75">Sign in to order ahead, book a table, or run tonight&rsquo;s service.</p>
+    </div>
+  </div>
+
+  <div class="qj-auth__form">
+    <h1 class="h2 mb-1">Sign in to Quick Junction</h1>
+    <p class="text-secondary mb-4">{{ portals[portal].blurb }}</p>
 
     {# Portal choice is navigation only. The role stored on the account
        decides access; the staff and admin pages refuse other account types. #}
-    <nav class="qj-portals mb-3" aria-label="Choose how to sign in">
-      {% for key in ("customer", "staff", "admin") %}
+    <nav class="qj-segmented qj-portals mb-4" aria-label="Choose how to sign in">
+      {% for key, icon in (("customer", "person"), ("staff", "person-badge"), ("admin", "shield-lock")) %}
         <a class="qj-portal{{ ' is-active' if key == portal }}"
            href="{{ url_for('auth.login', portal=key) }}"
            {% if key == portal %}aria-current="page"{% endif %}>
-          <span class="qj-portal-name">{{ key|title }}</span>
+          <i class="bi bi-{{ icon }} me-1" aria-hidden="true"></i><span class="qj-portal-name">{{ key|title }}</span>
         </a>
       {% endfor %}
     </nav>
 
-    <div class="card shadow-sm">
-      <div class="card-body p-4">
-        <h2 class="h5 mb-1">{{ portals[portal].title }}</h2>
-        <p class="text-secondary small mb-4">{{ portals[portal].blurb }}</p>
+    <h2 class="h6 mb-3">{{ portals[portal].title }}</h2>
+    <form method="post" action="{{ url_for('auth.login', portal=portal, next=request.args.get('next')) }}" novalidate>
+      {{ form.hidden_tag() }}
+      {{ field(form.username, autofocus=true, autocomplete="username") }}
+      {{ field(form.password, autocomplete="current-password") }}
 
-        <form method="post" action="{{ url_for('auth.login', portal=portal, next=request.args.get('next')) }}" novalidate>
-          {{ form.hidden_tag() }}
-          {{ field(form.username, autofocus=true, autocomplete="username") }}
-          {{ field(form.password, autocomplete="current-password") }}
+      {% for error in form.errors.get("_general", []) %}
+        <div class="alert alert-danger py-2" role="alert"><i class="bi bi-exclamation-circle me-1" aria-hidden="true"></i>{{ error }}</div>
+      {% endfor %}
 
-          {% for error in form.errors.get("_general", []) %}
-            <div class="alert alert-danger py-2">{{ error }}</div>
-          {% endfor %}
+      <div class="d-grid mt-2">{{ submit("Sign in", "btn btn-primary btn-lg") }}</div>
+    </form>
 
-          <div class="d-grid">{{ submit("Sign in") }}</div>
-        </form>
-      </div>
-    </div>
-
-    <p class="text-center small mt-3 mb-0">
+    <p class="small mt-4 mb-0 text-secondary">
       {% if portal == "customer" %}
         New here? <a href="{{ url_for('auth.register') }}">Create a customer account</a>
       {% elif portal == "staff" %}
         New staff member? <a href="{{ url_for('auth.register_staff') }}">Request a staff account</a>
-        <span class="d-block text-secondary mt-1">An administrator approves every staff account before it can sign in.</span>
+        <span class="d-block mt-1">An administrator approves every staff account before it can sign in.</span>
       {% else %}
         Admin accounts are created by the system operator; there is no public sign-up.
       {% endif %}

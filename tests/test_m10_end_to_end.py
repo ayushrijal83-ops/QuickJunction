@@ -129,7 +129,7 @@ def test_m10_customer_staff_admin_flow(app, db):
     assert [(d, p, t.net) for d, p, t in report.daily] == [(today, 3, 2 * two_burgers)]  # 26
     assert sum(t.orders for _, t in report.by_hour) == 2                            # 27
     page = req(admin, "get", "/admin/reports?range=today").get_data(as_text=True)
-    assert "1540.00" in page
+    assert "1,540.00" in page
 
     # --- historical safety (section 11) -------------------------------------------
     item.price = Decimal("999.00")

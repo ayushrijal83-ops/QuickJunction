@@ -9,50 +9,39 @@
   </ol>
 </nav>
 
-<div class="row g-4">
-  <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-body p-4">
-        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
-          <h1 class="h3 mb-0">{{ item.name }}</h1>
-          <span class="qj-price h4 mb-0">{{ item.price | money }}</span>
-        </div>
-        <p class="text-secondary">{{ item.category.name }}</p>
-
-        {% if item.description %}<p class="mb-4">{{ item.description }}</p>{% endif %}
-
-        <dl class="row mb-0">
-          <dt class="col-sm-3">Cuisine</dt>
-          <dd class="col-sm-9">{{ item.cuisine.value|replace("_", " ")|title }}</dd>
-          <dt class="col-sm-3">Dietary type</dt>
-          <dd class="col-sm-9">{{ item.dietary_type.value|replace("_", " ")|title }}</dd>
-          <dt class="col-sm-3">Spice level</dt>
-          <dd class="col-sm-9">{{ item.spice_level.value|replace("_", " ")|title }}</dd>
-          {% if item.ingredients %}
-            <dt class="col-sm-3">Ingredients</dt>
-            <dd class="col-sm-9">{{ item.ingredients | map(attribute="name") | join(", ") }}</dd>
-          {% endif %}
-        </dl>
-      </div>
+<div class="row g-4 g-xl-5 align-items-start">
+  <div class="col-lg-7 qj-reveal">
+    <div class="qj-dish-hero">
+      <img src="{{ dish_image(item) }}" alt="" width="720" height="540">
     </div>
   </div>
 
-  <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h2 class="h6 text-uppercase text-secondary">Order this</h2>
-        <p class="qj-price h4">{{ item.price | money }}</p>
-        <form method="post" action="{{ url_for('cart.add') }}">
-          {{ add_form.csrf_token }}
-          <input type="hidden" name="menu_item_id" value="{{ item.id }}">
+  <div class="col-lg-5 qj-reveal qj-reveal-2">
+    <p class="qj-eyebrow mb-2">{{ item.category.name }}</p>
+    <h1 class="display-6 mb-2">{{ item.name }}</h1>
+    <p class="qj-food__price qj-price h3 mb-3">{{ item.price | money }}</p>
+    {% if item.description %}<p class="lead fs-6 text-secondary mb-4">{{ item.description }}</p>{% endif %}
+
+    <dl class="qj-facts mb-4">
+      <div><dt>Cuisine</dt><dd>{{ item.cuisine.value|replace("_", " ")|title }}</dd></div>
+      <div><dt>Dietary type</dt><dd>{{ item.dietary_type.value|replace("_", " ")|title }}</dd></div>
+      <div><dt>Spice level</dt><dd>{{ item.spice_level.value|replace("_", " ")|title }}</dd></div>
+      {% if item.ingredients %}
+        <div class="w-100" style="grid-column: 1 / -1"><dt>Ingredients</dt><dd>{{ item.ingredients | map(attribute="name") | join(", ") }}</dd></div>
+      {% endif %}
+    </dl>
+
+    <div class="qj-panel p-3 p-md-4">
+      <h2 class="h6 qj-eyebrow mb-3">Order this</h2>
+      <form method="post" action="{{ url_for('cart.add') }}" class="d-flex flex-wrap align-items-end gap-2">
+        {{ add_form.csrf_token }}
+        <input type="hidden" name="menu_item_id" value="{{ item.id }}">
+        <div>
           <label class="form-label" for="quantity">Quantity</label>
-          <input class="form-control mb-3" type="number" id="quantity" name="quantity"
-                 value="1" min="1" max="20">
-          <div class="d-grid">
-            <button type="submit" class="btn btn-primary">Add to cart</button>
-          </div>
-        </form>
-      </div>
+          <input class="form-control" style="width:6rem" type="number" id="quantity" name="quantity" value="1" min="1" max="20">
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg flex-grow-1"><i class="bi bi-bag-plus me-2" aria-hidden="true"></i>Add to cart</button>
+      </form>
     </div>
   </div>
 </div>

@@ -11,8 +11,9 @@ from decimal import Decimal, InvalidOperation
 
 from flask import Flask
 
-#: Rupee sign. Named rather than inlined so there is one place to change it.
-CURRENCY_SYMBOL = "₹"
+#: Nepali rupee, written the way Nepali menus and bills write it ("Rs. 250").
+#: Named rather than inlined so there is one place to change it.
+CURRENCY_SYMBOL = "Rs. "  # non-breaking space: an amount never wraps
 
 #: Shown where a price is genuinely unknown -- e.g. a cart line whose menu item
 #: was withdrawn. An em dash reads as "not applicable"; a zero would be a lie.
@@ -22,7 +23,7 @@ _CENTS = Decimal("0.01")
 
 
 def money(value) -> str:
-    """Render a monetary amount as ``₹249.00``.
+    """Render a monetary amount Nepali-style: ``Rs. 249.00``, ``Rs. 1,23,456.78``.
 
     Stays inside :class:`~decimal.Decimal` throughout. A value that arrives as
     a string or int is converted via ``str()``, never through ``float()``,
@@ -47,7 +48,21 @@ def money(value) -> str:
     # quantize() rounds half-to-even by default, which is the right behaviour
     # for display: these values are already stored to two places, so this only
     # normalises presentation (249.5 -> 249.50) rather than altering money.
-    return f"{CURRENCY_SYMBOL}{amount.quantize(_CENTS)}"
+    text = str(amount.quantize(_CENTS))
+    sign = "-" if text.startswith("-") else ""
+    whole, cents = text.lstrip("-").split(".")
+    return f"{sign}{CURRENCY_SYMBOL}{_group(whole)}.{cents}"
+
+
+def _group(digits: str) -> str:
+    """South Asian digit grouping, as used in Nepal: the last three digits,
+    then pairs -- 1234567 -> 12,34,567."""
+    head, tail = digits[:-3], digits[-3:]
+    pairs = []
+    while head:
+        pairs.insert(0, head[-2:])
+        head = head[:-2]
+    return ",".join(pairs + [tail])
 
 
 def register_filters(app: Flask) -> None:

@@ -2,7 +2,7 @@
 {% block title %}Your cart &mdash; Quick Junction{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">Your cart</h1>
+<div class="qj-page-header"><div><div class="qj-eyebrow">Almost there</div><h1>Your cart</h1></div><a class="btn btn-outline-secondary" href="{{ url_for('menu.index') }}"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Keep browsing</a></div>
 
 {% if cart.has_unavailable %}
   <div class="alert alert-warning">
@@ -14,7 +14,7 @@
 {% if cart.lines %}
   <div class="row g-4">
     <div class="col-lg-8">
-      <div class="card shadow-sm">
+      <div class="card">
         <div class="table-responsive">
           <table class="table align-middle mb-0">
             <thead class="table-light">
@@ -31,8 +31,13 @@
                 <tr {% if not line.menu_item %}class="table-warning"{% endif %}>
                   <td>
                     {% if line.menu_item %}
-                      <a class="text-decoration-none" href="{{ url_for('menu.detail', item_id=line.menu_item.id) }}">{{ line.menu_item.name }}</a>
-                      <div class="small text-secondary">{{ line.menu_item.category.name }}</div>
+                      <div class="d-flex align-items-center gap-3">
+                        <img src="{{ dish_image(line.menu_item) }}" alt="" width="56" height="56" loading="lazy" class="rounded-3 object-fit-cover flex-shrink-0">
+                        <div>
+                          <a class="fw-semibold text-decoration-none" href="{{ url_for('menu.detail', item_id=line.menu_item.id) }}">{{ line.menu_item.name }}</a>
+                          <div class="small text-secondary">{{ line.menu_item.category.name }}</div>
+                        </div>
+                      </div>
                     {% else %}
                       <span class="text-secondary">Item #{{ line.menu_item_id }}</span>
                       <div><span class="badge text-bg-secondary">No longer available</span></div>
@@ -66,16 +71,17 @@
         </div>
       </div>
 
-      <form method="post" action="{{ url_for('cart.clear') }}" class="mt-3">
+      <form method="post" action="{{ url_for('cart.clear') }}" class="mt-3"
+            data-confirm="Clear your cart?" data-confirm-body="Every item will be removed." data-confirm-ok="Clear cart" data-confirm-cancel="Keep items">
         {{ clear_form.csrf_token }}
         <button type="submit" class="btn btn-sm btn-outline-danger">Clear cart</button>
       </form>
     </div>
 
     <div class="col-lg-4">
-      <div class="card shadow-sm">
+      <div class="card">
         <div class="card-body">
-          <h2 class="h6 text-uppercase text-secondary">Summary</h2>
+          <h2 class="qj-eyebrow mb-3">Summary</h2>
           <dl class="row mb-3">
             <dt class="col-7 fw-normal">Items</dt>
             <dd class="col-5 text-end mb-1">{{ cart.item_count }}</dd>
@@ -86,14 +92,15 @@
             Prices are taken from the menu when you check out.
           </p>
           <div class="d-grid">
-            <a class="btn btn-primary" href="{{ url_for('orders.checkout_page') }}">Go to checkout</a>
+            <a class="btn btn-primary btn-lg" href="{{ url_for('orders.checkout_page') }}">Go to checkout <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i></a>
           </div>
         </div>
       </div>
     </div>
   </div>
 {% else %}
-  <div class="qj-empty border rounded-3 bg-white">
+  <div class="qj-empty">
+    <div class="qj-empty__icon" aria-hidden="true"><i class="bi bi-bag"></i></div>
     <h2 class="h5">Your cart is empty.</h2>
     <p class="mb-3">Add something from the menu to get started.</p>
     <a class="btn btn-primary" href="{{ url_for('menu.index') }}">Browse the menu</a>

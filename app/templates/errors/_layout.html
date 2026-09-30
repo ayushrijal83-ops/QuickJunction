@@ -1,26 +1,19 @@
-{# Shared shell for every error page.
-
-   One card, one clear sentence, and a way out. Deliberately plain: an error
-   page that tries to be clever is worse than one that tells you what to do
-   next. Uses only the Bootstrap already vendored for the rest of the app. #}
+{# Shared shell for every error page: a clear code, one sentence, and a way
+   out. It renders inside the normal layout (navigation intact), so an error
+   never feels like the site broke. #}
 {% extends "base.html" %}
 
 {% block content %}
-  <div class="row justify-content-center py-4">
-    <div class="col-12 col-md-8 col-lg-6">
-      <div class="card shadow-sm">
-        <div class="card-body text-center p-4 p-md-5">
-          <p class="display-4 fw-bold text-secondary mb-2">{% block code %}{{ status }}{% endblock %}</p>
-          <h1 class="h4 mb-3">{% block heading %}Something went wrong{% endblock %}</h1>
-          <p class="text-secondary mb-4">{% block explanation %}{{ message }}{% endblock %}</p>
-          <div class="d-flex flex-wrap justify-content-center gap-2">
-            {% block actions %}
-              <a class="btn btn-primary" href="{{ url_for('main.home') }}">Go to the home page</a>
-              <a class="btn btn-outline-secondary" href="{{ url_for('menu.index') }}">Browse the menu</a>
-            {% endblock %}
-          </div>
-        </div>
-      </div>
+  <div class="qj-error qj-reveal">
+    <div class="qj-error__icon" aria-hidden="true"><i class="bi bi-{% block icon %}signpost-split{% endblock %}"></i></div>
+    <p class="qj-error__code mb-2">{% block code %}{{ status }}{% endblock %}</p>
+    <h1 class="h2 mb-3">{% block heading %}Something went wrong{% endblock %}</h1>
+    <p class="text-secondary mb-4 mx-auto" style="max-width:48ch">{% block explanation %}{{ message }}{% endblock %}</p>
+    <div class="d-flex flex-wrap justify-content-center gap-2">
+      {% block actions %}
+        <a class="btn btn-primary" href="{{ url_for('main.home') }}"><i class="bi bi-house me-1" aria-hidden="true"></i>Go to the home page</a>
+        <a class="btn btn-outline-secondary" href="{{ url_for('menu.index') }}">Browse the menu</a>
+      {% endblock %}
     </div>
   </div>
 {% endblock %}

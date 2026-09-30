@@ -1,67 +1,93 @@
 {% extends "base.html" %}
-{% from "partials/_dashboard.html" import kpi, action, section %}
+{% from "partials/_dashboard.html" import kpi, action, section, empty, greeting %}
 {% block title %}{% block dash_title %}Staff dashboard{% endblock %} &mdash; Quick Junction{% endblock %}
+{% block ops_context %}{{ local_now().strftime("%A, %d %B %Y") }}{% endblock %}
+
+{% set occupied = namespace(n=0) %}
+{% for status, n in table_counts.items() %}{% if status.value == "occupied" %}{% set occupied.n = n %}{% endif %}{% endfor %}
+{% set total_tables = table_counts.values() | sum %}
 
 {% block content %}
-<div class="qj-page-header">
+<div class="qj-page-header qj-reveal">
   <div>
     <div class="qj-eyebrow">{% block eyebrow %}Staff dashboard{% endblock %}</div>
-    <h1 class="h3">Welcome, {{ user.username }}</h1>
+    <h1>{{ greeting() }}, {{ user.username }}</h1>
+    <p class="text-secondary mb-0">{% block subtitle %}Today&rsquo;s operations at a glance.{% endblock %}</p>
   </div>
   <div class="d-flex flex-wrap gap-2">
-    {{ action("Kitchen", url_for('kitchen.board'), primary=true) }}
-    {{ action("Order queue", url_for('staff_orders.order_list')) }}
-    {{ action("Tables", url_for('tables.board')) }}
+    {{ action("Kitchen", url_for('kitchen.board'), primary=true, icon="fire") }}
+    {{ action("Order queue", url_for('staff_orders.order_list'), icon="receipt") }}
+    {{ action("Tables", url_for('tables.board'), icon="grid-3x3-gap") }}
   </div>
 </div>
 
 {% block business %}{% endblock %}
 
-<h2 class="h6 qj-eyebrow mb-2">Kitchen now</h2>
+<div class="row g-3 mb-4 qj-reveal qj-reveal-2">
+  {{ kpi("Active orders", kitchen.values() | sum, "in the kitchen now", url_for('kitchen.board'), "accent", "fire", "col-6 col-md-4 col-xl") }}
+  {{ kpi("Occupied tables", occupied.n ~ " / " ~ total_tables, "seated right now", url_for('tables.board'), "", "people", "col-6 col-md-4 col-xl") }}
+  {{ kpi("Reservations", todays_reservations | length, "confirmed for today", url_for('reservations.staff_list'), "", "calendar-event", "col-6 col-md-4 col-xl") }}
+  {{ kpi("Low stock", low_stock | length, "ingredients at or below minimum", url_for('inventory.stock'), "warn" if low_stock else "", "box-seam", "col-6 col-md-6 col-xl") }}
+  {{ kpi("Orders today", orders_today, completed_today ~ " completed", url_for('staff_orders.order_list'), "", "receipt", "col-12 col-md-6 col-xl") }}
+</div>
+
+<h2 class="qj-eyebrow mb-2">Kitchen now</h2>
 <div class="row g-3 mb-4">
+  {% set icons = {"pending": "hourglass-split", "confirmed": "check2", "preparing": "fire", "ready": "bell"} %}
   {% for status, count in kitchen.items() %}
     {{ kpi({"pending": "New", "confirmed": "Confirmed", "preparing": "Preparing", "ready": "Ready to serve"}[status.value],
-           count, href=url_for('kitchen.board'), variant="accent" if status.value == "ready" and count else "") }}
+           count, href=url_for('kitchen.board'), variant="accent" if status.value == "ready" and count else "", icon=icons[status.value]) }}
   {% endfor %}
 </div>
 
 <div class="row g-4">
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
-      {{ section("Tables", "Board", url_for('tables.board')) }}
+    <div class="card h-100">
+      {{ section("Tables", "Board", url_for('tables.board'), "grid-3x3-gap") }}
+      <div class="card-body pb-2">
+        {% if total_tables %}
+          <div class="qj-stack mb-2" role="img" aria-label="Table status distribution">
+            {% for status, n in table_counts.items() %}{% if n %}<span class="qj-fill--{{ status.value }}" style="width: {{ (n * 100 / total_tables) | round(1) }}%"></span>{% endif %}{% endfor %}
+          </div>
+        {% endif %}
+      </div>
       <ul class="list-group list-group-flush">
         {% for status, n in table_counts.items() %}
-          <li class="list-group-item d-flex justify-content-between">{% include "partials/_table_status_badge.html" %}<span>{{ n }}</span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center">{% include "partials/_table_status_badge.html" %}<span class="fw-semibold qj-num">{{ n }}</span></li>
         {% endfor %}
       </ul>
     </div>
   </div>
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
-      {{ section("Today's reservations", "All", url_for('reservations.staff_list')) }}
+    <div class="card h-100">
+      {{ section("Today's reservations", "All", url_for('reservations.staff_list'), "calendar-event") }}
       <ul class="list-group list-group-flush">
         {% for r in todays_reservations[:6] %}
-          <li class="list-group-item d-flex justify-content-between">
-            <span>{{ r.reservation_time.strftime("%H:%M") }} &middot; {{ r.table.name }}</span>
-            <span class="small text-secondary">{{ r.user.username }}, {{ r.guest_count }}</span>
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span><span class="fw-semibold qj-num">{{ r.reservation_time.strftime("%H:%M") }}</span> &middot; {{ r.table.name }}</span>
+            <span class="small text-secondary"><i class="bi bi-person me-1" aria-hidden="true"></i>{{ r.user.username }}, {{ r.guest_count }}</span>
           </li>
         {% else %}
-          <li class="list-group-item text-secondary">None booked for today.</li>
+          <li class="list-group-item">{{ empty("calendar", "None booked for today.", "New bookings will appear here.", compact=true) }}</li>
         {% endfor %}
       </ul>
     </div>
   </div>
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
-      {{ section("Low stock", "Inventory", url_for('inventory.stock')) }}
+    <div class="card h-100">
+      {{ section("Low stock", "Inventory", url_for('inventory.stock'), "box-seam") }}
       <ul class="list-group list-group-flush">
         {% for i in low_stock[:6] %}
-          <li class="list-group-item d-flex justify-content-between">
-            <a href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">{{ i.name }}</a>
-            <span class="{{ 'text-danger fw-semibold' if i.current_quantity < 0 else 'text-warning-emphasis' }}">{{ i.current_quantity | round(3) }} {{ i.unit.value }}</span>
+          {% set pct = [100, (i.current_quantity * 100 / i.minimum_quantity) if i.minimum_quantity > 0 else 0] | min %}
+          <li class="list-group-item">
+            <div class="d-flex justify-content-between mb-1">
+              <a class="fw-semibold text-decoration-none" href="{{ url_for('inventory.detail', ingredient_id=i.id) }}">{{ i.name }}</a>
+              <span class="small {{ 'text-danger fw-semibold' if i.current_quantity < 0 else 'text-warning-emphasis' }}">{{ i.current_quantity | round(3) }} {{ i.unit.value }}</span>
+            </div>
+            <div class="qj-meter {{ 'qj-meter--short' if i.current_quantity <= 0 else 'qj-meter--low' }}" aria-hidden="true"><span style="width: {{ [pct, 0] | max }}%"></span></div>
           </li>
         {% else %}
-          <li class="list-group-item text-secondary">Everything is stocked.</li>
+          <li class="list-group-item">{{ empty("check2-circle", "Everything is stocked.", compact=true) }}</li>
         {% endfor %}
       </ul>
     </div>

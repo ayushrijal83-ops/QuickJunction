@@ -10,24 +10,31 @@
 </nav>
 
 <div class="row justify-content-center">
-  <div class="col-lg-6">
-    <div class="card shadow-sm">
+  <div class="col-lg-7 col-xl-6">
+    <div class="card overflow-hidden qj-reveal">
+      <div class="qj-hero qj-hero--card rounded-0">
+        <img class="qj-hero__img" src="{{ scene_image('reserve') }}" alt="" width="1600" height="900">
+        <div class="d-flex flex-wrap w-100 justify-content-between align-items-end gap-2">
+          <div>
+            <p class="qj-eyebrow mb-1">Reservation #{{ r.id }}</p>
+            <h1 class="h2 mb-0">{{ "Reservation confirmed" if r.status.value == "confirmed" else "Reservation #" ~ r.id }}</h1>
+          </div>
+          {% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}
+        </div>
+      </div>
       <div class="card-body p-4">
-        <h1 class="h4 mb-3">
-          {{ "Reservation confirmed" if r.status.value == "confirmed" else "Reservation #" ~ r.id }}
-        </h1>
-        <dl class="row mb-0">
-          <dt class="col-5 fw-normal text-secondary">Table</dt><dd class="col-7">{{ r.table.name }}</dd>
-          <dt class="col-5 fw-normal text-secondary">Date</dt><dd class="col-7">{{ r.reservation_date.strftime("%a %d %b %Y") }}</dd>
-          <dt class="col-5 fw-normal text-secondary">Time</dt><dd class="col-7">{{ r.reservation_time.strftime("%H:%M") }}</dd>
-          <dt class="col-5 fw-normal text-secondary">Guests</dt><dd class="col-7">{{ r.guest_count }}</dd>
-          <dt class="col-5 fw-normal text-secondary">Reserved by</dt><dd class="col-7">{{ r.user.username }}</dd>
-          <dt class="col-5 fw-normal text-secondary">Reserved at</dt><dd class="col-7">{{ r.reserved_at.strftime("%d %b %Y, %H:%M:%S") }}</dd>
-          <dt class="col-5 fw-normal text-secondary">Status</dt>
-          <dd class="col-7 mb-0">{% with status = r.status %}{% include "partials/_reservation_badge.html" %}{% endwith %}</dd>
+        <dl class="qj-facts mb-3">
+          <div><dt>Table</dt><dd>{{ r.table.name }}</dd></div>
+          <div><dt>Date</dt><dd>{{ r.reservation_date.strftime("%a %d %b %Y") }}</dd></div>
+          <div><dt>Time</dt><dd>{{ r.reservation_time.strftime("%H:%M") }}</dd></div>
+          <div><dt>Guests</dt><dd>{{ r.guest_count }}</dd></div>
+          <div><dt>Reserved by</dt><dd>{{ r.user.username }}</dd></div>
+          <div><dt>Reserved at</dt><dd>{{ r.reserved_at.strftime("%d %b %Y, %H:%M:%S") }}</dd></div>
         </dl>
         {% if can_cancel %}
-          <form method="post" action="{{ url_for('reservations.cancel', reservation_id=r.id) }}" class="mt-4">
+          <form method="post" action="{{ url_for('reservations.cancel', reservation_id=r.id) }}" class="mt-4"
+                data-confirm="Cancel this reservation?" data-confirm-body="Your table will be released for other guests. This cannot be undone."
+                data-confirm-ok="Cancel reservation" data-confirm-cancel="Keep reservation">
             {{ form.csrf_token }}
             <button class="btn btn-outline-danger w-100" type="submit">Cancel reservation</button>
           </form>

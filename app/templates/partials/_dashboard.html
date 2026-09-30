@@ -1,9 +1,10 @@
-{# Dashboard building blocks (M15). Presentation only. #}
+{# Dashboard and page building blocks. Presentation only. #}
 
-{% macro kpi(label, value, note=none, href=none, variant="") %}
-  <div class="col-6 col-lg-3">
-    {% if href %}<a class="text-decoration-none text-reset d-block h-100" href="{{ href }}">{% endif %}
-    <div class="qj-kpi {{ 'qj-kpi--' ~ variant if variant else '' }} {{ 'qj-tile' if href else '' }}">
+{% macro kpi(label, value, note=none, href=none, variant="", icon=none, col="col-6 col-lg-3") %}
+  <div class="{{ col }}">
+    {% if href %}<a class="qj-tile h-100 rounded-4" href="{{ href }}">{% endif %}
+    <div class="qj-kpi {{ 'qj-kpi--' ~ variant if variant else '' }}">
+      {% if icon %}<span class="qj-kpi__icon" aria-hidden="true"><i class="bi bi-{{ icon }}"></i></span>{% endif %}
       <div class="qj-kpi__label">{{ label }}</div>
       <div class="qj-kpi__value">{{ value }}</div>
       {% if note %}<div class="qj-kpi__note">{{ note }}</div>{% endif %}
@@ -12,13 +13,41 @@
   </div>
 {% endmacro %}
 
-{% macro action(label, href, primary=false) %}
-  <a class="btn btn-sm {{ 'btn-primary' if primary else 'btn-outline-primary' }}" href="{{ href }}">{{ label }}</a>
+{% macro action(label, href, primary=false, icon=none) %}
+  <a class="btn btn-sm {{ 'btn-primary' if primary else 'btn-outline-secondary' }}" href="{{ href }}">{% if icon %}<i class="bi bi-{{ icon }} me-1" aria-hidden="true"></i>{% endif %}{{ label }}</a>
 {% endmacro %}
 
-{% macro section(title, link_label=none, link_href=none) %}
-  <div class="card-header bg-white d-flex justify-content-between align-items-center">
-    <h2 class="qj-section-title">{{ title }}</h2>
-    {% if link_href %}<a class="small" href="{{ link_href }}">{{ link_label }}</a>{% endif %}
+{% macro section(title, link_label=none, link_href=none, icon=none) %}
+  <div class="card-header d-flex justify-content-between align-items-center gap-2">
+    <h2 class="qj-section-title">{% if icon %}<i class="bi bi-{{ icon }} me-2 text-secondary" aria-hidden="true"></i>{% endif %}{{ title }}</h2>
+    {% if link_href %}<a class="small fw-semibold text-decoration-none" href="{{ link_href }}">{{ link_label }} <i class="bi bi-arrow-right" aria-hidden="true"></i></a>{% endif %}
   </div>
 {% endmacro %}
+
+{# Empty state: an icon, a heading, a helpful sentence and a way forward. #}
+{% macro empty(icon, title, text=none, cta_label=none, cta_href=none, compact=false) %}
+  <div class="qj-empty {{ 'qj-empty--compact' if compact }}">
+    <div class="qj-empty__icon" aria-hidden="true"><i class="bi bi-{{ icon }}"></i></div>
+    <h2 class="{{ 'h6' if compact else 'h5' }}">{{ title }}</h2>
+    {% if text %}<p class="{{ 'small mb-2' if compact else 'mb-3' }}">{{ text }}</p>{% endif %}
+    {% if cta_href %}<a class="btn {{ 'btn-sm btn-outline-primary' if compact else 'btn-primary' }}" href="{{ cta_href }}">{{ cta_label }}</a>{% endif %}
+  </div>
+{% endmacro %}
+
+{# Order progress. Expects an Order; a cancelled order shows no stepper. #}
+{% set ORDER_STEPS = ("pending", "confirmed", "preparing", "ready", "served", "completed") %}
+{% macro steps(order) %}
+  {% if order.status.value in ORDER_STEPS %}
+    {% set at = ORDER_STEPS.index(order.status.value) %}
+    <ol class="qj-steps" aria-label="Order progress">
+      {% for s in ORDER_STEPS %}
+        <li class="{{ 'is-done' if loop.index0 < at else ('is-current' if loop.index0 == at else '') }}"{% if loop.index0 == at %} aria-current="step"{% endif %}><span>{{ s | capitalize }}</span></li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+{% endmacro %}
+
+{# Greeting by the server clock (cosmetic). #}
+{% macro greeting() -%}{% set now = local_now() %}
+  {{ "Good morning" if now.hour < 12 else ("Good afternoon" if now.hour < 17 else "Good evening") }}
+{%- endmacro %}

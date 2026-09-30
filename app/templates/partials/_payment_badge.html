@@ -1,0 +1,11 @@
+{# Payment state of an order. Expects `payment` (a Payment row or none).
+   Derived only from the stored amounts; the text is the authoritative value. #}
+{%- if not payment -%}
+  <span class="qj-status qj-status--unpaid badge"><i class="bi bi-hourglass" aria-hidden="true"></i>Unpaid</span>
+{%- elif payment.fully_refunded -%}
+  <span class="qj-status qj-status--refunded badge"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Fully refunded</span>
+{%- elif payment.refunded_amount > 0 -%}
+  <span class="qj-status qj-status--partial badge"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Partially refunded</span>
+{%- else -%}
+  <span class="qj-status qj-status--paid badge"><i class="bi bi-check-circle" aria-hidden="true"></i>Paid</span>
+{%- endif -%}

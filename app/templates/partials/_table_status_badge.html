@@ -1,10 +1,7 @@
-{# Table status badge. Expects `status` (a TableStatus member). Colour is
-   presentation only -- the text is the authoritative value. #}
-{%- set _styles = {
-  "available":      "bg-success-subtle text-success-emphasis border-success-subtle",
-  "occupied":       "bg-danger-subtle text-danger-emphasis border-danger-subtle",
-  "reserved":       "bg-info-subtle text-info-emphasis border-info-subtle",
-  "cleaning":       "bg-warning-subtle text-warning-emphasis border-warning-subtle",
-  "out_of_service": "bg-secondary-subtle text-secondary-emphasis border-secondary-subtle",
+{# Table status badge. Expects `status` (a TableStatus member). Colour and
+   icon are presentation only -- the text is the authoritative value. #}
+{%- set _icons = {
+  "available": "check-circle", "occupied": "people-fill", "reserved": "bookmark-star",
+  "cleaning": "stars", "out_of_service": "slash-circle",
 } -%}
-<span class="badge border {{ _styles.get(status.value, 'bg-secondary-subtle text-secondary-emphasis') }} text-uppercase">{{ status.value.replace("_", " ") }}</span>
+<span class="qj-status qj-status--{{ status.value }} badge"><i class="bi bi-{{ _icons.get(status.value, 'circle') }}" aria-hidden="true"></i>{{ status.value.replace("_", " ") }}</span>

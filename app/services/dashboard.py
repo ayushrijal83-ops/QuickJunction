@@ -13,6 +13,8 @@ query logic and no new money arithmetic. Data scope follows RBAC:
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from app.extensions import db
 from app.models.order import OrderStatus
 from app.models.reservation import ReservationStatus
@@ -74,6 +76,8 @@ def admin() -> dict:
     data.update(
         today=report,
         month=totals_for(today.replace(day=1), today),
+        # Trend and hourly-activity charts: the same report, over 7 days.
+        week=build_report(today - timedelta(days=6), today, "Last 7 days"),
         pending_staff=db.session.query(User).filter_by(role=Role.STAFF, staff_approved=False).count(),
     )
     return data
