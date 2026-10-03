@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-03**, release **v0.9.0** (audited prototype baseline).
+Last reviewed: **2026-10-03**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`).
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -54,7 +54,7 @@ Overall: **NOT READY FOR PRODUCTION.**
 | D7 | Health / readiness checks | IN PROGRESS | `/health` liveness only | Readiness check covering DB, Redis and migration head; not public |
 | D8 | Logging | IN PROGRESS | Rotating `app.log` / `security.log` inside the code directory | Logs outside the code tree, rotated, request IDs |
 | D9 | Monitoring | NOT STARTED | — | Uptime check, error tracking, disk/CPU/memory, backup-job and certificate alerts — each alert tested once |
-| D10 | Admin bootstrap | NOT STARTED | No production path (demo seed refuses production) | `create-admin` command, tested |
+| D10 | Admin bootstrap | READY (application) | M1: `flask create-admin` — interactive only, hidden password prompts, existing username/email/password rules, Argon2id, account + `admin_created` audit row in one transaction; `tests/test_create_admin.py` passes on SQLite and MySQL 8.0 | Re-verify once on the production stack during the first installation (O2) |
 
 ## 3. Data protection
 
@@ -97,7 +97,7 @@ No capacity statement may be published until these are measured.
 | # | Item | Status | Current state (evidence) | Required for READY |
 | --- | --- | --- | --- | --- |
 | O1 | Restaurant configuration | NOT STARTED | Slots, currency, branding are code constants | Admin-editable settings |
-| O2 | Admin bootstrap | NOT STARTED | See D10 | Owner account created on the installation; first-login password change |
+| O2 | Admin bootstrap | BLOCKED (by S2, D1) | Command exists (D10); no installation yet; no password change, so the owner cannot replace an operator-chosen password | Owner account created on the installation with `flask create-admin`; owner able to change the password (S2) |
 | O3 | Staff onboarding | BLOCKED (by S4) | — | Staff invited and able to sign in |
 | O4 | Menu setup | IN PROGRESS | Admin menu/category/ingredient/recipe/table management exists and is tested | Restaurant's real menu, tables and tax rate entered and reviewed |
 | O5 | Backup verification | BLOCKED (by P1–P4) | — | First backup restored successfully before go-live |

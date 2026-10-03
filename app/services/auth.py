@@ -15,6 +15,7 @@ from app.extensions import db
 from app.models.user import Role, User
 from app.services.errors import ValidationError
 from app.utils.security import (
+    USERNAME_PATTERN,
     hash_password,
     normalize_email,
     normalize_username,
@@ -42,14 +43,9 @@ class RegistrationInput:
     password_confirm: str
 
 
-def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
-    """Create a CUSTOMER account, or -- when the *route* passes
-    ``as_staff=True`` -- a STAFF account that starts unapproved and cannot
-    sign in until an admin approves it. Never an admin: there is no code path
-    from a request to ``Role.ADMIN``."""
-    username = normalize_username(data.username)
-    email = normalize_email(data.email)
-
+def _account_errors(data: RegistrationInput, username: str, email: str) -> dict[str, list[str]]:
+    """Password policy, confirmation and duplicate checks shared by every way
+    an account is created. ``username``/``email`` are already normalized."""
     errors: dict[str, list[str]] = {}
 
     if password_errors := password_policy_errors(data.password):
@@ -59,13 +55,23 @@ def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
 
     # Pre-check for a friendly, field-specific message. The database's
     # unique constraint is the real backstop against the race between this
-    # check and the insert below.
+    # check and the insert that follows.
     if db.session.query(User.id).filter_by(username=username).first() is not None:
         errors.setdefault("username", []).append("That username is already taken.")
     if db.session.query(User.id).filter_by(email=email).first() is not None:
         errors.setdefault("email", []).append("That email is already registered.")
+    return errors
 
-    if errors:
+
+def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
+    """Create a CUSTOMER account, or -- when the *route* passes
+    ``as_staff=True`` -- a STAFF account that starts unapproved and cannot
+    sign in until an admin approves it. Never an admin: no HTTP route can
+    create one (admins come only from ``create_admin``, the CLI path)."""
+    username = normalize_username(data.username)
+    email = normalize_email(data.email)
+
+    if errors := _account_errors(data, username, email):
         raise RegistrationError(errors)
 
     user = User(
@@ -83,6 +89,63 @@ def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
         # Lost the pre-check race against a concurrent registration.
         raise RegistrationError({"_general": ["That username or email is already registered."]})
 
+    return user
+
+
+def create_admin(data: RegistrationInput) -> User:
+    """Create an ADMIN account -- the ``flask create-admin`` path, never HTTP.
+
+    Same password policy, confirmation, normalization, duplicate checks and
+    Argon2id hashing as ``register_user``. Because no web form sits in front
+    of this function, it also applies the form-layer rules itself: the
+    username pattern and email syntax (the same ``email_validator`` package
+    the registration form's ``Email()`` uses).
+
+    The account and its ``admin_created`` audit row are written in **one
+    transaction**: either both commit or neither does, so a failure can leave
+    neither a half-created admin nor an orphaned audit row.
+    """
+    # Local imports: audit sits beside this module in the service layer and
+    # email_validator is only needed on this path.
+    from email_validator import EmailNotValidError, validate_email
+
+    from app.models.audit_log import AuditEvent
+    from app.services.audit import mirror_to_security_log, record_event
+
+    errors: dict[str, list[str]] = {}
+    if not USERNAME_PATTERN.fullmatch((data.username or "").strip()):
+        errors["username"] = ["Username must be 3-32 characters: letters, digits or underscores."]
+    raw_email = (data.email or "").strip()
+    try:
+        if len(raw_email) > 255:
+            raise EmailNotValidError("too long")
+        validate_email(raw_email, check_deliverability=False)
+    except EmailNotValidError:
+        errors["email"] = ["Enter a valid email address."]
+
+    username = normalize_username(data.username or "")
+    email = normalize_email(raw_email)
+    for field, messages in _account_errors(data, username, email).items():
+        errors.setdefault(field, []).extend(messages)
+    if errors:
+        raise RegistrationError(errors)
+
+    user = User(username=username, email=email, password_hash=hash_password(data.password),
+                role=Role.ADMIN, staff_approved=False)
+    try:
+        db.session.add(user)
+        db.session.flush()  # assigns user.id for the audit row
+        entry = record_event(AuditEvent.ADMIN_CREATED, success=True, user_id=user.id,
+                             metadata={"source": "cli"}, commit=False)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        # Lost the pre-check race against a concurrent registration.
+        raise RegistrationError({"_general": ["That username or email is already registered."]})
+    except Exception:
+        db.session.rollback()
+        raise
+    mirror_to_security_log(entry)
     return user
 
 

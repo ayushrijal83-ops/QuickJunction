@@ -11,6 +11,7 @@ from datetime import datetime
 
 from flask import Flask
 
+from app.cli import register_cli
 from app.extensions import csrf, db, migrate
 from app.routes import register_blueprints
 from app.utils.authorization import get_current_user
@@ -63,6 +64,7 @@ def create_app(config_name: str | None = None) -> Flask:
     app.jinja_env.globals["local_now"] = datetime.now
     register_security_headers(app)
     register_blueprints(app)
+    register_cli(app)
 
     # So a template can show/hide admin-only controls without every route
     # passing the user in explicitly. Still just a display convenience --

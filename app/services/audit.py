@@ -27,7 +27,15 @@ def record_event(
     ip_address: str | None = None,
     user_agent: str | None = None,
     metadata: dict | None = None,
+    commit: bool = True,
 ) -> AuditLog:
+    """Write one audit row.
+
+    ``commit=False`` only adds the row to the caller's session, so it commits
+    or rolls back together with the change it describes; the caller then
+    owns the commit and the security-log mirror (see
+    ``app/services/auth.create_admin``).
+    """
     if metadata:
         leaked = _FORBIDDEN_METADATA_KEYS & metadata.keys()
         if leaked:
@@ -44,14 +52,18 @@ def record_event(
         metadata_json=metadata_json,
     )
     db.session.add(entry)
+    if not commit:
+        return entry
     db.session.commit()
-
-    # Mirrored to a log file, not just the database: a compromised or
-    # unavailable database should not be the only way to lose visibility
-    # into auth activity.
-    level = "info" if success else "warning"
-    getattr(get_security_logger(), level)(
-        "%s user_id=%s ip=%s", event_type.value, user_id, ip_address
-    )
-
+    mirror_to_security_log(entry)
     return entry
+
+
+def mirror_to_security_log(entry: AuditLog) -> None:
+    """Mirrored to a log file, not just the database: a compromised or
+    unavailable database should not be the only way to lose visibility into
+    auth activity. Call only after the row has committed."""
+    level = "info" if entry.success else "warning"
+    getattr(get_security_logger(), level)(
+        "%s user_id=%s ip=%s", entry.event_type.value, entry.user_id, entry.ip_address
+    )
