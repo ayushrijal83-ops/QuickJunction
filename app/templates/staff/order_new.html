@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}New order &mdash; Quick Junction Staff{% endblock %}
+
+{% block ops_context %}Service &middot; new order{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('staff_orders.order_list') }}">Order queue</a></li>
+    <li class="breadcrumb-item active" aria-current="page">New order</li>
+  </ol>
+</nav>
+
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">Service</div>
+    <h1>New order</h1>
+    <p class="text-secondary mb-0">Dine-in or takeaway. Prices come from the menu and are recalculated when the order is created.</p>
+  </div>
+</div>
+
+{% set chosen_source = form.source.data or "dine_in" %}
+<form method="post" action="{{ url_for('staff_orders.order_new') }}" novalidate>
+  {{ form.csrf_token }}
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header"><h2 class="qj-section-title">Menu</h2></div>
+        {% if items %}
+          <div class="table-responsive qj-scroll">
+            <table class="table align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">Item</th>
+                  <th scope="col" class="text-end">Price</th>
+                  <th scope="col" class="text-center" style="width: 7rem">Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in items %}
+                  <tr>
+                    <td><label for="qty_{{ item.id }}" class="mb-0">{{ item.name }}</label>
+                        <span class="small text-secondary">&middot; {{ item.category.name }}</span></td>
+                    <td class="text-end qj-price">{{ item.price | money }}</td>
+                    <td><input class="form-control form-control-sm text-center" type="number" inputmode="numeric"
+                               min="1" max="{{ max_qty }}" step="1" name="qty_{{ item.id }}" id="qty_{{ item.id }}"
+                               value="{{ cart.get(item.id | string, '') }}"></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="card-body text-secondary">No dishes are available right now.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card mb-3">
+        <div class="card-body">
+          <fieldset class="mb-3">
+            <legend class="qj-eyebrow mb-2">Order type</legend>
+            {% for source in sources %}
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="source" id="source-{{ source.value }}"
+                       value="{{ source.value }}" {% if source.value == chosen_source %}checked{% endif %}>
+                <label class="form-check-label" for="source-{{ source.value }}">{{ source.value.replace("_", "-") | capitalize }}</label>
+              </div>
+            {% endfor %}
+          </fieldset>
+          <div class="mb-3">
+            <label class="form-label" for="table_id">Table (dine-in only)</label>
+            <select class="form-select" name="table_id" id="table_id">
+              <option value="">No table</option>
+              {% for table in tables %}
+                <option value="{{ table.id }}" {% if form.table_id.data == table.id | string %}selected{% endif %}>
+                  {{ table.name }} ({{ table.capacity }} seats{% if table.status.value == "reserved" %}, reserved{% endif %})</option>
+              {% endfor %}
+            </select>
+            {% if not tables %}<div class="form-text">No table is free to seat right now.</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      {% if view %}
+        <div class="card mb-3">
+          <div class="card-header"><h2 class="qj-section-title">Current order</h2></div>
+          <ul class="list-group list-group-flush">
+            {% for line in view.lines %}
+              <li class="list-group-item d-flex justify-content-between">
+                {% if line.menu_item %}
+                  <span>{{ line.menu_item.name }} &times; {{ line.quantity }}</span>
+                  <span class="qj-price">{{ line.line_total | money }}</span>
+                {% else %}
+                  <span>Item #{{ line.menu_item_id }} <span class="badge text-bg-secondary">No longer available</span></span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+          <div class="card-body">
+            {% set tax_rate, tax_amount, total = pricing_preview %}
+            <dl class="row mb-0">
+              <dt class="col-7 fw-normal">Subtotal</dt><dd class="col-5 text-end qj-price mb-1">{{ view.subtotal | money }}</dd>
+              <dt class="col-7 fw-normal">Tax ({{ tax_rate }}%)</dt><dd class="col-5 text-end qj-price mb-1">{{ tax_amount | money }}</dd>
+              <dt class="col-7">Total</dt><dd class="col-5 text-end qj-price h5 mb-0">{{ total | money }}</dd>
+            </dl>
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="d-grid gap-2">
+        <button class="btn btn-outline-secondary" type="submit" name="action" value="review">Review totals</button>
+        {% if view and not view.has_unavailable %}
+          <button class="btn btn-success btn-lg" type="submit" name="action" value="create">Create order</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}

@@ -164,6 +164,37 @@ def test_reservation_cap_holds_under_concurrent_bookings(app, db):
         assert _db.session.query(Reservation).filter_by(user_id=owner_id).count() == limit
 
 
+def test_two_staff_seating_one_table_exactly_one_wins(app, db):
+    """M3: two staff members submit a dine-in order for the same free table at
+    the same instant. The table-row lock in checkout makes the second wait,
+    re-read OCCUPIED and be refused -- never two open orders on one table."""
+    from app.models.restaurant_table import RestaurantTable, TableStatus
+    from app.services.orders import CheckoutError, place_staff_order
+    from tests.conftest import make_menu_item
+
+    staff_ids = [make_user(username=f"waiter{i}", email=f"waiter{i}@example.com", role=Role.STAFF).id
+                 for i in (1, 2)]
+    item_id = make_menu_item(name="Race Dish", price="100.00").id
+
+    for round_no in range(ROUNDS):
+        table_id = create_table(f"SEAT{round_no:02d}", 4).id
+
+        def seat(staff_id):
+            def act():
+                try:
+                    place_staff_order(_db.session.get(User, staff_id), {str(item_id): 1}, "dine_in", table_id)
+                    return "ok"
+                except CheckoutError as exc:
+                    return "refused" if "table_id" in exc.errors else f"other:{exc.errors}"
+            return act
+
+        results = _race(app, seat(staff_ids[0]), seat(staff_ids[1]))
+        assert sorted(map(str, results)) == ["ok", "refused"], results
+        _db.session.rollback()  # end this session's snapshot before verifying
+        assert _db.session.query(Order).filter_by(table_id=table_id).count() == 1
+        assert _db.session.get(RestaurantTable, table_id).status == TableStatus.OCCUPIED
+
+
 # --- Milestone 11: payments ------------------------------------------------------------
 
 

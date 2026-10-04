@@ -91,6 +91,12 @@ a client. CI reports these advisories without failing.
 | SQLite after M2 | **804 passed, 8 skipped, 0 failed** (8 = MySQL-only concurrency tests) |
 | MySQL 8.0.46 after M2 (disposable container) | **811 passed, 1 skipped, 0 failed** (skip = known issue #32) |
 | MySQL concurrency after M2 | **8 of 8 executed and passed** (stable over 5 consecutive runs) |
+| M3 — staff order entry | `/staff/orders/new` (STAFF/ADMIN): dine-in or takeaway over the existing `checkout()`; seatable tables only (AVAILABLE/RESERVED, no open order), checked on a `FOR UPDATE`-locked row; server-side prices and 1–20 quantities; `order_created` audit in the same transaction. Details: `docs/SECURITY.md` §19 |
+| Migration head after M3 | **`a7c2e9d4b1f3`** — unchanged (M3 needs no schema change) |
+| Tests collected after M3 | **861** (48 new in `tests/test_m3_staff_orders.py`, 1 new MySQL race) |
+| SQLite after M3 | **852 passed, 9 skipped, 0 failed** (9 = MySQL-only concurrency tests) |
+| MySQL 8.0.46 after M3 (disposable container) | **860 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| MySQL concurrency after M3 | **9 of 9 executed and passed** (stable over 5 consecutive runs) |
 | Dependency audit (M2 re-run) | runtime: no known vulnerabilities; AI stack: same 13 advisories, accepted for the disabled-by-default optional model (`docs/SECURITY.md` §18.9) |
 
 ---
@@ -160,5 +166,5 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | 35 / 36 | Stock checked not reserved; no ingredient costs |
 | 37 | No order notes |
 | — | Runtime DB account also holds DDL privileges; public `/register/staff` (from the 2026-10-03 audit; scheduled for Phase 1). Customer dine-in and the reservation cap were closed in M2 |
-| — | No staff HTTP order-entry screen: since M2 the customer checkout cannot create dine-in orders and staff cannot use it, so dine-in orders exist only via the `checkout()` service |
+| — | No "add items to an open order": a seated table takes one open order at a time (M3), so a party's follow-up order needs a new order once the table is freed |
 | — | AI-stack dependency advisories (above) |

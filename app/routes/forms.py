@@ -132,6 +132,15 @@ class CheckoutForm(FlaskForm):
     submit = SubmitField("Place order")
 
 
+class StaffOrderForm(FlaskForm):
+    """Staff order entry (M3). Only the order type and table are fields here;
+    quantities arrive as ``qty_<menu item id>`` and are parsed by the route.
+    Plain strings again: app/services/orders.py is the one validator."""
+
+    source = StringField(validators=[Optional(), Length(max=16)])
+    table_id = StringField(validators=[Optional(), Length(max=12)])
+
+
 class CancelOrderForm(FlaskForm):
     reason = StringField("Reason (optional)", validators=[Optional(), Length(max=255)])
     submit = SubmitField("Cancel order")

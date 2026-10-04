@@ -26,8 +26,11 @@ ALLOWED_TABLE_TRANSITIONS: dict[TableStatus, frozenset[TableStatus]] = {
     S.OUT_OF_SERVICE: frozenset({S.AVAILABLE}),
 }
 
-# A dine-in order may not be seated at a table staff have closed off.
-UNSEATABLE_STATUSES = frozenset({S.CLEANING, S.OUT_OF_SERVICE})
+# Statuses from which a new party may be seated (M3): exactly those the
+# lifecycle above allows to move to OCCUPIED -- AVAILABLE and RESERVED (staff
+# seating the party the table was held for). OCCUPIED, CLEANING and
+# OUT_OF_SERVICE are refused. Derived, so the two can never disagree.
+SEATABLE_STATUSES = frozenset(s for s, targets in ALLOWED_TABLE_TRANSITIONS.items() if S.OCCUPIED in targets)
 
 ACTIVE_ORDER_STATUSES = (
     OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.SERVED,
@@ -107,8 +110,26 @@ def list_tables() -> list[RestaurantTable]:
     return db.session.query(RestaurantTable).order_by(RestaurantTable.name).all()
 
 
+def has_active_order(table_id: int) -> bool:
+    return db.session.query(Order.id).filter(
+        Order.table_id == table_id, Order.status.in_(ACTIVE_ORDER_STATUSES)
+    ).first() is not None
+
+
+def is_free_to_seat(table: RestaurantTable) -> bool:
+    """A new dine-in party may sit here: the lifecycle allows the move to
+    OCCUPIED and no unfinished order is still on the table (a table set back
+    to AVAILABLE by hand while an order was open must not be seated twice).
+    Authoritative only when ``table`` was read under a row lock -- see
+    app/services/orders.py::_lock_table_for_seating."""
+    return table.status in SEATABLE_STATUSES and not has_active_order(table.id)
+
+
 def seatable_tables() -> list[RestaurantTable]:
-    return [t for t in list_tables() if t.status not in UNSEATABLE_STATUSES]
+    """Tables a new dine-in party could be seated at right now -- what the
+    staff order-entry page offers. Display only; checkout re-checks."""
+    busy = set(active_orders_by_table())
+    return [t for t in list_tables() if t.status in SEATABLE_STATUSES and t.id not in busy]
 
 
 def active_orders_by_table() -> dict[int, Order]:
