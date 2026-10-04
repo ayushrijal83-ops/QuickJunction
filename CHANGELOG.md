@@ -41,6 +41,12 @@ Each release uses only the sections that apply, in this order:
 - `app/services/audit.commit_with` and `login_identifier` (M2).
 - `tests/test_m2_security.py` (72 tests) and a MySQL reservation-cap race
   test; CI now expects 8 MySQL concurrency tests.
+- **Staff order entry** (M3, `/staff/orders/new`, STAFF/ADMIN): dine-in or
+  takeaway, eligible tables only, "Review totals" then "Create order", built
+  on the existing `checkout()`. "New order" button on the order queue;
+  staff-entered orders show as "Walk-in". `tests/test_m3_staff_orders.py`
+  (48 tests) and a MySQL two-staff same-table race test; CI now expects 9
+  MySQL concurrency tests.
 - `docs/STATUS.md` — verified current state and baseline record.
 - `docs/PRODUCTION_READINESS.md` — go-live checklist.
 - `docs/RELEASE_PROCESS.md` — branching, tagging, changelog and intended
@@ -72,6 +78,10 @@ Each release uses only the sections that apply, in this order:
   included.
 - **M2:** failed-login and rate-limited audit rows store
   `{"login_id": <keyed hash>}` instead of the typed username.
+
+- **M3:** a dine-in order may only seat a table that is AVAILABLE or
+  RESERVED and has no open order; the check runs on a row-locked read inside
+  `checkout()`. Seating an OCCUPIED table is now refused for every caller.
 
 ### Removed
 
@@ -112,8 +122,8 @@ Each release uses only the sections that apply, in this order:
   the proxy's IP. Leave it at 0 otherwise.
 - **M2:** to keep AI explanations on (e.g. a development machine or demo), set
   `LLM_ENABLED=true`. They are now off by default.
-- **M2:** staff can no longer take dine-in orders through `/checkout`, and
-  there is no replacement screen yet. Plan pilot operations accordingly.
+- **M2/M3:** staff take dine-in and takeaway orders at **Orders → New order**
+  (`/staff/orders/new`), not `/checkout`.
 
 ## [0.9.0] — 2026-10-03
 

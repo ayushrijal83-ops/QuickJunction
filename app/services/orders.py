@@ -39,7 +39,7 @@ from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available
 from app.services.errors import ValidationError
 from app.services.inventory import deduct_for_order, shortages
 from app.services.pricing import current_settings, price
-from app.services.tables import UNSEATABLE_STATUSES, release_table_if_idle
+from app.services.tables import is_free_to_seat, release_table_if_idle
 
 MAX_DISTINCT_LINES = 30
 
@@ -69,9 +69,11 @@ def _parse_cart(cart: dict[str, int]) -> list[_Line]:
 def resolve_order_channel(raw_source, raw_table_id) -> tuple[OrderSource, int | None]:
     """Validate a client-supplied (source, table) pair.
 
-    DINE_IN requires an existing, seatable table; every other source must not
-    carry one. Both are re-checked by ``ck_orders_source_table`` in the
-    database, so a bypass of this function still cannot store a mismatch.
+    DINE_IN requires an existing table; every other source must not carry
+    one. Both are re-checked by ``ck_orders_source_table`` in the database,
+    so a bypass of this function still cannot store a mismatch. Whether the
+    table is free to seat is decided later, under a row lock
+    (``_lock_table_for_seating``).
     """
     try:
         source = OrderSource(raw_source or OrderSource.ONLINE.value)
@@ -95,9 +97,27 @@ def resolve_order_channel(raw_source, raw_table_id) -> tuple[OrderSource, int | 
     table = db.session.get(RestaurantTable, table_id)
     if table is None:
         raise CheckoutError({"table_id": ["Unknown table."]})
-    if table.status in UNSEATABLE_STATUSES:
-        raise CheckoutError({"table_id": [f"Table {table.name} is not available right now."]})
     return source, table.id
+
+
+def _lock_table_for_seating(table_id: int) -> None:
+    """Lock the table row (``SELECT ... FOR UPDATE``, re-read from the
+    database) and refuse unless a new party may be seated there.
+
+    This is the guard for two staff seating one table at once: the second
+    waits on the lock until the first commits, then reads OCCUPIED and is
+    refused. A locking read sees the latest committed status even under
+    MySQL's REPEATABLE READ, so a page rendered while the table was free
+    cannot overwrite a later state. On refusal the transaction is rolled
+    back, releasing the lock."""
+    table = db.session.execute(
+        sa.select(RestaurantTable).where(RestaurantTable.id == table_id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    if not is_free_to_seat(table):
+        name = table.name
+        db.session.rollback()
+        raise CheckoutError({"table_id": [f"Table {name} is not free to seat right now. Choose another table."]})
 
 
 # What a customer may order through the customer checkout (M2). DINE_IN is
@@ -123,6 +143,28 @@ def checkout_as_customer(customer: User, cart: dict[str, int], source=None, tabl
     if source not in CUSTOMER_ORDER_SOURCES:
         raise CheckoutError({"source": ["Choose takeaway or online. For dine-in, our staff will take your order."]})
     return checkout(customer.id, cart, source, None, audit=audit)
+
+
+# What staff may enter at the till (M3): a seated party or a collection
+# order. ONLINE is the customer's own channel; DELIVERY is out of the pilot.
+STAFF_ORDER_SOURCES = frozenset({OrderSource.DINE_IN, OrderSource.TAKEAWAY})
+
+
+def place_staff_order(actor: User, cart: dict[str, int], source=None, table_id=None, *,
+                      audit=None) -> Order:
+    """Staff order entry: ``checkout`` for a STAFF/ADMIN actor, DINE_IN or
+    TAKEAWAY only. The order is owned by the acting staff account (walk-in
+    guests have no account). Prices, availability, stock, the table lock and
+    the seating transition are all ``checkout``'s -- nothing is duplicated."""
+    if actor.role not in (Role.STAFF, Role.ADMIN):
+        raise CheckoutError({"account": ["Only staff can enter orders here."]})
+    try:
+        source = OrderSource(source or "")
+    except ValueError:
+        raise CheckoutError({"source": ["Choose dine-in or takeaway."]})
+    if source not in STAFF_ORDER_SOURCES:
+        raise CheckoutError({"source": ["Choose dine-in or takeaway."]})
+    return checkout(actor.id, cart, source, table_id, audit=audit)
 
 
 def checkout(
@@ -176,6 +218,8 @@ def checkout(
     # Re-validated here, not only in the route: the channel rule is a
     # business rule, and callers other than the checkout route exist.
     source, table_id = resolve_order_channel(source, table_id)
+    if table_id is not None:
+        _lock_table_for_seating(table_id)  # held until the commit below
     # Read before the order is built: a query here would autoflush a
     # half-priced order row and trip ck_orders_total_formula.
     tax_rate = current_settings()[0]
@@ -213,8 +257,9 @@ def checkout(
         tax_amount, total = price(subtotal, Decimal("0.00"), tax_rate)
         order.subtotal, order.tax_rate, order.tax_amount, order.total = subtotal, tax_rate, tax_amount, total
         if table_id is not None:
-            # A party ordering at a table means it is in use. Freeing it again
-            # (CLEANING -> AVAILABLE) is a staff action on the table board.
+            # The seating transition (AVAILABLE/RESERVED -> OCCUPIED), on the
+            # row locked above. Freeing it again (CLEANING -> AVAILABLE) is a
+            # staff action on the table board.
             db.session.get(RestaurantTable, table_id).status = TableStatus.OCCUPIED
         commit_with(audit, order)
     except SQLAlchemyError:

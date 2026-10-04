@@ -11,6 +11,7 @@ from flask import g
 
 from app.extensions import db as _db
 from app.models.order import Order, OrderSource, OrderStatus
+from app.models.restaurant_table import TableStatus
 from app.models.user import Role
 from app.services.sales import ReportRangeError, build_report, db_today, resolve_range, totals_for
 from app.services.tables import create_table
@@ -34,6 +35,10 @@ def order(user, price: str, qty: int = 1, status=OrderStatus.COMPLETED, when: da
     item = make_menu_item(category=category, name=f"Dish {category.name}", price=price)
     placed = checkout(user.id, {str(item.id): qty}, source, table_id)
     placed.status = status
+    if placed.table is not None and status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
+        # The status is written directly, so do what the real workflow does
+        # when a party leaves: free the table (M3 refuses to seat an occupied one).
+        placed.table.status = TableStatus.AVAILABLE
     if when is not None:
         placed.created_at = when
     _db.session.commit()

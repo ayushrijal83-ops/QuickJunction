@@ -227,7 +227,11 @@ def test_table_released_only_when_last_active_order_finishes(db):
     user = customer()
     table = create_table("T05", 4)
     first = place(user, source=OrderSource.DINE_IN, table_id=table.id)
-    second = place(user, source=OrderSource.DINE_IN, table_id=table.id)
+    # M3: checkout refuses to seat an occupied table, so two open orders on
+    # one table can only be legacy data -- written directly here.
+    second = place(user, source=OrderSource.DINE_IN, table_id=create_table("T05b", 4).id)
+    second.table_id = table.id
+    _db.session.commit()
     set_status(first, OrderStatus.READY)
     update_order_status(first, OrderStatus.COMPLETED)
     assert table.status == TableStatus.OCCUPIED  # second party still eating

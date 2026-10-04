@@ -1007,8 +1007,8 @@ any table row is read:
 So no crafted request can change floor state. The checkout page no longer
 renders a table selector or the dine-in option, but that is presentation
 only. The underlying `checkout()` still accepts DINE_IN with a table: it is
-the staff-side primitive (OCCUPIED on order, CLEANING when finished). **There
-is currently no staff HTTP screen that calls it** — see 18.10.
+the staff-side primitive (OCCUPIED on order, CLEANING when finished). Since
+M3 it is reached from the web only through staff order entry (§19).
 
 ### 18.3 Reservation cap
 
@@ -1140,11 +1140,81 @@ The same `pip-audit` commands as CI, run with pip-audit 2.10.1 on 2026-10-04:
 
 ### 18.10 Remaining (not M2)
 
-- **No staff HTTP order-entry screen.** Before M2, dine-in orders were
-  created by whoever used `/checkout`, including staff signed in as
-  themselves. Both paths are now closed, so dine-in orders can only be
-  created by calling `checkout()` directly. A staff/QR ordering flow is
-  later-phase work.
+- ~~No staff HTTP order-entry screen~~ — **done in M3** (§19).
 - Shared-store (Redis) rate limiting, password change/reset, staff
   invitations, DB privilege separation, audit retention, and deployment
   (Nginx/TLS) are all still open: see `PRODUCTION_READINESS.md`.
+
+---
+
+## 19. Staff order entry (M3)
+
+M2 closed the customer dine-in path. M3 adds the controlled replacement:
+`GET/POST /staff/orders/new` (`app/routes/staff_orders.py::order_new`). Tests
+are in `tests/test_m3_staff_orders.py`; the two-staff race runs on MySQL in
+`tests/test_mysql_concurrency.py`
+(`test_two_staff_seating_one_table_exactly_one_wins`).
+
+**Operational boundary**
+
+| Who | Path | Order types | Tables |
+| --- | --- | --- | --- |
+| CUSTOMER | `/checkout` | takeaway, online | never; any `table_id` refused |
+| STAFF, ADMIN | `/staff/orders/new` | dine-in, takeaway | dine-in only, server-checked |
+
+Customers cannot assign tables. Staff order entry is the only web path that
+creates a dine-in order.
+
+- **Roles.** `require_role(STAFF, ADMIN)`, the same decorator as the rest of
+  the staff order routes: anonymous callers get 401 (a login redirect in a
+  browser) and customers get 403, for GET and POST alike. `place_staff_order`
+  re-checks the role and allows only DINE_IN or TAKEAWAY. No new role was
+  added.
+- **One order engine.** `place_staff_order` validates the actor and the
+  source, then calls the existing `checkout()`. Prices, availability
+  (available item in an active category), the per-item quantity bounds
+  (1–20, `app/services/cart.py`), stock shortages, tax, the order and item
+  rows and the audit row all come from that one function.
+- **Who owns the order.** Walk-in guests have no account, so the order's
+  `user_id` is the staff member who entered it. The queue labels these rows
+  "Walk-in"; the kitchen board shows no account names at all.
+- **Seating rule.** A table can take a new party only if the lifecycle allows
+  its move to OCCUPIED, and it has no unfinished order.
+  - Statuses: AVAILABLE or RESERVED are seatable (`SEATABLE_STATUSES` is
+    derived from `ALLOWED_TABLE_TRANSITIONS`, so the two cannot drift).
+    RESERVED is seatable because staff are seating the party the table was
+    held for.
+  - Refused: OCCUPIED, CLEANING, OUT_OF_SERVICE, and a table set back to
+    AVAILABLE by hand while its order was still open.
+  - The page offers only seatable tables, but the server never trusts the
+    dropdown.
+- **Locking.** In `checkout()` the dine-in table row is read with
+  `SELECT ... FOR UPDATE` before the order is built, and the rule is checked
+  on that locked, freshly read row. A concurrent second seating waits, then
+  reads OCCUPIED and is refused; the lock is released on the refusal's
+  rollback or on commit. The same check makes a stale page (table free when
+  rendered, taken since) fail safely.
+  - With the lock removed, the MySQL race test fails.
+  - Isolation is unchanged.
+  - This also applies to any other caller of `checkout()` with a table:
+    seating an already-occupied table is refused everywhere.
+- **Tampering.** Only `qty_<menu item id>` fields, `source` and `table_id`
+  are read. A posted price, subtotal, total or discount is never looked at.
+  - A quantity must match `^\d{1,6}$` and be within 1–20. A blank box means
+    "not ordered"; 0, a negative number, a decimal, `1e3`, hex and
+    out-of-range values all get a 400 with nothing written.
+  - "Review totals" recomputes from the live menu and writes nothing.
+  - "Create order" re-prices again, so a price change between review and
+    create is charged at the current menu price.
+- **Atomicity.** The table lock, order, items, OCCUPIED transition and
+  `order_created` audit row are one transaction (M2 `commit_with`). A failure
+  anywhere rolls back all of them, and the user sees a generic message with
+  no SQL or driver text.
+- **Audit.** The existing `order_created` event, no new event type. Metadata
+  is `{"order_id", "total", "source", "table_id", "actor"}`, with `user_id`
+  set to the acting staff member. A refused attempt writes an independent
+  `order_creation_failed` row with `{"actor"}` only.
+
+**Not covered (by design, for now):** adding items to an order that is
+already open. A seated party's follow-up order needs either a new order
+after the table is freed, or a future "add to order" feature.

@@ -8,9 +8,12 @@
   <div>
     <div class="qj-eyebrow">Service</div>
     <h1>Order queue</h1>
-    <p class="text-secondary mb-0">All customer orders, newest first.</p>
+    <p class="text-secondary mb-0">All orders, newest first.</p>
   </div>
-  <a class="btn btn-primary" href="{{ url_for('kitchen.board') }}"><i class="bi bi-fire me-1" aria-hidden="true"></i>Kitchen display</a>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-success" href="{{ url_for('staff_orders.order_new') }}"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New order</a>
+    <a class="btn btn-primary" href="{{ url_for('kitchen.board') }}"><i class="bi bi-fire me-1" aria-hidden="true"></i>Kitchen display</a>
+  </div>
 </div>
 
 {% if orders %}
@@ -36,7 +39,8 @@
               <th scope="row" class="fw-semibold">#{{ order.id }}</th>
               {# Username only -- staff need to identify the customer, not to
                  read their email address. #}
-              <td>{{ order.customer.username }}</td>
+              {# Staff-entered orders (M3) are owned by the staff account. #}
+              <td>{% if order.customer.role.value == "customer" %}{{ order.customer.username }}{% else %}<span class="text-secondary">Walk-in &middot; {{ order.customer.username }}</span>{% endif %}</td>
               <td class="text-secondary">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</td>
               <td>{{ order.source.value.replace("_", "-") | capitalize }}{% if order.table %} &middot; {{ order.table.name }}{% endif %}</td>
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
@@ -57,7 +61,7 @@
   <div class="qj-empty">
     <div class="qj-empty__icon" aria-hidden="true"><i class="bi bi-receipt"></i></div>
     <h2 class="h5">No orders yet</h2>
-    <p class="mb-0">Orders placed by customers will appear here.</p>
+    <p class="mb-0">Orders placed by customers or entered by staff will appear here.</p>
   </div>
 {% endif %}
 {% endblock %}

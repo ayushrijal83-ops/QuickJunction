@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`) and M2 (Phase 1A security hardening).
+Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening) and M3 (staff order entry).
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -30,7 +30,7 @@ Overall: **NOT READY FOR PRODUCTION.**
 | S3 | Account management | NOT STARTED | No admin UI to list/deactivate users; `is_active` cannot be set by the app | Admin list/search/deactivate/reactivate with session revocation; last-admin protection; audited; tests |
 | S4 | Staff onboarding security | NOT STARTED | Public `/register/staff` with admin approval | Invitation-only staff accounts; public staff sign-up removed |
 | S5 | Authorization | READY (application) | `require_role` on every non-public route; owner-scoped customer queries; tests across role boundaries | Re-verify after each Phase 1 change |
-| S6 | Dine-in abuse protection | READY (application) | M2: customer checkout is CUSTOMER-only and takeaway/online only; any `table_id` refused server-side; crafted-request tests incl. RESERVED and unknown tables (`tests/test_m2_security.py`, `docs/SECURITY.md` §18.2). Note: no staff HTTP order-entry screen exists for dine-in | Customer checkout cannot occupy tables; tests |
+| S6 | Dine-in abuse protection | READY (application) | M2: customer checkout is CUSTOMER-only and takeaway/online only; any `table_id` refused server-side; crafted-request tests incl. RESERVED and unknown tables (`tests/test_m2_security.py`, `docs/SECURITY.md` §18.2). M3: dine-in is created only through staff order entry (STAFF/ADMIN), which seats a table under a row lock; MySQL two-staff race test (`docs/SECURITY.md` §19) | Customer checkout cannot occupy tables; tests |
 | S7 | Reservation abuse protection | READY (application) | M2: `RESERVATION_ACTIVE_LIMIT` (default 2 active future CONFIRMED) under a `users`-row lock; MySQL race test passes 15/15 rounds × 5 runs and fails without the lock (`docs/SECURITY.md` §18.3) | Per-account cap enforced under concurrency (MySQL test) |
 | S8 | Secret management | NOT STARTED | `.env` file; production location and rotation undocumented | Secrets in a root-owned 0600 file outside the code tree; rotation procedure documented; no real credentials in comments |
 | S9 | Audit integrity | IN PROGRESS | M2: business change and audit row commit in one transaction (`commit_with`), failure-injection tests; independent auth events commit separately (`docs/SECURITY.md` §18.4). Retention job not started | Same-transaction audit for business events; retention job |
@@ -105,5 +105,5 @@ No capacity statement may be published until these are measured.
 | O7 | Smoke test | NOT STARTED | Test-client end-to-end flows exist (`tests/test_demo_flow.py`) | Scripted smoke test against the live installation: order → kitchen → payment → report |
 | O8 | Support runbook | NOT STARTED | — | Common incidents with exact steps; remote-access policy |
 | O9 | Staff training | NOT STARTED | — | Admin, staff and kitchen guides; training session held |
-| O10 | Product gaps for pilot | NOT STARTED | No order notes, receipts, kitchen auto-refresh; delivery to be removed for pilot | Pilot-critical items (roadmap Phase 6a) done |
+| O10 | Product gaps for pilot | IN PROGRESS | M3: staff order entry for dine-in/takeaway (`/staff/orders/new`). Still missing: order notes, receipts, kitchen auto-refresh, adding items to an open order. Delivery is already closed to customers (M2) | Pilot-critical items (roadmap Phase 6a) done |
 | O11 | Go-live sign-off | NOT STARTED | — | Every item above READY or a signed exception; rollback plan agreed |

@@ -18,23 +18,31 @@ order's real current status regardless of what was posted.
 
 from __future__ import annotations
 
+import re
+
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.models.audit_log import AuditEvent
 from app.models.user import Role
 from app.models.payment import PaymentMethod
-from app.routes.forms import DiscountForm, OrderStatusForm, PaymentForm, RefundForm
+from app.routes.forms import DiscountForm, OrderStatusForm, PaymentForm, RefundForm, StaffOrderForm
 from app.services.audit import record_event
+from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, build_cart_view
+from app.services.menu import list_public_menu_items
 from app.services.payments import PaymentError, record_payment, refund_payment
-from app.services.pricing import PricingError, apply_discount, current_settings
+from app.services.pricing import PricingError, apply_discount, current_settings, preview
 from app.services.orders import (
+    STAFF_ORDER_SOURCES,
+    CheckoutError,
     OrderStatusError,
     allowed_next_statuses,
     coerce_status,
     get_order_for_staff,
     list_orders_for_staff,
+    place_staff_order,
     update_order_status,
 )
+from app.services.tables import seatable_tables
 from app.utils.authorization import get_current_user, require_role
 from app.utils.request_meta import client_ip, user_agent
 
@@ -45,6 +53,106 @@ staff_orders_bp = Blueprint("staff_orders", __name__, url_prefix="/staff")
 @require_role(Role.STAFF, Role.ADMIN)
 def order_list():
     return render_template("staff/order_list.html", orders=list_orders_for_staff())
+
+
+_QTY_FIELD = re.compile(r"^qty_(\d{1,9})$")
+_QTY_VALUE = re.compile(r"^\d{1,6}$")
+
+
+def _posted_cart(form_data) -> tuple[dict[str, int], list[str]]:
+    """``qty_<menu item id>`` fields -> the same {id: quantity} cart shape the
+    customer checkout uses. Blank means "not ordered"; anything else must be
+    a whole number in the existing per-item bounds. Every other posted field
+    (a price, a total, ...) is simply never read."""
+    cart: dict[str, int] = {}
+    errors: list[str] = []
+    for key, raw in form_data.items():
+        match = _QTY_FIELD.match(key)
+        if match is None or not raw.strip():
+            continue
+        raw = raw.strip()
+        quantity = int(raw) if _QTY_VALUE.match(raw) else None
+        if quantity is None or not MIN_QUANTITY <= quantity <= MAX_QUANTITY_PER_ITEM:
+            errors.append(f"Quantities must be whole numbers from {MIN_QUANTITY} to {MAX_QUANTITY_PER_ITEM}.")
+            continue
+        cart[match.group(1)] = quantity
+    if not cart and not errors:
+        errors.append("Add at least one item.")
+    return cart, errors[:1]
+
+
+def _order_entry_page(form: StaffOrderForm, cart: dict[str, int], review: bool = False):
+    view = build_cart_view(cart) if review else None
+    return render_template(
+        "staff/order_new.html",
+        form=form,
+        items=list_public_menu_items(),
+        tables=seatable_tables(),
+        sources=sorted(STAFF_ORDER_SOURCES, key=lambda s: s.value),
+        cart=cart,
+        max_qty=MAX_QUANTITY_PER_ITEM,
+        view=view,
+        pricing_preview=preview(view.subtotal) if view else None,  # display only; checkout recomputes
+    )
+
+
+@staff_orders_bp.route("/orders/new", methods=["GET", "POST"])
+@require_role(Role.STAFF, Role.ADMIN)
+def order_new():
+    """Staff order entry (M3): the controlled path for dine-in, plus
+    takeaway. One stateless form -- the menu with a quantity box per dish.
+    "Review" re-renders it with server-computed totals and writes nothing;
+    "Create order" goes through ``place_staff_order`` -> ``checkout``, which
+    re-reads every price, checks availability and stock, locks and seats the
+    table, and commits the ORDER_CREATED audit row in the same transaction."""
+    form = StaffOrderForm()
+    if request.method == "GET":
+        return _order_entry_page(form, {})
+    if not form.validate_on_submit():
+        flash("Could not read the order. Please try again.", "error")
+        return redirect(url_for("staff_orders.order_new"))
+
+    cart, errors = _posted_cart(request.form)
+    if errors:
+        for message in errors:
+            flash(message, "error")
+        return _order_entry_page(form, cart), 400
+    if request.form.get("action") != "create":
+        return _order_entry_page(form, cart, review=True)
+
+    actor = get_current_user()
+
+    def audit(order):
+        return record_event(
+            AuditEvent.ORDER_CREATED,
+            success=True,
+            user_id=actor.id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"order_id": order.id, "total": str(order.total), "source": order.source.value,
+                      "table_id": order.table_id, "actor": actor.role.value},
+        )
+
+    try:
+        order = place_staff_order(actor, cart, form.source.data, form.table_id.data, audit=audit)
+    except CheckoutError as exc:
+        record_event(
+            AuditEvent.ORDER_CREATION_FAILED,
+            success=False,
+            user_id=actor.id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"actor": actor.role.value},
+            commit=True,  # independent: nothing was written
+        )
+        for messages in exc.errors.values():
+            for message in messages:
+                flash(message, "error")
+        return _order_entry_page(form, cart), 409
+
+    where = f" for {order.table.name}" if order.table else ""
+    flash(f"Order #{order.id} created{where}. Total {order.total}.", "success")
+    return redirect(url_for("staff_orders.order_detail", order_id=order.id))
 
 
 @staff_orders_bp.get("/orders/<int:order_id>")
