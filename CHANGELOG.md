@@ -24,6 +24,15 @@ Each release uses only the sections that apply, in this order:
 
 ### Added
 
+- **`flask create-admin`** (M1): the production way to create an
+  administrator. Interactive only — prompts for username, email and password
+  (hidden, entered twice); refuses to run without a terminal and never takes
+  the password as an argument or from piped input. Reuses the web
+  registration rules (username pattern, email syntax, password policy,
+  duplicate checks) and Argon2id hashing. The account and its audit row are
+  written in one transaction. Documented in `docs/DATABASE_SETUP_GUIDE.md` §14.
+- `admin_created` audit event, recorded by `flask create-admin` (metadata:
+  `{"source": "cli"}` only).
 - `docs/STATUS.md` — verified current state and baseline record.
 - `docs/PRODUCTION_READINESS.md` — go-live checklist.
 - `docs/RELEASE_PROCESS.md` — branching, tagging, changelog and intended
@@ -42,12 +51,28 @@ Each release uses only the sections that apply, in this order:
 - `README.md`: "Project status" no longer says "feature-complete and
   released"; it states the v0.9.0 not-production-ready baseline.
 
+- `app/services/audit.record_event` accepts `commit=False` so an audit row can
+  share the caller's transaction (used by `create_admin`; every existing caller
+  keeps the previous behaviour).
+
 ### Fixed
 
 - `README.md`: the `scripts\reset_database.bat` path was corrupted (a
   carriage-return byte had replaced `\r`).
 
-No application code, configuration, dependency or migration changed.
+### Migration
+
+- `a7c2e9d4b1f3` (revises `f3a6d9b2e8c5`): widens the `ck_audit_logs_event_type`
+  CHECK constraint to allow `admin_created`. No table or column change; quick on
+  any database size. Reversible: `downgrade()` deletes `admin_created` audit rows
+  (the admin accounts themselves are kept) and restores the previous list.
+
+### Operator action required
+
+- Run `flask db upgrade` (new head `a7c2e9d4b1f3`). Until it is applied,
+  `flask create-admin` fails with a CHECK-constraint error and creates nothing.
+- Create administrators with `flask create-admin` from an interactive terminal on
+  the server. Do not promote accounts with SQL.
 
 ## [0.9.0] — 2026-10-03
 

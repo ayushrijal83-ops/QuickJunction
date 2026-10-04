@@ -89,6 +89,11 @@ class AuditEvent(str, enum.Enum):
     STOCK_MOVEMENT_RECORDED = "stock_movement_recorded"
     RECIPE_UPDATED = "recipe_updated"
 
+    # Admin bootstrap (M1, ``flask create-admin``). user_id is the new admin;
+    # there is no acting account -- the operator is whoever has a shell on
+    # the server -- so metadata only records the source.
+    ADMIN_CREATED = "admin_created"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

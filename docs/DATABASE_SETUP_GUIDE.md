@@ -442,9 +442,25 @@ administrators at `/login/admin`.
   (Admin → Staff accounts) before it can sign in.
 - **Administrators cannot sign up.** There is no public admin registration by design.
 
-**Getting the first administrator — two ways:**
+**Getting the first administrator:**
 
-1. **Demo data (development only).** Answer **Y** to "Load demo data now?" during
+1. **`flask create-admin` (use this on every real installation).** From the project
+   folder, in an interactive terminal, after `flask db upgrade`:
+
+   ```powershell
+   .\.venv\Scripts\python -m flask --app run.py create-admin
+   ```
+
+   It asks for a username, an email and the password twice (the password is not
+   shown while typing, and it is never accepted as a command-line argument or from
+   piped input). It applies the same username, email and password rules as web
+   registration, refuses an existing username or email, stores only the Argon2id
+   hash, and records an `admin_created` event in the audit log. On success it prints
+   only the username. Use it to create the first administrator of a new
+   installation, or another administrator if none can sign in; it never changes an
+   existing account. Exit status is 1 if nothing was created.
+
+2. **Demo data (development only).** Answer **Y** to "Load demo data now?" during
    setup, or run later:
 
    ```powershell
@@ -456,14 +472,8 @@ administrators at `/login/admin`.
    is in the repository), so use these accounts only on your own computer. The script
    refuses to run in a production configuration and is safe to run more than once.
 
-2. **Promote your own account.** Register a normal customer account at `/register`,
-   then, inside `mysql -u root -p`:
-
-   ```sql
-   UPDATE quick_junction.users SET role = 'admin' WHERE username = 'your_username';
-   ```
-
-   Sign in at `/login/admin`. (Roles are stored as `admin`, `staff`, `customer`.)
+Do not promote an account to `admin` with SQL: it bypasses the password rules and
+leaves no audit record.
 
 ---
 

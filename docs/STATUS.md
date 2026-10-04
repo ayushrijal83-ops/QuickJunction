@@ -75,6 +75,19 @@ a client. CI reports these advisories without failing.
 
 ---
 
+## Unreleased changes since v0.9.0
+
+| Item | Value |
+| --- | --- |
+| M1 — production admin bootstrap | `flask create-admin` (`app/cli.py`, `app/services/auth.create_admin`), 14 tests in `tests/test_create_admin.py` |
+| Migration head | **`a7c2e9d4b1f3`** (12 linear revisions) — adds `admin_created` to the audit-event CHECK |
+| Tests collected | **739** |
+| SQLite | **732 passed, 7 skipped, 0 failed** (7 = MySQL-only concurrency tests) |
+| MySQL 8.0 (disposable container) | **738 passed, 1 skipped, 0 failed** (skip = known issue #32); all 7 concurrency tests executed and passed |
+| Dependencies | unchanged since v0.9.0 |
+
+---
+
 ## What exists today (verified against the code)
 
 **Stack:** Flask 3.1 app factory, SQLAlchemy 2.0, Alembic via Flask-Migrate,
@@ -83,12 +96,12 @@ Flask-WTF CSRF, scikit-learn TF-IDF recommender, optional local Qwen3-0.6B +
 LoRA **v4** explanations.
 
 **Size:** 18 blueprints · 14 model modules / 14 tables · 17 service modules ·
-51 templates · 31 audit event types · 7 order statuses · 4 order sources ·
+51 templates · 32 audit event types · 7 order statuses · 4 order sources ·
 3 roles (admin, staff, customer).
 
 **Features present and covered by tests:** registration and login (three
 sign-in portals), server-side session revocation, staff sign-up with admin
-approval, public menu with category filter and an in-page (client-side) dish
+approval, administrator creation via `flask create-admin` (CLI only), public menu with category filter and an in-page (client-side) dish
 filter, session cart, checkout with server-side pricing and tax, order history
 and customer cancellation, staff order workflow (atomic status transitions),
 kitchen board, tables, reservations (fixed slots), payments and admin refunds,
@@ -105,7 +118,7 @@ separately. The LLM is disabled in tests and enabled by default in development.
 ## What does NOT exist (do not assume it does)
 
 Production deployment configuration (WSGI service, reverse proxy, TLS,
-systemd, Docker) · a way to create the first admin in production · admin user
+systemd, Docker) · admin user
 management (deactivate, reset, role change) · password change / reset · email
 of any kind · multi-worker-safe rate limiting · `ProxyFix` · automated backups,
 restore scripts · upgrade/rollback tooling · version endpoint · pagination on
@@ -138,5 +151,5 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | 32 | Full downgrade to base fails on MySQL (pre-M10 revisions) |
 | 35 / 36 | Stock checked not reserved; no ingredient costs |
 | 37 | No order notes |
-| — | No production admin bootstrap; runtime DB account also holds DDL privileges; public `/register/staff`; customer dine-in can mark tables occupied; no per-customer reservation cap (all from the 2026-10-03 audit; scheduled for Phase 1) |
+| — | Runtime DB account also holds DDL privileges; public `/register/staff`; customer dine-in can mark tables occupied; no per-customer reservation cap (all from the 2026-10-03 audit; scheduled for Phase 1) |
 | — | AI-stack dependency advisories (above) |
