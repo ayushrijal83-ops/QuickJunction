@@ -1,6 +1,10 @@
 """Checkout and order history.
 
-Checkout requires an authenticated customer (``@login_required``). Order
+Checkout is for CUSTOMER accounts only (``@customer_required``; M2): staff
+and admin get 403 rather than placing orders as themselves. A customer may
+order takeaway or online only -- never dine-in and never with a table, so
+crafted form fields cannot change floor state (see
+app/services/orders.py::checkout_as_customer, which re-checks both). Order
 history and detail are scoped to the requesting user's own orders only --
 ownership is enforced inside the database query itself
 (app/services/orders.py::get_order_for_user), not checked after the fact.
@@ -14,22 +18,22 @@ from __future__ import annotations
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, url_for
 
 from app.models.audit_log import AuditEvent
-from app.models.order import OrderSource, OrderStatus
+from app.models.order import OrderStatus
 from app.routes.forms import CancelOrderForm, CheckoutForm
 from app.services.audit import record_event
 from app.services.cart import build_cart_view
 from app.services.orders import (
+    CUSTOMER_ORDER_SOURCES,
     CheckoutError,
     OrderStatusError,
     cancel_order_as_customer,
-    checkout,
+    checkout_as_customer,
     customer_can_cancel,
     get_order_for_user,
     list_orders_for_user,
 )
 from app.services.pricing import preview
-from app.services.tables import seatable_tables
-from app.utils.authorization import get_current_user, login_required
+from app.utils.authorization import customer_required, get_current_user, login_required
 from app.utils.cart import clear_cart, get_cart
 from app.utils.errors import wants_html
 from app.utils.request_meta import client_ip, user_agent
@@ -38,18 +42,16 @@ orders_bp = Blueprint("orders", __name__)
 
 
 @orders_bp.get("/checkout")
-@login_required
+@customer_required
 def checkout_page():
     cart_view = build_cart_view(get_cart())
-    # Offered for dine-in only; the service re-checks the chosen table anyway.
-    tables = seatable_tables()
     return render_template("orders/checkout.html", cart=cart_view, form=CheckoutForm(),
-                           tables=tables, sources=list(OrderSource),
+                           sources=sorted(CUSTOMER_ORDER_SOURCES, key=lambda s: s.value),
                            pricing_preview=preview(cart_view.subtotal))  # display only; checkout recomputes
 
 
 @orders_bp.post("/checkout")
-@login_required
+@customer_required
 def checkout_submit():
     form = CheckoutForm()
     user = get_current_user()
@@ -58,8 +60,12 @@ def checkout_submit():
         flash("Could not place your order.", "error")
         return redirect(url_for("orders.checkout_page"))
 
+    def audit_created(order):
+        return record_event(AuditEvent.ORDER_CREATED, success=True, user_id=user.id, ip_address=client_ip(),
+                            user_agent=user_agent(), metadata={"order_id": order.id, "total": str(order.total)})
+
     try:
-        order = checkout(user.id, get_cart(), form.source.data, form.table_id.data)
+        order = checkout_as_customer(user, get_cart(), form.source.data, form.table_id.data, audit=audit_created)
     except CheckoutError as exc:
         record_event(
             AuditEvent.ORDER_CREATION_FAILED,
@@ -67,6 +73,7 @@ def checkout_submit():
             user_id=user.id,
             ip_address=client_ip(),
             user_agent=user_agent(),
+            commit=True,  # independent: nothing was written
         )
         for messages in exc.errors.values():
             for message in messages:
@@ -74,14 +81,6 @@ def checkout_submit():
         return redirect(url_for("orders.checkout_page"))
 
     clear_cart()
-    record_event(
-        AuditEvent.ORDER_CREATED,
-        success=True,
-        user_id=user.id,
-        ip_address=client_ip(),
-        user_agent=user_agent(),
-        metadata={"order_id": order.id, "total": str(order.total)},
-    )
     flash("Order placed.", "success")
     return redirect(url_for("orders.detail", order_id=order.id))
 
@@ -121,8 +120,20 @@ def cancel(order_id: int):
         return redirect(url_for("orders.detail", order_id=order.id))
 
     previous = order.status
+
+    def audit_cancelled():
+        return record_event(
+            AuditEvent.ORDER_STATUS_CHANGED,
+            success=True,
+            user_id=user.id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"order_id": order.id, "from": previous.value, "to": OrderStatus.CANCELLED.value,
+                      "actor": "customer"},
+        )
+
     try:
-        previous = cancel_order_as_customer(order, user, form.reason.data)
+        cancel_order_as_customer(order, user, form.reason.data, audit=audit_cancelled)
     except OrderStatusError as exc:
         record_event(
             AuditEvent.ORDER_STATUS_CHANGE_REJECTED,
@@ -131,6 +142,7 @@ def cancel(order_id: int):
             ip_address=client_ip(),
             user_agent=user_agent(),
             metadata={"order_id": order.id, "from": previous.value, "attempted": "cancelled", "actor": "customer"},
+            commit=True,
         )
         message = exc.errors["status"][0]
         if not wants_html():
@@ -138,14 +150,5 @@ def cancel(order_id: int):
         flash(message, "error")
         return redirect(url_for("orders.detail", order_id=order.id))
 
-    record_event(
-        AuditEvent.ORDER_STATUS_CHANGED,
-        success=True,
-        user_id=user.id,
-        ip_address=client_ip(),
-        user_agent=user_agent(),
-        metadata={"order_id": order.id, "from": previous.value, "to": OrderStatus.CANCELLED.value,
-                  "actor": "customer"},
-    )
     flash(f"Order #{order.id} has been cancelled.", "success")
     return redirect(url_for("orders.detail", order_id=order.id))

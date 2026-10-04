@@ -113,11 +113,14 @@ def test_customer_cancel_vs_start_preparing_exactly_one_wins(app, db):
 
 
 def test_same_slot_booking_exactly_one_wins(app, db):
-    owners = [make_user(username=f"booker{i}", email=f"b{i}@example.com").id for i in (1, 2)]
     day = (db_today() + timedelta(days=1)).isoformat()
 
     for round_no in range(ROUNDS):
         table_id = create_table(f"RACE{round_no:02d}", 4).id
+        # Fresh customers each round: the per-customer cap (M2) would
+        # otherwise stop a repeat winner, and this test is about the slot.
+        owners = [make_user(username=f"booker{round_no}_{i}", email=f"b{round_no}_{i}@example.com").id
+                  for i in (1, 2)]
 
         def booker(owner_id):
             def act():
@@ -132,6 +135,33 @@ def test_same_slot_booking_exactly_one_wins(app, db):
         assert sorted(map(str, results)) == ["conflict", "ok"], results
         _db.session.rollback()
         assert _db.session.query(Reservation).filter_by(table_id=table_id, holds_slot=True).count() == 1
+
+
+def test_reservation_cap_holds_under_concurrent_bookings(app, db):
+    """M2: one customer fires four bookings at once, each for a different free
+    table. With the default cap of 2, exactly two may commit -- every round.
+    The users-row lock in create_reservation is what decides it."""
+    day = (db_today() + timedelta(days=2)).isoformat()
+    limit = app.config["RESERVATION_ACTIVE_LIMIT"]
+    attempts = limit + 2
+
+    for round_no in range(ROUNDS):
+        owner_id = make_user(username=f"flooder{round_no}", email=f"flood{round_no}@example.com").id
+        table_ids = [create_table(f"CAP{round_no:02d}{i}", 4).id for i in range(attempts)]
+
+        def booker(table_id):
+            def act():
+                try:
+                    create_reservation(_db.session.get(User, owner_id), table_id, day, "19:00", 2)
+                    return "ok"
+                except ReservationError as exc:
+                    return "capped" if "reservation" in exc.errors else f"other:{exc.errors}"
+            return act
+
+        results = _race(app, *(booker(t) for t in table_ids))
+        assert sorted(map(str, results)) == ["capped"] * (attempts - limit) + ["ok"] * limit, results
+        _db.session.rollback()  # end this session's snapshot before verifying
+        assert _db.session.query(Reservation).filter_by(user_id=owner_id).count() == limit
 
 
 # --- Milestone 11: payments ------------------------------------------------------------

@@ -110,7 +110,7 @@ def test_2_copied_cookie_cannot_authenticate_after_logout(app, client, db):
 
     assert replay(app, captured) == 401, "copied cookie still authenticates after logout"
     # Also across other protected surfaces, not just /orders.
-    assert replay(app, captured, "/account/me") == 401
+    assert replay(app, captured, "/_test/me") == 401
     assert replay(app, captured, "/preferences") == 401
 
 
@@ -121,7 +121,7 @@ def test_3_fresh_login_works_after_logout(app, client, db):
 
     login(client, "fresh_login")
     assert client.get("/orders").status_code == 200
-    assert client.get("/account/me").get_json()["username"] == "fresh_login"
+    assert client.get("/_test/me").get_json()["username"] == "fresh_login"
 
     # The new session carries the incremented version.
     _db.session.refresh(user)
@@ -133,7 +133,7 @@ def test_3_fresh_login_works_after_logout(app, client, db):
 
 def test_4_unauthenticated_request_is_still_401(client, db):
     assert client.get("/orders").status_code == 401
-    assert client.get("/account/me").status_code == 401
+    assert client.get("/_test/me").status_code == 401
     assert client.get("/preferences").status_code == 401
     assert client.get("/staff/orders").status_code == 401
 
@@ -218,7 +218,7 @@ def test_7_session_material_never_reaches_the_logs(app, client, db, caplog):
 def test_7b_session_material_never_reaches_a_response_body(app, client, db):
     make_and_login(client, "bodysafe")
     captured = capture_session(app, client)
-    for path in ("/account/", "/account/me", "/orders", "/preferences"):
+    for path in ("/account/", "/_test/me", "/orders", "/preferences"):
         body = client.get(path).get_data(as_text=True)
         assert captured not in body
         assert "session_version" not in body

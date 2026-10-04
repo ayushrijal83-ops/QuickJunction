@@ -156,10 +156,11 @@ def _resolve_path(config_key: str, default: str | None) -> Path | None:
 
 
 def is_enabled() -> bool:
+    """Opt-in only (M2): unset, or no app context, means disabled."""
     try:
-        return bool(current_app.config.get("LLM_ENABLED", True))
+        return bool(current_app.config.get("LLM_ENABLED", False))
     except RuntimeError:
-        return True
+        return False
 
 
 def _load():
@@ -647,7 +648,7 @@ def warm_up(app) -> bool:
         return False  # idempotent: create_app may be called more than once
     if app.config.get("TESTING"):
         return False
-    if not app.config.get("LLM_ENABLED", True):
+    if not app.config.get("LLM_ENABLED", False):
         return False
     if not app.config.get("LLM_WARMUP", False):
         return False

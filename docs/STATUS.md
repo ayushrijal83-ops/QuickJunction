@@ -85,6 +85,13 @@ a client. CI reports these advisories without failing.
 | SQLite | **732 passed, 7 skipped, 0 failed** (7 = MySQL-only concurrency tests) |
 | MySQL 8.0 (disposable container) | **738 passed, 1 skipped, 0 failed** (skip = known issue #32); all 7 concurrency tests executed and passed |
 | Dependencies | unchanged since v0.9.0 |
+| M2 — Phase 1A security hardening | `ProxyFix` behind `TRUSTED_PROXY_COUNT` (default 0); customer checkout CUSTOMER-only, takeaway/online only, no table; reservation cap (`RESERVATION_ACTIVE_LIMIT`, default 2) under a row lock; business change + audit row in one transaction; `/account/me|staff|admin` removed; Argon2 rehash on login; failed-login audit stores a keyed identifier, not the username; `LLM_ENABLED` defaults to false. Details: `docs/SECURITY.md` §18 |
+| Migration head after M2 | **`a7c2e9d4b1f3`** — unchanged (M2 needs no schema change) |
+| Tests collected after M2 | **812** (72 new in `tests/test_m2_security.py`, 1 new MySQL race) |
+| SQLite after M2 | **804 passed, 8 skipped, 0 failed** (8 = MySQL-only concurrency tests) |
+| MySQL 8.0.46 after M2 (disposable container) | **811 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| MySQL concurrency after M2 | **8 of 8 executed and passed** (stable over 5 consecutive runs) |
+| Dependency audit (M2 re-run) | runtime: no known vulnerabilities; AI stack: same 13 advisories, accepted for the disabled-by-default optional model (`docs/SECURITY.md` §18.9) |
 
 ---
 
@@ -113,14 +120,15 @@ no-store), audit log.
 **Local AI:** default adapter is
 `models/qwen3-0.6b-quickjunction-lora-v4` (`config.py`), behind a deterministic
 preference-safety guard. Weights (~1.3 GB) are git-ignored and must be copied
-separately. The LLM is disabled in tests and enabled by default in development.
+separately. Since M2 the LLM is **disabled by default in every environment**;
+`LLM_ENABLED=true` opts in.
 
 ## What does NOT exist (do not assume it does)
 
 Production deployment configuration (WSGI service, reverse proxy, TLS,
 systemd, Docker) · admin user
 management (deactivate, reset, role change) · password change / reset · email
-of any kind · multi-worker-safe rate limiting · `ProxyFix` · automated backups,
+of any kind · multi-worker-safe rate limiting · automated backups,
 restore scripts · upgrade/rollback tooling · version endpoint · pagination on
 the staff order queue, customer history, audit and payment views · server-side
 menu search · order notes · delivery address · receipts · restaurant
@@ -139,7 +147,7 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | --- | --- |
 | 3 | Anonymous cart discarded on login |
 | 4 | Checkout idempotency relies on cart clearing, no idempotency key |
-| 5 | Login rate limiter is in-process only; no `ProxyFix` (behind a proxy every client shares one IP) |
+| 5 | Login rate limiter is in-process only (`ProxyFix` added in M2; set `TRUSTED_PROXY_COUNT` behind a proxy) |
 | 8 | No audit-log retention job |
 | 12 / 39 | Unpaginated staff queue, customer history, admin payments/audit (200-row cap) |
 | 13 | `migrations/env.py` uses deprecated `get_engine()` (breaks on Flask-SQLAlchemy 3.2) |
@@ -151,5 +159,6 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | 32 | Full downgrade to base fails on MySQL (pre-M10 revisions) |
 | 35 / 36 | Stock checked not reserved; no ingredient costs |
 | 37 | No order notes |
-| — | Runtime DB account also holds DDL privileges; public `/register/staff`; customer dine-in can mark tables occupied; no per-customer reservation cap (all from the 2026-10-03 audit; scheduled for Phase 1) |
+| — | Runtime DB account also holds DDL privileges; public `/register/staff` (from the 2026-10-03 audit; scheduled for Phase 1). Customer dine-in and the reservation cap were closed in M2 |
+| — | No staff HTTP order-entry screen: since M2 the customer checkout cannot create dine-in orders and staff cannot use it, so dine-in orders exist only via the `checkout()` service |
 | — | AI-stack dependency advisories (above) |

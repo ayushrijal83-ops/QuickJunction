@@ -778,7 +778,7 @@ application.
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. | `DEBUG` | No — defaults to `INFO` (`DEBUG` in development) |
 | `FLASK_RUN_HOST` | Address `run.py` binds to. | `127.0.0.1` | No — defaults to `127.0.0.1` |
 | `FLASK_RUN_PORT` | Port `run.py` binds to. | `5000` | No — defaults to `5000` |
-| `LLM_ENABLED` | Master switch for AI explanations. | `true` | No — defaults to `true` |
+| `LLM_ENABLED` | Master switch for AI explanations. | `true` | No — defaults to `false` (since M2); set `true` to opt in |
 | `LLM_MODEL_PATH` | Directory of the base model weights. | `models/Qwen3-0.6B-Base` | No — built-in default is correct |
 | `LLM_ADAPTER_PATH` | Directory of the production LoRA adapter. | `models/qwen3-0.6b-quickjunction-lora-v4` | No — built-in default is correct |
 | `LLM_MAX_NEW_TOKENS` | Caps how long a generated explanation can be, which caps how long it takes. | `48` | No — defaults to `48` |

@@ -110,7 +110,7 @@ def test_7_login_succeeds_with_correct_credentials(client, db):
     make_user(username="alice", password=VALID_PASSWORD)
     response = login(client, "alice", VALID_PASSWORD)
     assert response.status_code == 302
-    me = client.get("/account/me")
+    me = client.get("/_test/me")
     assert me.status_code == 200
     assert me.get_json()["username"] == "alice"
 
@@ -119,7 +119,7 @@ def test_8_login_fails_with_wrong_password(client, db):
     make_user(username="alice", password=VALID_PASSWORD)
     response = login(client, "alice", "wrong-password-1")
     assert response.status_code == 200
-    assert client.get("/account/me").status_code == 401
+    assert client.get("/_test/me").status_code == 401
 
 
 def test_9_logout_works(client, db):
@@ -127,11 +127,11 @@ def test_9_logout_works(client, db):
     login(client, "alice", VALID_PASSWORD)
     response = client.post("/logout")
     assert response.status_code == 302
-    assert client.get("/account/me").status_code == 401
+    assert client.get("/_test/me").status_code == 401
 
 
 def test_10_unauthenticated_user_cannot_access_protected_endpoint(client):
-    response = client.get("/account/me")
+    response = client.get("/_test/me")
     assert response.status_code == 401
 
 
@@ -141,20 +141,20 @@ def test_10_unauthenticated_user_cannot_access_protected_endpoint(client):
 def test_11_customer_cannot_access_admin_endpoint(client, db):
     make_user(username="cust", password=VALID_PASSWORD, role=Role.CUSTOMER)
     login(client, "cust", VALID_PASSWORD)
-    assert client.get("/account/admin").status_code == 403
+    assert client.get("/_test/admin").status_code == 403
 
 
 def test_12_customer_cannot_access_staff_endpoint(client, db):
     make_user(username="cust", password=VALID_PASSWORD, role=Role.CUSTOMER)
     login(client, "cust", VALID_PASSWORD)
-    assert client.get("/account/staff").status_code == 403
+    assert client.get("/_test/staff").status_code == 403
 
 
 def test_13_staff_cannot_access_admin_endpoint(client, db):
     make_user(username="stf", password=VALID_PASSWORD, role=Role.STAFF)
     login(client, "stf", VALID_PASSWORD)
-    assert client.get("/account/staff").status_code == 200
-    assert client.get("/account/admin").status_code == 403
+    assert client.get("/_test/staff").status_code == 200
+    assert client.get("/_test/admin").status_code == 403
 
 
 def test_14_user_cannot_assign_themselves_admin_role(client, db):
@@ -168,7 +168,7 @@ def test_15_role_changes_are_server_side_only(client, db):
     make_user(username="cust", password=VALID_PASSWORD, role=Role.CUSTOMER)
     login(client, "cust", VALID_PASSWORD)
     # A client-supplied hint must never substitute for the database role.
-    response = client.get("/account/admin", headers={"X-Role": "admin"})
+    response = client.get("/_test/admin", headers={"X-Role": "admin"})
     assert response.status_code == 403
 
 
@@ -211,10 +211,10 @@ def test_19_session_cookie_security_flags_are_correct(app):
 def test_20_logout_invalidates_authentication(client, db):
     make_user(username="alice", password=VALID_PASSWORD)
     login(client, "alice", VALID_PASSWORD)
-    assert client.get("/account/me").status_code == 200
+    assert client.get("/_test/me").status_code == 200
     client.post("/logout")
-    assert client.get("/account/me").status_code == 401
-    assert client.get("/account/admin").status_code == 401  # not 403: no longer authenticated at all
+    assert client.get("/_test/me").status_code == 401
+    assert client.get("/_test/admin").status_code == 401  # not 403: no longer authenticated at all
 
 
 # --- Information disclosure -----------------------------------------------------
@@ -232,7 +232,7 @@ def test_21_login_errors_do_not_distinguish_unknown_user_from_wrong_password(cli
 def test_22_password_hash_never_appears_in_responses(client, db):
     make_user(username="alice", password=VALID_PASSWORD)
     login(client, "alice", VALID_PASSWORD)
-    response = client.get("/account/me")
+    response = client.get("/_test/me")
     body = response.get_data(as_text=True)
     assert "password_hash" not in body
     assert "$argon2id$" not in body
@@ -320,4 +320,4 @@ def test_login_rate_limiting_blocks_after_repeated_failures(client, db):
         login(client, "alice", "wrong-password-1")
     limited = login(client, "alice", VALID_PASSWORD)  # even the right password is blocked
     assert limited.status_code == 429
-    assert client.get("/account/me").status_code == 401
+    assert client.get("/_test/me").status_code == 401

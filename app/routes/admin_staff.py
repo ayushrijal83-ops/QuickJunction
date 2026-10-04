@@ -18,7 +18,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, url_for
 from app.extensions import db
 from app.models.audit_log import AuditEvent
 from app.models.user import Role, User
-from app.services.audit import record_event
+from app.services.audit import commit_with, record_event
 from app.utils.authorization import get_current_user, require_role
 from app.utils.request_meta import client_ip, user_agent
 
@@ -43,15 +43,15 @@ def _set_approval(user_id: int, approved: bool):
 
     if user.staff_approved != approved:
         user.staff_approved = approved
-        db.session.commit()
-        record_event(
+        # The access change and its audit row commit together or not at all.
+        commit_with(lambda: record_event(
             AuditEvent.STAFF_APPROVED if approved else AuditEvent.STAFF_APPROVAL_REVOKED,
             success=True,
             user_id=get_current_user().id,
             ip_address=client_ip(),
             user_agent=user_agent(),
             metadata={"staff_user_id": user.id},
-        )
+        ))
     if approved:
         flash(f"{user.username} is approved and can now sign in to the staff portal.", "success")
     else:

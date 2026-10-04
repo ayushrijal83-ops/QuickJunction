@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-03**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`).
+Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`) and M2 (Phase 1A security hardening).
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -25,21 +25,21 @@ Overall: **NOT READY FOR PRODUCTION.**
 
 | # | Item | Status | Current state (evidence) | Required for READY |
 | --- | --- | --- | --- | --- |
-| S1 | Rate limiting | NOT STARTED | Login only; in-process dict per worker (`app/utils/ratelimit.py`), no `ProxyFix`, keyed on `remote_addr` | Shared-store limiter (Redis) per IP and per account on login, registration, password reset, checkout, reservations, AI explain; `ProxyFix` with a configured hop count; tests incl. spoofed `X-Forwarded-For` |
-| S2 | Authentication | IN PROGRESS | Argon2id, session fixation protection, server-side revocation — tested (`tests/test_auth.py`, `tests/test_session_revocation.py`) | Password change; admin-issued reset; rehash on login; tests |
+| S1 | Rate limiting | IN PROGRESS | Login only; in-process dict per worker (`app/utils/ratelimit.py`), keyed on `remote_addr`. M2: `ProxyFix` behind explicit `TRUSTED_PROXY_COUNT` (default 0), spoofed `X-Forwarded-For` tests (`tests/test_m2_security.py`) — limiter itself unchanged | Shared-store limiter (Redis) per IP and per account on login, registration, password reset, checkout, reservations, AI explain; `ProxyFix` with a configured hop count; tests incl. spoofed `X-Forwarded-For` |
+| S2 | Authentication | IN PROGRESS | Argon2id, session fixation protection, server-side revocation — tested (`tests/test_auth.py`, `tests/test_session_revocation.py`); rehash on login done in M2 (`docs/SECURITY.md` §18.6) | Password change; admin-issued reset; rehash on login; tests |
 | S3 | Account management | NOT STARTED | No admin UI to list/deactivate users; `is_active` cannot be set by the app | Admin list/search/deactivate/reactivate with session revocation; last-admin protection; audited; tests |
 | S4 | Staff onboarding security | NOT STARTED | Public `/register/staff` with admin approval | Invitation-only staff accounts; public staff sign-up removed |
 | S5 | Authorization | READY (application) | `require_role` on every non-public route; owner-scoped customer queries; tests across role boundaries | Re-verify after each Phase 1 change |
-| S6 | Dine-in abuse protection | NOT STARTED | Any customer can choose any seatable table and mark it OCCUPIED | Customer checkout cannot occupy tables; tests |
-| S7 | Reservation abuse protection | NOT STARTED | No per-customer limit | Per-account cap enforced under concurrency (MySQL test) |
+| S6 | Dine-in abuse protection | READY (application) | M2: customer checkout is CUSTOMER-only and takeaway/online only; any `table_id` refused server-side; crafted-request tests incl. RESERVED and unknown tables (`tests/test_m2_security.py`, `docs/SECURITY.md` §18.2). Note: no staff HTTP order-entry screen exists for dine-in | Customer checkout cannot occupy tables; tests |
+| S7 | Reservation abuse protection | READY (application) | M2: `RESERVATION_ACTIVE_LIMIT` (default 2 active future CONFIRMED) under a `users`-row lock; MySQL race test passes 15/15 rounds × 5 runs and fails without the lock (`docs/SECURITY.md` §18.3) | Per-account cap enforced under concurrency (MySQL test) |
 | S8 | Secret management | NOT STARTED | `.env` file; production location and rotation undocumented | Secrets in a root-owned 0600 file outside the code tree; rotation procedure documented; no real credentials in comments |
-| S9 | Audit integrity | NOT STARTED | Audit row committed separately from the business change | Same-transaction audit for business events; retention job |
+| S9 | Audit integrity | IN PROGRESS | M2: business change and audit row commit in one transaction (`commit_with`), failure-injection tests; independent auth events commit separately (`docs/SECURITY.md` §18.4). Retention job not started | Same-transaction audit for business events; retention job |
 | S10 | Database privilege separation | NOT STARTED | One account holds DML **and** DDL (`scripts/db_setup.py`) | Runtime account DML-only; separate migration account |
 | S11 | Security headers | IN PROGRESS | CSP (no inline script), `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `no-store` — tested; HSTS only when cookies are Secure | Verified on the deployed HTTPS stack; `Server` version header hidden |
 | S12 | CSRF | READY (application) | `CSRFProtect` app-wide; all state changes are POST forms; tested | Re-verify behind the reverse proxy |
-| S13 | Password hashing | READY (application) | Argon2id library defaults (`app/utils/security.py`) | Rehash on login (tracked under S2) |
-| S14 | Dependency vulnerability scanning | IN PROGRESS | `pip-audit` in CI (M0): runtime clean; AI stack has known advisories (`docs/STATUS.md`) | CI green on GitHub; AI stack disabled in production or advisories resolved; hash-locked requirements |
-| S15 | Remove unnecessary endpoints | NOT STARTED | `/account/me`, `/account/staff`, `/account/admin` probe routes exist | Removed or confined to tests |
+| S13 | Password hashing | READY (application) | Argon2id library defaults (`app/utils/security.py`); rehash on successful login (M2) | Re-verify on the production stack |
+| S14 | Dependency vulnerability scanning | IN PROGRESS | `pip-audit` in CI (M0): runtime clean; AI stack has 13 known advisories, re-checked in M2; AI stack now disabled by default and not needed by the core app (`docs/SECURITY.md` §18.9) | CI green on GitHub; AI stack disabled in production or advisories resolved; hash-locked requirements |
+| S15 | Remove unnecessary endpoints | READY (application) | M2: probe routes removed; tests use a test-only blueprint; 404 asserted (`tests/test_m2_security.py`) | Re-verify the route list on each release |
 
 ## 2. Deployment
 
@@ -50,7 +50,7 @@ Overall: **NOT READY FOR PRODUCTION.**
 | D3 | HTTPS | NOT STARTED | — | Certificate, auto-renewal, HTTP→HTTPS redirect, TLS ≥ 1.2, expiry alert |
 | D4 | Gunicorn | NOT STARTED | Documented in `run.py`, **not** in `requirements.txt` | Pinned; config file; worker count from Phase 5 measurements |
 | D5 | systemd | NOT STARTED | — | Service unit as a non-login user with hardening; restart on failure; survives reboot |
-| D6 | Production configuration | IN PROGRESS | `ProductionConfig` refuses debug, weak `SECRET_KEY`, SQLite, MySQL root | Production defaults reviewed (LLM off, log location, secure cookies) and documented |
+| D6 | Production configuration | IN PROGRESS | `ProductionConfig` refuses debug, weak `SECRET_KEY`, SQLite, MySQL root; M2: `LLM_ENABLED` defaults to false, `TRUSTED_PROXY_COUNT` defaults to 0, `RESERVATION_ACTIVE_LIMIT` defaults to 2 | Production defaults reviewed (LLM off, log location, secure cookies) and documented |
 | D7 | Health / readiness checks | IN PROGRESS | `/health` liveness only | Readiness check covering DB, Redis and migration head; not public |
 | D8 | Logging | IN PROGRESS | Rotating `app.log` / `security.log` inside the code directory | Logs outside the code tree, rotated, request IDs |
 | D9 | Monitoring | NOT STARTED | — | Uptime check, error tracking, disk/CPU/memory, backup-job and certificate alerts — each alert tested once |

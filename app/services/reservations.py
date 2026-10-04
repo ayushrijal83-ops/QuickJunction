@@ -16,6 +16,14 @@ table's current status.
 
 **Ownership.** Every write takes the owning ``User`` from the caller, which
 takes it from the session -- no function here accepts a user id from a form.
+
+**Per-customer cap (M2).** A customer may hold at most
+``RESERVATION_ACTIVE_LIMIT`` (default 2) *active future* reservations: status
+CONFIRMED and a slot that has not started yet. CANCELLED, COMPLETED and
+NO_SHOW rows never count, nor does a CONFIRMED row whose slot has begun.
+The check and the insert are serialised per customer by locking that
+customer's ``users`` row (``SELECT ... FOR UPDATE``) before counting, so two
+simultaneous requests cannot both see "one left" (see _enforce_active_limit).
 """
 
 from __future__ import annotations
@@ -26,10 +34,13 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import selectinload
 
+from flask import current_app
+
 from app.extensions import db
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import User
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 from app.utils.clock import db_now
 
@@ -100,7 +111,52 @@ def available_tables(day: date, slot: time, guests: int) -> list[RestaurantTable
     ]
 
 
-def create_reservation(owner: User, raw_table_id, raw_date, raw_time, raw_guests) -> Reservation:
+def active_future_filter(now: datetime):
+    """CONFIRMED and the slot has not started -- what counts toward the cap."""
+    return sa.and_(
+        Reservation.status == ReservationStatus.CONFIRMED,
+        sa.or_(Reservation.reservation_date > now.date(),
+               sa.and_(Reservation.reservation_date == now.date(), Reservation.reservation_time > now.time())),
+    )
+
+
+def _enforce_active_limit(owner: User) -> None:
+    """Serialise this customer's bookings, then count their active ones.
+
+    1. End the current transaction. Nothing has been written yet in this
+       call; this only drops the REPEATABLE READ snapshot an earlier read in
+       the request may have opened, which could predate a booking the other
+       request is about to commit.
+    2. Lock the customer's ``users`` row (``SELECT ... FOR UPDATE``): a
+       concurrent booking by the same customer waits here until the first
+       commits or rolls back.
+    3. Count with a plain read. It is the transaction's first consistent
+       read, so its snapshot is taken *after* the lock was granted and sees
+       every booking the previous lock holder committed.
+
+    A locking read (``FOR UPDATE``) on ``reservations`` is deliberately not
+    used for the count: its gap locks on the user index made two *different*
+    customers' inserts deadlock each other (found by the MySQL slot-race test).
+    """
+    # Read the id first: after the rollback ``owner`` is expired, and touching
+    # it would reload it with a plain SELECT -- opening the snapshot before
+    # the lock and defeating step 3 (found by the MySQL cap-race test).
+    owner_id = owner.id
+    db.session.rollback()
+    db.session.execute(sa.select(User.id).where(User.id == owner_id).with_for_update())
+    taken = db.session.scalar(
+        sa.select(sa.func.count(Reservation.id))
+        .where(Reservation.user_id == owner_id, active_future_filter(db_now()))
+    )
+    limit = current_app.config["RESERVATION_ACTIVE_LIMIT"]
+    if taken >= limit:
+        db.session.rollback()  # release the lock
+        _fail("reservation", f"You already have {limit} upcoming reservations. "
+                             "Cancel one before booking another.")
+
+
+def create_reservation(owner: User, raw_table_id, raw_date, raw_time, raw_guests, *, audit=None) -> Reservation:
+    """``audit(reservation)`` adds the audit row in the booking's transaction."""
     day, slot, guests = parse_slot(raw_date, raw_time, raw_guests)
     try:
         table = db.session.get(RestaurantTable, int(raw_table_id))
@@ -112,6 +168,7 @@ def create_reservation(owner: User, raw_table_id, raw_date, raw_time, raw_guests
         _fail("table_id", f"{table.name} is out of service.")
     if guests > table.capacity:
         _fail("guest_count", f"{table.name} seats at most {table.capacity}.")
+    _enforce_active_limit(owner)
 
     reservation = Reservation(
         user_id=owner.id, table_id=table.id, reservation_date=day, reservation_time=slot,
@@ -121,7 +178,7 @@ def create_reservation(owner: User, raw_table_id, raw_date, raw_time, raw_guests
     try:
         # No pre-check for a clash: the unique index is the check, and it is
         # the only one that holds when two customers submit at once.
-        db.session.commit()
+        commit_with(audit, reservation)
     except IntegrityError:
         db.session.rollback()
         _fail("table_id", f"{table.name} has just been booked for that time. Please choose another table or time.")
@@ -129,8 +186,9 @@ def create_reservation(owner: User, raw_table_id, raw_date, raw_time, raw_guests
 
 
 def _apply(reservation: Reservation, from_status: ReservationStatus, new_status: ReservationStatus,
-           owner_id: int | None = None) -> bool:
-    """Conditional UPDATE -- same concurrency pattern as order transitions."""
+           owner_id: int | None = None, audit=None) -> bool:
+    """Conditional UPDATE -- same concurrency pattern as order transitions.
+    ``audit(previous)`` runs only for the winner, in the same transaction."""
     stmt = (
         sa.update(Reservation)
         .where(Reservation.id == reservation.id, Reservation.status == from_status)
@@ -141,7 +199,7 @@ def _apply(reservation: Reservation, from_status: ReservationStatus, new_status:
         stmt = stmt.where(Reservation.user_id == owner_id)
     try:
         won = db.session.execute(stmt).rowcount == 1
-        db.session.commit()
+        commit_with(audit if won else None, from_status)
     except SQLAlchemyError:
         db.session.rollback()
         _fail("status", "Could not update the reservation. Please try again.")
@@ -154,25 +212,27 @@ def customer_can_cancel(reservation: Reservation) -> bool:
             and datetime.combine(reservation.reservation_date, reservation.reservation_time) > db_now())
 
 
-def cancel_reservation_as_customer(reservation: Reservation, owner: User) -> ReservationStatus:
+def cancel_reservation_as_customer(reservation: Reservation, owner: User, *, audit=None) -> ReservationStatus:
     previous = reservation.status
     if reservation.user_id != owner.id:
         _fail("status", "Reservation not found.")
     if not customer_can_cancel(reservation) or not _apply(
-        reservation, ReservationStatus.CONFIRMED, ReservationStatus.CANCELLED, owner_id=owner.id
+        reservation, ReservationStatus.CONFIRMED, ReservationStatus.CANCELLED, owner_id=owner.id, audit=audit
     ):
         _fail("status", f"This reservation is {reservation.status.value.replace('_', ' ')} "
                         "and can no longer be cancelled online.")
     return previous
 
 
-def update_reservation_status(reservation: Reservation, raw_status) -> ReservationStatus:
+def update_reservation_status(reservation: Reservation, raw_status, *, audit=None) -> ReservationStatus:
     try:
         new_status = ReservationStatus(raw_status)
     except ValueError:
         _fail("status", "Unknown reservation status.")
     previous = reservation.status
-    if new_status not in ALLOWED_RESERVATION_TRANSITIONS[previous] or not _apply(reservation, previous, new_status):
+    if new_status not in ALLOWED_RESERVATION_TRANSITIONS[previous] or not _apply(
+        reservation, previous, new_status, audit=audit
+    ):
         _fail("status", f"Cannot change a reservation from {reservation.status.value} to {new_status.value}.")
     return previous
 

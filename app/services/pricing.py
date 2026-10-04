@@ -33,6 +33,7 @@ from app.models.pricing_settings import (
     PricingSettings,
 )
 from app.models.user import Role, User
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 
 _CENTS = Decimal("0.01")
@@ -73,8 +74,9 @@ def current_settings() -> tuple[Decimal, Decimal]:
     return (row.tax_rate, row.staff_max_discount) if row else (DEFAULT_TAX_RATE, DEFAULT_STAFF_MAX_DISCOUNT)
 
 
-def update_settings(raw_tax_rate, raw_staff_max, actor: User) -> dict:
-    """ADMIN only (enforced by the route). Returns {"from": ..., "to": ...}."""
+def update_settings(raw_tax_rate, raw_staff_max, actor: User, *, audit=None) -> dict:
+    """ADMIN only (enforced by the route). Returns {"from": ..., "to": ...};
+    ``audit(change)`` adds the audit row in the same transaction."""
     tax = _decimal(raw_tax_rate, "tax_rate").quantize(_CENTS)
     cap = _decimal(raw_staff_max, "staff_max_discount").quantize(_CENTS)
     if not Decimal("0") <= tax <= MAX_TAX_RATE:
@@ -85,8 +87,9 @@ def update_settings(raw_tax_rate, raw_staff_max, actor: User) -> dict:
     row = db.session.get(PricingSettings, _SETTINGS_ID) or PricingSettings(id=_SETTINGS_ID)
     row.tax_rate, row.staff_max_discount, row.updated_by_id = tax, cap, actor.id
     db.session.add(row)
-    db.session.commit()
-    return {"from": [str(v) for v in before], "to": [str(tax), str(cap)]}
+    change = {"from": [str(v) for v in before], "to": [str(tax), str(cap)]}
+    commit_with(audit, change)
+    return change
 
 
 # --- arithmetic -------------------------------------------------------------------
@@ -116,7 +119,7 @@ def preview(subtotal: Decimal) -> tuple[Decimal, Decimal, Decimal]:
 # --- discounts --------------------------------------------------------------------
 
 
-def apply_discount(order: Order, raw_type, raw_value, reason: str | None, actor: User) -> Order:
+def apply_discount(order: Order, raw_type, raw_value, reason: str | None, actor: User, *, audit=None) -> Order:
     """Set (or, with value 0, remove) the discount on an unpaid order and
     re-price it with the order's own snapshotted tax rate."""
     if actor.role not in (Role.STAFF, Role.ADMIN):
@@ -170,5 +173,5 @@ def apply_discount(order: Order, raw_type, raw_value, reason: str | None, actor:
         locked.discount_type, locked.discount_value = discount_type, value
         locked.discount_reason, locked.discounted_by_id = reason, actor.id
     locked.discount_amount, locked.tax_amount, locked.total = amount, tax_amount, total
-    db.session.commit()
+    commit_with(audit, locked)
     return locked

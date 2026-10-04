@@ -16,6 +16,7 @@ from app.models import (
     AuditEvent, AuditLog, Ingredient, MenuItem, Order, OrderSource, OrderStatus, Payment,
     Reservation, ReservationStatus, RestaurantTable, Role, StockMovement, TableStatus, User,
 )
+from app.services.orders import checkout
 from app.services.sales import build_report
 from app.utils.clock import db_today
 from tests.conftest import make_category, make_menu_item, make_user
@@ -87,7 +88,12 @@ def test_full_demo_flow(app, db):
     assert ", <em>alice</em>." in text(cust, "/account/")  # time-of-day greeting (final UI)
     assert "Chicken Burger" in text(cust, "/menu")
     assert "Tax (13.00%)" in (go(cust, "post", "/cart/add", menu_item_id=burger.id, quantity=2) and text(cust, "/checkout"))
+    # M2: the customer cannot seat themselves; staff create the dine-in order.
     go(cust, "post", "/checkout", source="dine_in", table_id=str(t01.id))
+    assert _db.session.query(Order).filter_by(user_id=alice.id).count() == 0
+    assert fresh(RestaurantTable, t01.id).status == TableStatus.AVAILABLE
+    go(cust, "post", "/cart/clear")
+    checkout(alice.id, {str(burger.id): 2}, OrderSource.DINE_IN, t01.id)
     first = _db.session.query(Order).filter_by(user_id=alice.id).order_by(Order.id.desc()).first()
     assert (first.source, first.table_id, first.subtotal, first.tax_amount, first.total) == (
         OrderSource.DINE_IN, t01.id, D("700.00"), D("91.00"), D("791.00"))

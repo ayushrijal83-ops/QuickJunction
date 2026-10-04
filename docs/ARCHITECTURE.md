@@ -130,10 +130,9 @@ app/services/audit.py   record_event — the only writer of AuditLog rows,
                          also mirrors to the quickjunction.security logger
 ```
 
-`app/routes/account.py` (`/account/`, `/account/me`, `/account/staff`,
-`/account/admin`) is authorization-foundation, not a feature: it exists so
-`login_required`/`require_role` have something real to protect. Later
-milestones replace it with actual staff/admin views.
+`app/routes/account.py` serves the role dashboard (`/account/`). The M02
+probe endpoints (`/account/me`, `/account/staff`, `/account/admin`) were
+removed in M2; tests use a test-only equivalent (`tests/conftest.py`).
 
 ## Menu data layer and menu management
 
@@ -449,9 +448,6 @@ GET  /login                          ->  200  login form (HTML)
 POST /login                           ->  302 → /account/ on success, 200/429 otherwise
 POST /logout                          ->  302 → /login (CSRF-protected, login required)
 GET  /account/                        ->  200  minimal authenticated landing page (HTML)
-GET  /account/me                      ->  200  {"username", "role"} JSON, login required
-GET  /account/staff                   ->  200  JSON, STAFF or ADMIN only
-GET  /account/admin                   ->  200  JSON, ADMIN only
 
 GET  /menu                            ->  200  active-category + available-item list (HTML), public
 GET  /menu/<id>                       ->  200 or 404, public (404 hides "exists but unavailable")

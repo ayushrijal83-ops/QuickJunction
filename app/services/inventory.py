@@ -36,6 +36,7 @@ from app.models.menu_item_ingredient import MenuItemIngredient
 from app.models.order import Order
 from app.models.stock_movement import MovementType, StockMovement
 from app.models.user import Role, User
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 
 _QTY = Decimal("0.001")
@@ -87,7 +88,8 @@ def _move(ingredient_id: int, delta: Decimal, movement_type: MovementType, *, ac
 # --- ingredients ---------------------------------------------------------------------
 
 
-def save_ingredient(ingredient: Ingredient | None, name, unit, minimum, is_active: bool) -> Ingredient:
+def save_ingredient(ingredient: Ingredient | None, name, unit, minimum, is_active: bool, *,
+                    audit=None) -> Ingredient:
     """Create or edit an ingredient's definition. Never touches its quantity
     -- opening stock is a PURCHASE movement, so it is on the ledger too."""
     name = (name or "").strip().lower()
@@ -102,14 +104,15 @@ def save_ingredient(ingredient: Ingredient | None, name, unit, minimum, is_activ
     ingredient.name, ingredient.unit, ingredient.minimum_quantity, ingredient.is_active = name, unit, minimum, is_active
     db.session.add(ingredient)
     try:
-        db.session.commit()
+        commit_with(audit, ingredient)
     except IntegrityError:
         db.session.rollback()
         _fail("name", f"An ingredient called {name!r} already exists.")
     return ingredient
 
 
-def record_movement(ingredient: Ingredient, raw_type, raw_quantity, note: str | None, actor: User) -> StockMovement:
+def record_movement(ingredient: Ingredient, raw_type, raw_quantity, note: str | None, actor: User, *,
+                    audit=None) -> StockMovement:
     """A manual movement. PURCHASE/RESTOCK add, WASTE removes (the quantity
     is entered as a positive amount), ADJUSTMENT is a signed correction and
     is ADMIN only."""
@@ -127,7 +130,7 @@ def record_movement(ingredient: Ingredient, raw_type, raw_quantity, note: str | 
     quantity = _quantity(raw_quantity, "quantity", allow_negative=signed)
     delta = -quantity if movement_type == MovementType.WASTE else quantity
     movement = _move(ingredient.id, delta, movement_type, actor_id=actor.id, note=note)
-    db.session.commit()
+    commit_with(audit, movement)
     db.session.refresh(ingredient)
     return movement
 
@@ -135,7 +138,7 @@ def record_movement(ingredient: Ingredient, raw_type, raw_quantity, note: str | 
 # --- recipes ---------------------------------------------------------------------------
 
 
-def set_recipe(item: MenuItem, quantities: dict[int, str]) -> None:
+def set_recipe(item: MenuItem, quantities: dict[int, str], *, audit=None) -> None:
     """Set per-portion quantities for ingredients already linked to ``item``
     (links come from the menu form). 0 = listed but not stock-tracked."""
     links = {link.ingredient_id: link for link in
@@ -145,17 +148,17 @@ def set_recipe(item: MenuItem, quantities: dict[int, str]) -> None:
         if link is None:
             _fail("recipe", "That ingredient is not on this menu item.")
         link.quantity = _quantity(raw, "recipe", allow_zero=True)
-    db.session.commit()
+    commit_with(audit)
 
 
-def add_to_recipe(item: MenuItem, ingredient: Ingredient, raw_quantity) -> None:
+def add_to_recipe(item: MenuItem, ingredient: Ingredient, raw_quantity, *, audit=None) -> None:
     quantity = _quantity(raw_quantity, "recipe")
     link = db.session.get(MenuItemIngredient, (item.id, ingredient.id))
     if link is None:
         db.session.add(MenuItemIngredient(menu_item_id=item.id, ingredient_id=ingredient.id, quantity=quantity))
     else:
         link.quantity = quantity
-    db.session.commit()
+    commit_with(audit)
 
 
 def recipe_requirements(lines: dict[int, int]) -> dict[int, Decimal]:

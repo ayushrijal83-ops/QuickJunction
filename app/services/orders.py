@@ -34,6 +34,7 @@ from app.models.order import CancellationActor, Order, OrderItem, OrderSource, O
 from app.models.payment import Payment
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import Role, User
+from app.services.audit import commit_with
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available_menu_item
 from app.services.errors import ValidationError
 from app.services.inventory import deduct_for_order, shortages
@@ -99,11 +100,38 @@ def resolve_order_channel(raw_source, raw_table_id) -> tuple[OrderSource, int | 
     return source, table.id
 
 
+# What a customer may order through the customer checkout (M2). DINE_IN is
+# excluded because it seats a party at a table and marks it OCCUPIED -- floor
+# state that only staff manage. DELIVERY is out of the pilot (O10).
+CUSTOMER_ORDER_SOURCES = frozenset({OrderSource.TAKEAWAY, OrderSource.ONLINE})
+
+
+def checkout_as_customer(customer: User, cart: dict[str, int], source=None, table_id=None, *,
+                         audit=None) -> Order:
+    """The customer checkout: ``checkout`` restricted to what a customer may
+    create. Rejects a non-CUSTOMER account, any table, and any source outside
+    ``CUSTOMER_ORDER_SOURCES`` -- before anything is read or written, so a
+    crafted POST cannot reach the table at all, whatever its status."""
+    if customer.role != Role.CUSTOMER:
+        raise CheckoutError({"account": ["Only customer accounts can place orders here."]})
+    if table_id not in (None, ""):
+        raise CheckoutError({"table_id": ["Tables are assigned by our staff when you are seated."]})
+    try:
+        source = OrderSource(source or OrderSource.ONLINE.value)
+    except ValueError:
+        raise CheckoutError({"source": ["Unknown order type."]})
+    if source not in CUSTOMER_ORDER_SOURCES:
+        raise CheckoutError({"source": ["Choose takeaway or online. For dine-in, our staff will take your order."]})
+    return checkout(customer.id, cart, source, None, audit=audit)
+
+
 def checkout(
     user_id: int,
     cart: dict[str, int],
     source: OrderSource | str = OrderSource.ONLINE,
     table_id: int | None = None,
+    *,
+    audit=None,
 ) -> Order:
     """Validate ``cart`` against the live menu and create an ``Order`` with
     its ``OrderItem`` rows in a single transaction.
@@ -113,6 +141,11 @@ def checkout(
     verify each quantity is in bounds, recompute every unit price and line
     total, sum the subtotal/total, then write the order. Any failure raises
     ``CheckoutError`` and leaves no partial order behind.
+
+    Accepts any source, including DINE_IN with a table: this is the
+    staff-side primitive. Customer-facing callers use
+    ``checkout_as_customer``. ``audit(order)`` adds the ORDER_CREATED row in
+    the same transaction as the order.
     """
     if not cart:
         raise CheckoutError({"cart": ["Your cart is empty."]})
@@ -183,7 +216,7 @@ def checkout(
             # A party ordering at a table means it is in use. Freeing it again
             # (CLEANING -> AVAILABLE) is a staff action on the table board.
             db.session.get(RestaurantTable, table_id).status = TableStatus.OCCUPIED
-        db.session.commit()
+        commit_with(audit, order)
     except SQLAlchemyError:
         db.session.rollback()
         raise CheckoutError({"cart": ["Could not place your order. Please try again."]})
@@ -264,7 +297,8 @@ def _actor_for(user: User) -> CancellationActor:
 
 
 def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_status: OrderStatus,
-                      *, actor: User | None, reason: str | None, owner_id: int | None = None) -> bool:
+                      *, actor: User | None, reason: str | None, owner_id: int | None = None,
+                      audit=None) -> bool:
     """Move ``order`` to ``new_status`` **only if its current database row is
     still in ``from_statuses``**, in one conditional UPDATE.
 
@@ -280,6 +314,7 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
     a paid order can never be cancelled while still holding the money.
     Finishing a dine-in order (completed/cancelled) releases its table to
     CLEANING in the same transaction when nothing else is active there.
+    ``audit()`` runs only for the winner, inside that same transaction.
     """
     values: dict = {"status": new_status}
     if new_status == OrderStatus.PREPARING:
@@ -311,7 +346,7 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
             # The sale's stock deduction commits with the completion or not at
             # all; idempotent (M13, app/services/inventory.py).
             deduct_for_order(order.id, actor.id if actor else None)
-        db.session.commit()
+        commit_with(audit if won else None)
     except SQLAlchemyError:
         db.session.rollback()
         raise OrderStatusError({"status": ["Could not update the order. Please try again."]})
@@ -325,7 +360,7 @@ def holds_payment(order: Order) -> bool:
 
 
 def update_order_status(order: Order, new_status: OrderStatus, *, actor: User | None = None,
-                        reason: str | None = None) -> OrderStatus:
+                        reason: str | None = None, audit=None) -> OrderStatus:
     """Move ``order`` to ``new_status`` if the workflow permits it.
 
     Returns the previous status (the caller needs it for the audit record).
@@ -340,7 +375,7 @@ def update_order_status(order: Order, new_status: OrderStatus, *, actor: User | 
         raise OrderStatusError(
             {"status": [f"Cannot change an order from {previous.value} to {new_status.value}."]}
         )
-    if not _apply_transition(order, frozenset({previous}), new_status, actor=actor, reason=reason):
+    if not _apply_transition(order, frozenset({previous}), new_status, actor=actor, reason=reason, audit=audit):
         if new_status == OrderStatus.CANCELLED and holds_payment(order):
             raise OrderStatusError(
                 {"status": [f"Order #{order.id} has been paid. Refund the payment in full before cancelling."]}
@@ -364,7 +399,8 @@ def customer_can_cancel(order: Order) -> bool:
     return order.status in CUSTOMER_CANCELLABLE_STATUSES and not holds_payment(order)
 
 
-def cancel_order_as_customer(order: Order, customer: User, reason: str | None = None) -> OrderStatus:
+def cancel_order_as_customer(order: Order, customer: User, reason: str | None = None, *,
+                             audit=None) -> OrderStatus:
     """Cancel ``customer``'s own ``order``. Returns the previous status.
 
     Ownership is enforced twice: callers load the order with
@@ -379,7 +415,7 @@ def cancel_order_as_customer(order: Order, customer: User, reason: str | None = 
         raise OrderStatusError({"status": ["This order is already cancelled."]})
     if previous not in CUSTOMER_CANCELLABLE_STATUSES or not _apply_transition(
         order, CUSTOMER_CANCELLABLE_STATUSES, OrderStatus.CANCELLED,
-        actor=customer, reason=reason, owner_id=customer.id,
+        actor=customer, reason=reason, owner_id=customer.id, audit=audit,
     ):
         if holds_payment(order):
             raise OrderStatusError(

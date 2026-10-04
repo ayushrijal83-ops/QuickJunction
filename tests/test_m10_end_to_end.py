@@ -19,6 +19,7 @@ from app.models.reservation import Reservation, ReservationStatus
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import Role
 from app.services.reservations import create_reservation
+from app.services.orders import checkout
 from app.services.sales import build_report
 from app.utils.clock import db_today
 from tests.conftest import make_menu_item, make_user
@@ -41,6 +42,12 @@ def order_via_checkout(client, item, source, table=None) -> Order:
     response = req(client, "post", "/checkout", data=data)
     assert response.status_code == 302, response.get_data(as_text=True)[:300]
     return _db.session.query(Order).order_by(Order.id.desc()).first()
+
+
+def seated_order(customer, item, table) -> Order:
+    """Dine-in is created staff-side since M2 -- the customer checkout refuses
+    it (tests/test_m2_security.py). Same service, same pricing, same owner."""
+    return checkout(customer.id, {str(item.id): 2}, OrderSource.DINE_IN, table.id)
 
 
 def test_m10_customer_staff_admin_flow(app, db):
@@ -75,7 +82,7 @@ def test_m10_customer_staff_admin_flow(app, db):
     assert req(cust, "get", f"/reservations/{bobs.id}").status_code == 404         # 7
     assert req(cust, "post", f"/reservations/{bobs.id}/cancel").status_code == 404
 
-    dine_in = order_via_checkout(cust, item, "dine_in", t02)                         # 8
+    dine_in = seated_order(alice, item, t02)                                        # 8
     assert (dine_in.source, dine_in.table.name, dine_in.user_id) == (OrderSource.DINE_IN, "T02", alice.id)  # 9
     assert req(cust, "post", f"/orders/{dine_in.id}/cancel", data={"reason": "Changed plans"}).status_code == 302  # 10
     _db.session.expire_all()
@@ -85,7 +92,7 @@ def test_m10_customer_staff_admin_flow(app, db):
         CancellationActor.CUSTOMER, alice.id, "Changed plans")                        # 12
     assert dine_in.cancelled_at is not None and dine_in.table_id == t02.id
 
-    second = order_via_checkout(cust, item, "dine_in", t01)   # the one staff will prepare
+    second = seated_order(alice, item, t01)   # the one staff will prepare
     takeaway = order_via_checkout(cust, item, "takeaway")
     assert takeaway.table_id is None
 

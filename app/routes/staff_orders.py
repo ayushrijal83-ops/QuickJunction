@@ -79,25 +79,28 @@ def discount_order(order_id: int):
         flash("Could not apply the discount.", "error")
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
     actor = get_current_user()
+
+    def audit(order):
+        return record_event(
+            AuditEvent.ORDER_DISCOUNT_APPLIED,
+            success=True,
+            user_id=actor.id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"order_id": order.id,
+                      "type": order.discount_type.value if order.discount_type else None,
+                      "value": str(order.discount_value) if order.discount_value is not None else None,
+                      "amount": str(order.discount_amount), "total": str(order.total)},
+        )
+
     try:
         order = apply_discount(order, form.discount_type.data, form.discount_value.data,
-                               form.discount_reason.data, actor)
+                               form.discount_reason.data, actor, audit=audit)
     except PricingError as exc:
         for messages in exc.errors.values():
             for message in messages:
                 flash(message, "error")
         return redirect(url_for("staff_orders.order_detail", order_id=order_id))
-    record_event(
-        AuditEvent.ORDER_DISCOUNT_APPLIED,
-        success=True,
-        user_id=actor.id,
-        ip_address=client_ip(),
-        user_agent=user_agent(),
-        metadata={"order_id": order.id,
-                  "type": order.discount_type.value if order.discount_type else None,
-                  "value": str(order.discount_value) if order.discount_value is not None else None,
-                  "amount": str(order.discount_amount), "total": str(order.total)},
-    )
     flash(f"Order #{order.id} now totals {order.total}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))
 
@@ -121,9 +124,21 @@ def order_status_update(order_id: int):
         return back
 
     previous = order.status
+
+    def audit():
+        return record_event(
+            AuditEvent.ORDER_STATUS_CHANGED,
+            success=True,
+            user_id=actor.id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"order_id": order.id, "from": previous.value, "to": new_status.value,
+                      "actor": actor.role.value},
+        )
+
     try:
         new_status = coerce_status(form.status.data)
-        previous = update_order_status(order, new_status, actor=actor, reason=form.reason.data)
+        update_order_status(order, new_status, actor=actor, reason=form.reason.data, audit=audit)
     except OrderStatusError as exc:
         # Rejected transitions are audited too: a repeated attempt to force
         # an order backwards is exactly the kind of thing worth seeing.
@@ -138,21 +153,13 @@ def order_status_update(order_id: int):
                 "from": previous.value,
                 "attempted": (form.status.data or "")[:32],
             },
+            commit=True,  # independent: the rejected change wrote nothing
         )
         for messages in exc.errors.values():
             for message in messages:
                 flash(message, "error")
         return back
 
-    record_event(
-        AuditEvent.ORDER_STATUS_CHANGED,
-        success=True,
-        user_id=actor.id,
-        ip_address=client_ip(),
-        user_agent=user_agent(),
-        metadata={"order_id": order.id, "from": previous.value, "to": order.status.value,
-                  "actor": actor.role.value},
-    )
     flash(f"Order #{order.id} is now {order.status.value}.", "success")
     return back
 
@@ -174,20 +181,23 @@ def record_order_payment(order_id: int):
         flash("Could not record the payment.", "error")
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
     actor = get_current_user()
+
+    def audit(payment):
+        return record_event(
+            AuditEvent.PAYMENT_RECORDED,
+            success=True,
+            user_id=actor.id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"order_id": order.id, "payment_id": payment.id, "method": payment.method.value,
+                      "amount": str(payment.amount)},
+        )
+
     try:
-        payment = record_payment(order, form.method.data, actor)
+        payment = record_payment(order, form.method.data, actor, audit=audit)
     except PaymentError as exc:
         _flash_payment_errors(exc)
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
-    record_event(
-        AuditEvent.PAYMENT_RECORDED,
-        success=True,
-        user_id=actor.id,
-        ip_address=client_ip(),
-        user_agent=user_agent(),
-        metadata={"order_id": order.id, "payment_id": payment.id, "method": payment.method.value,
-                  "amount": str(payment.amount)},
-    )
     flash(f"Payment of {payment.amount} recorded for order #{order.id}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))
 
@@ -203,19 +213,21 @@ def refund_order_payment(order_id: int):
     if not form.validate_on_submit():
         flash("Enter a refund amount.", "error")
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
+    def audit(amount):
+        return record_event(
+            AuditEvent.PAYMENT_REFUNDED,
+            success=True,
+            user_id=get_current_user().id,
+            ip_address=client_ip(),
+            user_agent=user_agent(),
+            metadata={"order_id": order.id, "payment_id": order.payment.id, "amount": str(amount),
+                      "refunded_total": str(order.payment.refunded_amount)},
+        )
+
     try:
-        amount = refund_payment(order.payment, form.amount.data, form.reason.data)
+        amount = refund_payment(order.payment, form.amount.data, form.reason.data, audit=audit)
     except PaymentError as exc:
         _flash_payment_errors(exc)
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
-    record_event(
-        AuditEvent.PAYMENT_REFUNDED,
-        success=True,
-        user_id=get_current_user().id,
-        ip_address=client_ip(),
-        user_agent=user_agent(),
-        metadata={"order_id": order.id, "payment_id": order.payment.id, "amount": str(amount),
-                  "refunded_total": str(order.payment.refunded_amount)},
-    )
     flash(f"Refunded {amount} on order #{order.id}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))

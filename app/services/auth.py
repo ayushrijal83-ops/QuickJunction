@@ -7,21 +7,26 @@ a script or a future admin tool, not just from HTTP.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.extensions import db
 from app.models.user import Role, User
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 from app.utils.security import (
     USERNAME_PATTERN,
     hash_password,
+    needs_rehash,
     normalize_email,
     normalize_username,
     password_policy_errors,
     verify_password,
 )
+
+logger = logging.getLogger(__name__)
 
 # A real Argon2id hash of an unguessable, unused password. Verifying against
 # this when no account matches keeps the failure path doing the same
@@ -63,11 +68,14 @@ def _account_errors(data: RegistrationInput, username: str, email: str) -> dict[
     return errors
 
 
-def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
+def register_user(data: RegistrationInput, *, as_staff: bool = False, audit=None) -> User:
     """Create a CUSTOMER account, or -- when the *route* passes
     ``as_staff=True`` -- a STAFF account that starts unapproved and cannot
     sign in until an admin approves it. Never an admin: no HTTP route can
-    create one (admins come only from ``create_admin``, the CLI path)."""
+    create one (admins come only from ``create_admin``, the CLI path).
+
+    ``audit(user)`` adds the registration's audit row in the same transaction
+    as the account (app/services/audit.py::commit_with)."""
     username = normalize_username(data.username)
     email = normalize_email(data.email)
 
@@ -83,9 +91,8 @@ def register_user(data: RegistrationInput, *, as_staff: bool = False) -> User:
     )
     db.session.add(user)
     try:
-        db.session.commit()
+        commit_with(audit, user)
     except IntegrityError:
-        db.session.rollback()
         # Lost the pre-check race against a concurrent registration.
         raise RegistrationError({"_general": ["That username or email is already registered."]})
 
@@ -167,5 +174,16 @@ def authenticate_user(username: str, password: str) -> User | None:
 
     if not user.is_active:
         return None
+
+    # Only reachable with the correct password, so the plaintext in hand is
+    # verified: re-hash it if the stored hash used older Argon2 parameters.
+    if needs_rehash(user.password_hash):
+        user.password_hash = hash_password(password)
+        try:
+            db.session.commit()
+        except SQLAlchemyError:
+            # The old hash still verifies; the upgrade is retried next login.
+            db.session.rollback()
+            logger.warning("Could not store re-hashed password for user_id=%s", user.id)
 
     return user

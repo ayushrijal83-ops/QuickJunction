@@ -79,7 +79,7 @@ survive the engine's candidate filter.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `LLM_ENABLED` | `True` (`False` in testing) | master switch |
+| `LLM_ENABLED` | `False` everywhere unless `LLM_ENABLED=true` is set (since M2) | master switch; opt-in |
 | `LLM_MODEL_PATH` | `models/Qwen3-0.6B-Base` | base weights |
 | `LLM_ADAPTER_PATH` | `models/qwen3-0.6b-quickjunction-lora-v2` (since M07.1) | LoRA adapter |
 | `LLM_MAX_NEW_TOKENS` | `48` | bounds worst-case latency |

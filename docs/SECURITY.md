@@ -124,11 +124,10 @@ def admin_only(): ...
   `User.role` from the database on every request; nothing in a cookie,
   header, or form field can substitute for it (test 15 sends a forged
   `X-Role` header and confirms it is ignored).
-- **`app/routes/account.py` is authorization-foundation, not a feature**:
-  `/account/`, `/account/me`, `/account/staff`, `/account/admin` exist so
-  the decorators have something real to protect and so the manual/browser
-  test has something to click. Later milestones replace them with actual
-  staff and admin views.
+- **`app/routes/account.py`** now serves only the role dashboard
+  (`/account/`). The M02 probe endpoints `/account/me`, `/account/staff` and
+  `/account/admin` were removed in M2 (§18); the auth-boundary tests use an
+  equivalent blueprint registered only on the test app (`tests/conftest.py`).
 
 **Menu management role matrix (M03)**, all enforced by the same
 `require_role`, no separate mechanism:
@@ -883,6 +882,9 @@ repository. See the project `README.md` for the current rule set.
 > 2026-10-03 audit (no production admin bootstrap, public staff sign-up,
 > customer dine-in can occupy tables, no reservation cap, audit rows committed
 > outside the business transaction, no `ProxyFix`) are tracked there.
+> *[M2, 2026-10-04]* Dine-in abuse, the reservation cap, audit atomicity,
+> `ProxyFix`, login rehash (#9), the probe endpoints and the LLM default are
+> closed — see §18.
 
 Ranked by how much damage the absence causes. Items completed in earlier
 milestones (authentication, authorization, CSRF, session fixation
@@ -899,7 +901,7 @@ order-status management in M05) are removed from this list.
 | 6 | Least-privilege MySQL — **partly done**: `scripts/db_setup.py` creates a dedicated account with no `GRANT ALL`, but it also holds DDL (`CREATE, ALTER, DROP, INDEX, REFERENCES`) because it runs migrations. Still needed: a DML-only runtime account plus a separate migration account. (The older `setup.ps1` still uses `GRANT ALL`.) | deployment |
 | 7 | Password reset flow (with its own rate limiting and token expiry) | first locked-out real user |
 | 8 | Email verification at registration | before email is trusted for anything (e.g. password reset) |
-| 9 | Login-time rehash (`needs_rehash()` is written but not called) | first Argon2 parameter change |
+| 9 | ~~Login-time rehash~~ — **done (M2)**, §18.6 | — |
 | 10 | A maintained breached-password check (e.g. HaveIBeenPwned k-anonymity) replacing the hand-typed deny-list | before it matters for a real user base |
 | 11 | Audit log retention/purge policy, enforced in code | first real data / compliance review |
 | 12 | Encrypted, tested database backups | first real data |
@@ -948,3 +950,201 @@ Original rules, retained as the standing policy:
   produce a price. `app/services/recommendations.py` remains the sole
   authority on what a customer may be shown; an LLM may only phrase or
   explain results it has already been handed.
+
+---
+
+## 18. Phase 1A hardening (M2)
+
+Each item below is enforced server-side and covered by
+`tests/test_m2_security.py`; the reservation cap is also proven under real
+concurrency by `tests/test_mysql_concurrency.py`
+(`test_reservation_cap_holds_under_concurrent_bookings`). This milestone does
+**not** make Quick Junction production-ready — see
+[`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
+
+### 18.1 Proxy trust (`TRUSTED_PROXY_COUNT`)
+
+`request.remote_addr` keys the login rate limiter and is written to every
+audit row, and `request.scheme`/`host` decide HTTPS detection and external
+URLs. Behind a reverse proxy those come from `X-Forwarded-*` headers, which a
+client can also send itself. Werkzeug's `ProxyFix` is therefore applied
+**only** when `TRUSTED_PROXY_COUNT` (environment variable, default **0**) is
+positive, with `x_for = x_proto = x_host = TRUSTED_PROXY_COUNT`
+(`app/__init__.py`).
+
+- **0 (default):** no forwarded header is read. A spoofed `X-Forwarded-For`
+  changes neither the limiter key nor the audit IP. Correct for local
+  development and any deployment with nothing in front of the app.
+- **N > 0:** ProxyFix reads the N-th value from the right of each header,
+  i.e. the one written by the outermost *trusted* proxy. Anything a client
+  prepends is ignored.
+- Set it to **exactly** the number of proxies. Too high lets a client choose
+  its own IP (it can bypass the limiter and falsify audit IPs); too low makes
+  every client look like the proxy.
+- The proxy must append to `X-Forwarded-For` (Nginx:
+  `$proxy_add_x_forwarded_for`) and **overwrite** `X-Forwarded-Proto` and
+  `X-Forwarded-Host` (`$scheme`, `$host`). A proxy that passes a client's
+  `X-Forwarded-Host` through unchanged would let the client choose the host.
+- A negative value fails at startup (`ConfigError`).
+
+Proxy configuration itself (Nginx, TLS) is deployment work, not part of M2.
+
+### 18.2 Customer checkout boundaries
+
+`/checkout` (GET and POST) is `customer_required`: STAFF and ADMIN get 403
+and anonymous callers get 401, or a redirect to login for browsers. Staff no
+longer place orders as themselves through the customer path.
+`app/services/orders.py::checkout_as_customer` re-checks everything before
+any table row is read:
+
+- the account must be CUSTOMER;
+- the source must be `takeaway` or `online` (`CUSTOMER_ORDER_SOURCES`).
+  `dine_in` is refused because it seats a party and marks the table
+  OCCUPIED. `delivery` is refused because it is out of the pilot (O10);
+- any `table_id` is refused, whatever the source, and whether the table
+  exists, is RESERVED, or is unseatable.
+
+So no crafted request can change floor state. The checkout page no longer
+renders a table selector or the dine-in option, but that is presentation
+only. The underlying `checkout()` still accepts DINE_IN with a table: it is
+the staff-side primitive (OCCUPIED on order, CLEANING when finished). **There
+is currently no staff HTTP screen that calls it** — see 18.10.
+
+### 18.3 Reservation cap
+
+At most `RESERVATION_ACTIVE_LIMIT` (default **2**, must be ≥ 1)
+**active future** reservations per customer, meaning status CONFIRMED and a
+slot start that is still after the database clock's "now". CANCELLED,
+COMPLETED and NO_SHOW rows never count, and neither does a CONFIRMED row
+whose slot has already begun.
+
+`create_reservation` serialises each customer's bookings:
+
+1. it ends the current transaction (nothing has been written yet), dropping
+   any REPEATABLE READ snapshot opened earlier in the request;
+2. it locks that customer's `users` row with `SELECT ... FOR UPDATE`;
+3. it counts with a plain read. This is the transaction's first consistent
+   read, so its snapshot is taken after the lock and includes everything the
+   previous lock holder committed;
+4. it inserts, then commits. The commit releases the lock.
+
+Two design points were found by the MySQL tests:
+
+- A `FOR UPDATE` count on `reservations` took gap locks on the user index and
+  deadlocked two *different* customers' inserts (MySQL 1213).
+- Reading the expired `owner` object after step 1 reloaded it with a plain
+  SELECT, which opened the snapshot *before* the lock and let all four
+  concurrent bookings through.
+
+Isolation is unchanged: REPEATABLE READ, the MySQL default. With the lock
+removed, the race test fails (`['ok', 'ok', 'ok', 'ok']`).
+
+### 18.4 Audit rows in the business transaction
+
+`record_event` no longer commits by default; it adds the row to the caller's
+session. There are two patterns (`app/services/audit.py`):
+
+- **Business events.** The service that makes the change takes an `audit`
+  callback and commits through `commit_with(audit, ...)`. That flushes the
+  change, adds the audit row, and commits both **once**. If either fails,
+  both roll back and the error propagates. This applies to order creation,
+  order status changes and cancellations, discounts, payments, refunds,
+  reservation create/cancel/status, table create/update/status, staff
+  approve/revoke, registration (customer and staff), pricing settings, menu,
+  category and ingredient changes, and stock movements and recipes.
+  Multi-step admin saves (menu item + ingredient list, recipe + added line)
+  attach each step's audit row to that step's own commit. `create_admin`
+  (M1) already followed this pattern.
+- **Independent events** pass `commit=True`: login success, failure, pending
+  and wrong-portal refusals, rate limiting, logout (its session revocation
+  must stand even if auditing fails), and every *rejected* attempt
+  (`order_creation_failed`, `order_status_change_rejected`, a failed
+  reservation cancel). Those write nothing else.
+
+The security-log mirror is written only after the row has committed.
+
+### 18.5 Probe endpoints removed
+
+`/account/me`, `/account/staff` and `/account/admin` no longer exist; the
+URL map built by `create_app` has no such rule (404). The tests that used
+them as identity and role oracles use `/_test/me|staff|admin`, which only
+`tests/conftest.py` registers on the test app.
+
+### 18.6 Argon2 rehash on login
+
+`authenticate_user` checks `needs_rehash()` after the password has verified
+and the account is active. If the stored hash uses older parameters, it
+stores a fresh `hash_password()` of the just-verified password and commits.
+If that commit fails, it rolls back and logs a warning (user id only); the
+login still succeeds and the upgrade is retried next time. A failed
+password, an unknown user, or an inactive account never rehash, and a
+current hash is never rewritten. No password or hash is logged.
+
+### 18.7 Failed-login audit data
+
+The username field is attacker-controlled and can hold a password typed into
+the wrong box, so it is **never stored**. Failed-login and rate-limited rows
+store `{"login_id": <32 hex chars>}`:
+HMAC-SHA256(`SECRET_KEY`, trimmed + lowercased input), truncated
+(`app/services/audit.py::login_identifier`).
+
+- **Deterministic:** repeated attempts at one name (in any case or spacing)
+  share an identifier, so an investigator can still see targeting.
+- **Keyed:** usernames are guessable, so an unkeyed hash could be reversed
+  with a list. With the key, someone who can read `audit_logs` but not the
+  server's secret learns nothing.
+- **Bounded:** fixed length regardless of input, and the login form already
+  caps the field at 32 characters.
+- To check whether a given name was targeted, run `login_identifier(name)`
+  in `flask shell` on the server.
+- Rotating `SECRET_KEY` changes every identifier, so older rows no longer
+  correlate with new ones.
+
+Successful logins and refusals of a correct password (pending staff, wrong
+portal) are keyed by `user_id` and carry no typed input. Audit rows written
+before M2 still hold the raw `username`; the retention job (Phase 1, not
+M2) is what removes them.
+
+### 18.8 Local LLM off by default
+
+`LLM_ENABLED` now defaults to **false** in every environment, development
+included. `local_llm.is_enabled()` and `warm_up()` also fail closed when the
+key is missing or no app context exists. While disabled, the model is never
+loaded and never run, and `/recommendations/explain` shows its existing
+"unavailable" notice. Opting in requires `LLM_ENABLED=true` and the weights
+on disk. The LLM is an optional feature, not a production dependency.
+
+### 18.9 Dependency audit (M2)
+
+The same `pip-audit` commands as CI, run with pip-audit 2.10.1 on 2026-10-04:
+
+- **Core production dependencies** (`pip-audit -r requirements.txt`,
+  resolved, including unpinned transitive packages): **no known
+  vulnerabilities.**
+- **Optional AI dependencies** (`pip-audit -r requirements-ai.txt
+  --no-deps`): **13 advisories in 3 packages**, the same set M0 recorded:
+  torch 2.10.0 (2), transformers 4.57.1 (10 entries), accelerate 1.14.0 (1).
+  - These packages are not in `requirements.txt` and are imported lazily,
+    only inside `local_llm._load` and generation. The web application runs,
+    and the full test suite passes, without them.
+  - Their advisories concern loading untrusted checkpoints/state and
+    `torch.jit`/pt2 paths. Quick Junction loads only an operator-supplied
+    local directory (`local_files_only=True`, offline flags), takes no path
+    or model from a request, and never trains at runtime.
+  - **No compatible safe upgrade:** transformers fixes need 5.x, which
+    `peft==0.17.1` cannot import. The torch 2.13 fix covers only one
+    advisory (another has no fix) and is untested with this stack.
+  - **Accepted for the trusted, offline, disabled-by-default model only**;
+    revisit the stack as a whole (torch + transformers + peft) before any
+    installation enables it.
+
+### 18.10 Remaining (not M2)
+
+- **No staff HTTP order-entry screen.** Before M2, dine-in orders were
+  created by whoever used `/checkout`, including staff signed in as
+  themselves. Both paths are now closed, so dine-in orders can only be
+  created by calling `checkout()` directly. A staff/QR ordering flow is
+  later-phase work.
+- Shared-store (Redis) rate limiting, password change/reset, staff
+  invitations, DB privilege separation, audit retention, and deployment
+  (Nginx/TLS) are all still open: see `PRODUCTION_READINESS.md`.

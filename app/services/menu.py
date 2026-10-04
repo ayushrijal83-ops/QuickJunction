@@ -24,6 +24,7 @@ from app.models.category import Category
 from app.models.enums import Cuisine, DietaryType, SpiceLevel
 from app.models.ingredient import Ingredient
 from app.models.menu_item import MenuItem
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 
 MIN_PRICE = Decimal("0.01")
@@ -66,7 +67,7 @@ def _category_name_taken(name: str, *, exclude_id: int | None = None) -> bool:
     return query.first() is not None
 
 
-def create_category(data: CategoryInput) -> Category:
+def create_category(data: CategoryInput, *, audit=None) -> Category:
     name = data.name.strip()
     errors: dict[str, list[str]] = {}
 
@@ -81,14 +82,14 @@ def create_category(data: CategoryInput) -> Category:
     category = Category(name=name, description=(data.description or "").strip() or None, is_active=data.is_active)
     db.session.add(category)
     try:
-        db.session.commit()
+        commit_with(audit, category)
     except IntegrityError:
         db.session.rollback()
         raise CategoryError({"name": ["A category with this name already exists."]})
     return category
 
 
-def update_category(category: Category, data: CategoryInput) -> Category:
+def update_category(category: Category, data: CategoryInput, *, audit=None) -> Category:
     name = data.name.strip()
     errors: dict[str, list[str]] = {}
 
@@ -105,7 +106,7 @@ def update_category(category: Category, data: CategoryInput) -> Category:
     category.is_active = data.is_active
 
     try:
-        db.session.commit()
+        commit_with(audit, category)
     except IntegrityError:
         db.session.rollback()
         raise CategoryError({"name": ["A category with this name already exists."]})
@@ -188,7 +189,7 @@ def _validate_menu_item_input(data: MenuItemInput):
     return name, description, category, price, cuisine, spice_level, dietary_type
 
 
-def create_menu_item(data: MenuItemInput) -> MenuItem:
+def create_menu_item(data: MenuItemInput, *, audit=None) -> MenuItem:
     name, description, category, price, cuisine, spice_level, dietary_type = _validate_menu_item_input(data)
 
     item = MenuItem(
@@ -202,11 +203,11 @@ def create_menu_item(data: MenuItemInput) -> MenuItem:
         is_available=data.is_available,
     )
     db.session.add(item)
-    db.session.commit()
+    commit_with(audit, item)
     return item
 
 
-def update_menu_item(item: MenuItem, data: MenuItemInput) -> MenuItem:
+def update_menu_item(item: MenuItem, data: MenuItemInput, *, audit=None) -> MenuItem:
     name, description, category, price, cuisine, spice_level, dietary_type = _validate_menu_item_input(data)
 
     item.category_id = category.id
@@ -217,7 +218,7 @@ def update_menu_item(item: MenuItem, data: MenuItemInput) -> MenuItem:
     item.spice_level = spice_level
     item.dietary_type = dietary_type
     item.is_available = data.is_available
-    db.session.commit()
+    commit_with(audit, item)
     return item
 
 
@@ -264,7 +265,7 @@ def parse_ingredient_names(raw: str) -> list[str]:
     return names
 
 
-def sync_menu_item_ingredients(item: MenuItem, names: list[str]) -> bool:
+def sync_menu_item_ingredients(item: MenuItem, names: list[str], *, audit=None) -> bool:
     """Set item.ingredients to exactly ``names`` (find-or-create each
     Ingredient by normalized name). Returns True if the set changed."""
     too_long = [n for n in names if len(n) > MAX_INGREDIENT_NAME_LENGTH]
@@ -289,5 +290,5 @@ def sync_menu_item_ingredients(item: MenuItem, names: list[str]) -> bool:
         resolved.append(ingredient)
 
     item.ingredients = resolved
-    db.session.commit()
+    commit_with(audit, item)
     return True

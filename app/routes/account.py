@@ -1,15 +1,17 @@
-"""The role dashboard (``/account/``) plus the small authorization-foundation
-endpoints (``/account/me``, ``/account/staff``, ``/account/admin``) that the
-M02 role-boundary tests exercise.
+"""The role dashboard (``/account/``).
+
+The M02 probe endpoints (``/account/me``, ``/account/staff``,
+``/account/admin``) were removed in M2: they were test scaffolding, not
+product. The tests use an equivalent test-only blueprint (tests/conftest.py).
 """
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, render_template
 
 from app.models.user import Role
 from app.services import dashboard
-from app.utils.authorization import get_current_user, login_required, require_role
+from app.utils.authorization import get_current_user, login_required
 
 account_bp = Blueprint("account", __name__, url_prefix="/account")
 
@@ -26,21 +28,3 @@ def index():
     context = data[user.role](user) if user.role == Role.CUSTOMER else data[user.role]()
     return render_template(f"dashboard/{user.role.value}.html", user=user, **context)
 
-
-@account_bp.get("/me")
-@login_required
-def me():
-    user = get_current_user()
-    return jsonify(username=user.username, role=user.role.value)
-
-
-@account_bp.get("/staff")
-@require_role(Role.STAFF, Role.ADMIN)
-def staff_only():
-    return jsonify(message="staff access confirmed")
-
-
-@account_bp.get("/admin")
-@require_role(Role.ADMIN)
-def admin_only():
-    return jsonify(message="admin access confirmed")
