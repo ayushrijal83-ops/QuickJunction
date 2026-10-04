@@ -33,6 +33,14 @@ Each release uses only the sections that apply, in this order:
   written in one transaction. Documented in `docs/DATABASE_SETUP_GUIDE.md` §14.
 - `admin_created` audit event, recorded by `flask create-admin` (metadata:
   `{"source": "cli"}` only).
+- `TRUSTED_PROXY_COUNT` setting (M2, default `0`): Werkzeug `ProxyFix` is
+  applied only when it is positive, trusting exactly that many proxies for
+  `X-Forwarded-For`/`-Proto`/`-Host`.
+- `RESERVATION_ACTIVE_LIMIT` setting (M2, default `2`): most active future
+  CONFIRMED reservations per customer, enforced under a `users`-row lock.
+- `app/services/audit.commit_with` and `login_identifier` (M2).
+- `tests/test_m2_security.py` (72 tests) and a MySQL reservation-cap race
+  test; CI now expects 8 MySQL concurrency tests.
 - `docs/STATUS.md` — verified current state and baseline record.
 - `docs/PRODUCTION_READINESS.md` — go-live checklist.
 - `docs/RELEASE_PROCESS.md` — branching, tagging, changelog and intended
@@ -54,6 +62,32 @@ Each release uses only the sections that apply, in this order:
 - `app/services/audit.record_event` accepts `commit=False` so an audit row can
   share the caller's transaction (used by `create_admin`; every existing caller
   keeps the previous behaviour).
+- **M2:** `record_event` no longer commits by default. Business actions write
+  their audit row inside their own transaction; independent auth/rejection
+  events pass `commit=True`.
+- **M2:** `/checkout` is for CUSTOMER accounts only (staff/admin get 403) and
+  offers takeaway and online only. Dine-in and delivery are no longer
+  available to customers; the table selector is gone.
+- **M2:** `LLM_ENABLED` defaults to `false` in every environment, development
+  included.
+- **M2:** failed-login and rate-limited audit rows store
+  `{"login_id": <keyed hash>}` instead of the typed username.
+
+### Removed
+
+- **M2:** `/account/me`, `/account/staff`, `/account/admin` probe endpoints.
+
+### Security
+
+- **M2 — Phase 1A hardening** (`docs/SECURITY.md` §18): forwarded headers
+  untrusted unless configured; customers can no longer occupy, reserve or
+  otherwise change a table through checkout; staff/admin cannot place orders
+  through the customer checkout; per-customer reservation cap that holds
+  under concurrency; business changes can no longer commit without their audit
+  row; outdated Argon2 hashes are upgraded on successful login; raw login
+  input is no longer stored in the audit log; the local LLM is off unless
+  explicitly enabled. Dependency audit re-run: runtime clean, optional AI
+  stack unchanged (13 advisories, accepted while disabled).
 
 ### Fixed
 
@@ -73,6 +107,13 @@ Each release uses only the sections that apply, in this order:
   `flask create-admin` fails with a CHECK-constraint error and creates nothing.
 - Create administrators with `flask create-admin` from an interactive terminal on
   the server. Do not promote accounts with SQL.
+- **M2 (no migration):** behind a reverse proxy, set `TRUSTED_PROXY_COUNT`
+  to the number of proxies (1 for a single Nginx), or every client will share
+  the proxy's IP. Leave it at 0 otherwise.
+- **M2:** to keep AI explanations on (e.g. a development machine or demo), set
+  `LLM_ENABLED=true`. They are now off by default.
+- **M2:** staff can no longer take dine-in orders through `/checkout`, and
+  there is no replacement screen yet. Plan pilot operations accordingly.
 
 ## [0.9.0] — 2026-10-03
 

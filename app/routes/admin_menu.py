@@ -48,8 +48,10 @@ def _apply_form_errors(form, errors: dict[str, list[str]]) -> None:
                 flash(message, "error")
 
 
-def _audit(event_type: AuditEvent, **metadata) -> None:
-    record_event(
+def _audit(event_type: AuditEvent, **metadata):
+    """Called by the menu service inside its transaction (``audit=``
+    callbacks), so the row commits with the change."""
+    return record_event(
         event_type,
         success=True,
         user_id=get_current_user().id,
@@ -57,6 +59,10 @@ def _audit(event_type: AuditEvent, **metadata) -> None:
         user_agent=user_agent(),
         metadata=metadata or None,
     )
+
+
+def _ingredients_audit(item: MenuItem):
+    return _audit(AuditEvent.INGREDIENT_CHANGED, menu_item_id=item.id)
 
 
 def _category_choices() -> list[tuple[int, str]]:
@@ -81,12 +87,12 @@ def category_create():
     if form.validate_on_submit():
         try:
             category = create_category(
-                CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data)
+                CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data),
+                audit=lambda c: _audit(AuditEvent.CATEGORY_CREATED, category_id=c.id, name=c.name),
             )
         except CategoryError as exc:
             _apply_form_errors(form, exc.errors)
         else:
-            _audit(AuditEvent.CATEGORY_CREATED, category_id=category.id, name=category.name)
             flash(f'Category "{category.name}" created.', "success")
             return redirect(url_for("admin_menu.category_list"))
 
@@ -107,14 +113,13 @@ def category_edit(category_id: int):
             update_category(
                 category,
                 CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data),
+                audit=lambda c: _audit(
+                    AuditEvent.CATEGORY_DEACTIVATED if was_active and not c.is_active else AuditEvent.CATEGORY_UPDATED,
+                    category_id=c.id, name=c.name),
             )
         except CategoryError as exc:
             _apply_form_errors(form, exc.errors)
         else:
-            if was_active and not category.is_active:
-                _audit(AuditEvent.CATEGORY_DEACTIVATED, category_id=category.id, name=category.name)
-            else:
-                _audit(AuditEvent.CATEGORY_UPDATED, category_id=category.id, name=category.name)
             flash(f'Category "{category.name}" updated.', "success")
             return redirect(url_for("admin_menu.category_list"))
 
@@ -148,15 +153,15 @@ def menu_create():
                     spice_level=form.spice_level.data,
                     dietary_type=form.dietary_type.data,
                     is_available=form.is_available.data,
-                )
+                ),
+                audit=lambda i: _audit(AuditEvent.MENU_ITEM_CREATED, menu_item_id=i.id, name=i.name),
             )
         except MenuItemError as exc:
             _apply_form_errors(form, exc.errors)
         else:
-            _audit(AuditEvent.MENU_ITEM_CREATED, menu_item_id=item.id, name=item.name)
             ingredient_names = parse_ingredient_names(form.ingredients.data)
-            if ingredient_names and sync_menu_item_ingredients(item, ingredient_names):
-                _audit(AuditEvent.INGREDIENT_CHANGED, menu_item_id=item.id)
+            if ingredient_names:
+                sync_menu_item_ingredients(item, ingredient_names, audit=_ingredients_audit)
             flash(f'Menu item "{item.name}" created.', "success")
             return redirect(url_for("admin_menu.menu_list"))
 
@@ -192,18 +197,16 @@ def menu_edit(item_id: int):
                     dietary_type=form.dietary_type.data,
                     is_available=form.is_available.data,
                 ),
+                audit=lambda i: (
+                    _audit(AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED, menu_item_id=i.id, is_available=i.is_available)
+                    if was_available != i.is_available
+                    else _audit(AuditEvent.MENU_ITEM_UPDATED, menu_item_id=i.id, name=i.name)
+                ),
             )
         except MenuItemError as exc:
             _apply_form_errors(form, exc.errors)
         else:
-            if was_available != item.is_available:
-                _audit(AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED, menu_item_id=item.id, is_available=item.is_available)
-            else:
-                _audit(AuditEvent.MENU_ITEM_UPDATED, menu_item_id=item.id, name=item.name)
-
-            ingredient_names = parse_ingredient_names(form.ingredients.data)
-            if sync_menu_item_ingredients(item, ingredient_names):
-                _audit(AuditEvent.INGREDIENT_CHANGED, menu_item_id=item.id)
+            sync_menu_item_ingredients(item, parse_ingredient_names(form.ingredients.data), audit=_ingredients_audit)
 
             flash(f'Menu item "{item.name}" updated.', "success")
             return redirect(url_for("admin_menu.menu_list"))

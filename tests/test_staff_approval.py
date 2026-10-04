@@ -79,7 +79,7 @@ def test_1_new_staff_account_defaults_to_pending(client, db):
     assert user.role == Role.STAFF
     assert user.staff_approved is False
     # Not signed in by registration, unlike a customer.
-    assert get(client, "/account/me").status_code == 401
+    assert get(client, "/_test/me").status_code == 401
     assert _db.session.query(AuditLog).filter_by(event_type=AuditEvent.STAFF_REGISTERED).count() == 1
 
 
@@ -168,7 +168,7 @@ def test_7_8_admin_approves_and_staff_can_then_work(client, db):
 
     login(client, "newcook", "staff")
     assert get(client, "/staff/orders").status_code == 200
-    assert get(client, "/account/me").get_json()["role"] == "staff"
+    assert get(client, "/_test/me").get_json()["role"] == "staff"
 
 
 def test_9_revocation_blocks_the_existing_session_on_the_next_request(app, client, db):
@@ -184,7 +184,7 @@ def test_9_revocation_blocks_the_existing_session_on_the_next_request(app, clien
 
     # The staff member's still-held cookie no longer authenticates.
     assert get(client, "/staff/orders").status_code == 401
-    assert get(client, "/account/me").status_code == 401
+    assert get(client, "/_test/me").status_code == 401
     assert "waiting for administrator approval" in login(client, "cook", "staff").get_data(as_text=True)
 
 
@@ -211,7 +211,7 @@ def test_10_a_portal_refuses_other_account_types(client, db, role, portal):
     response = login(client, "someone", portal)
     assert response.status_code == 200
     assert f"does not have {portal} access" in response.get_data(as_text=True)
-    assert get(client, "/account/me").status_code == 401
+    assert get(client, "/_test/me").status_code == 401
 
 
 @pytest.mark.parametrize("role, portal, allowed, denied", [

@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app.cli import register_cli
 from app.extensions import csrf, db, migrate
@@ -39,6 +40,12 @@ def create_app(config_name: str | None = None) -> Flask:
     config_class.validate()
 
     configure_logging(app)
+
+    # Forwarded headers are trusted only from the configured number of
+    # proxies, and not at all by default -- see TRUSTED_PROXY_COUNT in config.py.
+    hops = app.config["TRUSTED_PROXY_COUNT"]
+    if hops:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
 
     # Production refuses this outright (ProductionConfig.validate); elsewhere
     # it is a loud reminder rather than a hard stop, so an existing local

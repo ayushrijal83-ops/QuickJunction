@@ -61,6 +61,23 @@ class BaseConfig:
     SESSION_COOKIE_SECURE: bool = True  # relaxed only in development
     PERMANENT_SESSION_LIFETIME: timedelta = timedelta(hours=8)
 
+    # --- reverse proxy (M2) ------------------------------------------------
+    # How many reverse proxies in front of the app may set X-Forwarded-For,
+    # -Proto and -Host. 0 (the default) trusts none of them: every forwarded
+    # header is ignored and request.remote_addr / scheme / host come from the
+    # socket and the Host header, so a client cannot spoof its IP (which keys
+    # the login limiter and the audit log) by sending the header itself. Set
+    # it to exactly the number of proxies that each *overwrite or append* those
+    # headers -- 1 for a single Nginx. Too high lets a client pick its own
+    # IP; too low makes every client look like the proxy. See docs/SECURITY.md.
+    TRUSTED_PROXY_COUNT: int = int(os.environ.get("TRUSTED_PROXY_COUNT", "0"))
+
+    # --- reservations (M2) -------------------------------------------------
+    # Most CONFIRMED reservations a customer may hold for a slot that has not
+    # started yet. Enforced under a row lock in
+    # app/services/reservations.py::create_reservation.
+    RESERVATION_ACTIVE_LIMIT: int = int(os.environ.get("RESERVATION_ACTIVE_LIMIT", "2"))
+
     # --- request limits --------------------------------------------------
     MAX_CONTENT_LENGTH: int = 2 * 1024 * 1024  # 2 MiB
 
@@ -76,7 +93,11 @@ class BaseConfig:
     # input -- nothing in app/services/local_llm.py accepts a path from a
     # caller. Inference is local and offline; there is no API key here
     # because there is no external service.
-    LLM_ENABLED: bool = _env_bool("LLM_ENABLED", True)
+    #
+    # Off unless LLM_ENABLED=true is set (M2): the model is an optional
+    # feature, not a production dependency. Disabled means it is never
+    # loaded and never run; explanations show as unavailable.
+    LLM_ENABLED: bool = _env_bool("LLM_ENABLED", False)
     LLM_MODEL_PATH: str = os.environ.get("LLM_MODEL_PATH", str(BASE_DIR / "models" / "Qwen3-0.6B-Base"))
     # LoRA adapter produced by training/train_lora.py.
     #
@@ -124,6 +145,10 @@ class BaseConfig:
             for name in ("SECRET_KEY", "SQLALCHEMY_DATABASE_URI")
             if not getattr(cls, name)
         ]
+        if cls.TRUSTED_PROXY_COUNT < 0:
+            raise ConfigError("TRUSTED_PROXY_COUNT must be 0 or a positive number of proxies.")
+        if cls.RESERVATION_ACTIVE_LIMIT < 1:
+            raise ConfigError("RESERVATION_ACTIVE_LIMIT must be at least 1.")
         if missing:
             env_names = {"SQLALCHEMY_DATABASE_URI": "DATABASE_URL"}
             required = ", ".join(env_names.get(n, n) for n in missing)

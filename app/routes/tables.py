@@ -31,9 +31,11 @@ from app.utils.request_meta import client_ip, user_agent
 tables_bp = Blueprint("tables", __name__)
 
 
-def _audit(event: AuditEvent, metadata: dict) -> None:
-    record_event(event, success=True, user_id=get_current_user().id, ip_address=client_ip(),
-                 user_agent=user_agent(), metadata=metadata)
+def _audit(event: AuditEvent, metadata: dict):
+    """Called by the service inside its transaction, so the row commits with
+    the change (app/services/audit.py::commit_with)."""
+    return record_event(event, success=True, user_id=get_current_user().id, ip_address=client_ip(),
+                        user_agent=user_agent(), metadata=metadata)
 
 
 def _get_table(table_id: int) -> RestaurantTable:
@@ -73,12 +75,11 @@ def set_status(table_id: int):
         flash("Could not update the table.", "error")
         return redirect(url_for("tables.board"))
     try:
-        previous = change_table_status(table, form.status.data)
+        change_table_status(table, form.status.data, audit=lambda previous: _audit(
+            AuditEvent.TABLE_STATUS_CHANGED, {"table_id": table.id, "from": previous.value, "to": table.status.value}))
     except TableError as exc:
         _flash_errors(exc)
         return redirect(url_for("tables.board"))
-    _audit(AuditEvent.TABLE_STATUS_CHANGED,
-           {"table_id": table.id, "from": previous.value, "to": table.status.value})
     flash(f"{table.name} is now {table.status.value.replace('_', ' ')}.", "success")
     return redirect(url_for("tables.board"))
 
@@ -89,11 +90,11 @@ def new():
     form = TableForm()
     if form.validate_on_submit():
         try:
-            table = create_table(form.name.data, form.capacity.data)
+            table = create_table(form.name.data, form.capacity.data,
+                                 audit=lambda t: _audit(AuditEvent.TABLE_CREATED, {"table_id": t.id}))
         except TableError as exc:
             _flash_errors(exc)
         else:
-            _audit(AuditEvent.TABLE_CREATED, {"table_id": table.id})
             flash(f"{table.name} added.", "success")
             return redirect(url_for("tables.board"))
     return render_template("tables/form.html", form=form, table=None)
@@ -106,12 +107,12 @@ def edit(table_id: int):
     form = TableForm(obj=table)
     if form.validate_on_submit():
         try:
-            update_table(table, form.name.data, form.capacity.data)
+            update_table(table, form.name.data, form.capacity.data,
+                         audit=lambda t: _audit(AuditEvent.TABLE_UPDATED, {"table_id": t.id}))
         except TableError as exc:
             db.session.refresh(table)
             _flash_errors(exc)
         else:
-            _audit(AuditEvent.TABLE_UPDATED, {"table_id": table.id})
             flash(f"{table.name} updated.", "success")
             return redirect(url_for("tables.board"))
     return render_template("tables/form.html", form=form, table=table)

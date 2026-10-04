@@ -255,7 +255,7 @@ def test_4_registration_creates_the_account(client, db):
 
 def test_4b_registration_authenticates_the_new_user(client, db):
     client.post("/register", data=_registration())
-    identity = client.get("/account/me")
+    identity = client.get("/_test/me")
     assert identity.status_code == 200
     assert identity.get_json()["username"] == "newcomer"
 

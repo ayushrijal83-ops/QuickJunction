@@ -44,9 +44,11 @@ WINDOWS = (7, 30, 90)
 _QTY_FIELD = re.compile(r"^q_(\d+)$")
 
 
-def _audit(event: AuditEvent, metadata: dict) -> None:
-    record_event(event, success=True, user_id=get_current_user().id, ip_address=client_ip(),
-                 user_agent=user_agent(), metadata=metadata)
+def _audit(event: AuditEvent, metadata: dict):
+    """Called by the service inside its transaction (``audit=`` callbacks), so
+    the row commits with the change (app/services/audit.py::commit_with)."""
+    return record_event(event, success=True, user_id=get_current_user().id, ip_address=client_ip(),
+                        user_agent=user_agent(), metadata=metadata)
 
 
 def _flash_errors(exc: InventoryError) -> None:
@@ -98,13 +100,13 @@ def movement(ingredient_id: int):
         return redirect(url_for("inventory.detail", ingredient_id=ingredient.id))
     try:
         moved = record_movement(ingredient, form.movement_type.data, form.quantity.data, form.note.data,
-                                get_current_user())
+                                get_current_user(), audit=lambda m: _audit(AuditEvent.STOCK_MOVEMENT_RECORDED, {
+                                    "ingredient_id": ingredient.id, "movement_id": m.id,
+                                    "type": m.movement_type.value, "change": str(m.quantity_change),
+                                    "after": str(m.quantity_after)}))
     except InventoryError as exc:
         _flash_errors(exc)
         return redirect(url_for("inventory.detail", ingredient_id=ingredient.id))
-    _audit(AuditEvent.STOCK_MOVEMENT_RECORDED, {
-        "ingredient_id": ingredient.id, "movement_id": moved.id, "type": moved.movement_type.value,
-        "change": str(moved.quantity_change), "after": str(moved.quantity_after)})
     flash(f"{ingredient.name}: {moved.movement_type.value} recorded; now {moved.quantity_after} {ingredient.unit.value}.",
           "success")
     return redirect(url_for("inventory.detail", ingredient_id=ingredient.id))
@@ -117,13 +119,14 @@ def _save(ingredient: Ingredient | None):
     if form.validate_on_submit():
         try:
             saved = save_ingredient(ingredient, form.name.data, form.unit.data, form.minimum_quantity.data,
-                                    form.is_active.data)
+                                    form.is_active.data, audit=lambda i: _audit(
+                                        AuditEvent.STOCK_ITEM_SAVED, {"ingredient_id": i.id,
+                                                                      "created": ingredient is None}))
         except InventoryError as exc:
             if ingredient is not None:
                 db.session.refresh(ingredient)
             _flash_errors(exc)
         else:
-            _audit(AuditEvent.STOCK_ITEM_SAVED, {"ingredient_id": saved.id, "created": ingredient is None})
             flash(f"{saved.name} saved.", "success")
             return redirect(url_for("inventory.detail", ingredient_id=saved.id))
     return render_template("inventory/form.html", form=form, ingredient=ingredient, units=list(StockUnit))
@@ -151,16 +154,18 @@ def recipe(item_id: int):
     if form.validate_on_submit():
         quantities = {int(m.group(1)): value for key, value in request.form.items()
                       if (m := _QTY_FIELD.match(key))}
+        add_id, add_qty = request.form.get("add_ingredient_id", ""), request.form.get("add_quantity", "")
+        # The audit row rides on the last commit of the save.
+        audit = lambda: _audit(AuditEvent.RECIPE_UPDATED, {"menu_item_id": item.id})  # noqa: E731
         try:
-            set_recipe(item, quantities)
-            add_id, add_qty = request.form.get("add_ingredient_id", ""), request.form.get("add_quantity", "")
+            set_recipe(item, quantities, audit=None if add_id else audit)
             if add_id:
-                add_to_recipe(item, _ingredient(int(add_id)) if add_id.isdigit() else abort(404), add_qty)
+                add_to_recipe(item, _ingredient(int(add_id)) if add_id.isdigit() else abort(404), add_qty,
+                              audit=audit)
         except InventoryError as exc:
             db.session.rollback()
             _flash_errors(exc)
         else:
-            _audit(AuditEvent.RECIPE_UPDATED, {"menu_item_id": item.id})
             flash(f"Recipe for {item.name} saved.", "success")
             return redirect(url_for("inventory.recipe", item_id=item.id))
     lines = recipe_lines(item)

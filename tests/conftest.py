@@ -68,9 +68,40 @@ def _fresh_schema_for_mysql_migration_tests(request):
     yield
 
 
+def _register_test_probes(application: Flask) -> None:
+    """Identity/role probes for the auth-boundary tests. They used to be real
+    routes (``/account/me|staff|admin``); M2 removed those from the product,
+    so they exist only on the test app and are never registered by
+    ``create_app``."""
+    from flask import Blueprint, jsonify
+
+    from app.utils.authorization import get_current_user, login_required, require_role
+
+    probes = Blueprint("test_probes", __name__, url_prefix="/_test")
+
+    @probes.get("/me")
+    @login_required
+    def me():
+        user = get_current_user()
+        return jsonify(username=user.username, role=user.role.value)
+
+    @probes.get("/staff")
+    @require_role(Role.STAFF, Role.ADMIN)
+    def staff_only():
+        return jsonify(message="staff access confirmed")
+
+    @probes.get("/admin")
+    @require_role(Role.ADMIN)
+    def admin_only():
+        return jsonify(message="admin access confirmed")
+
+    application.register_blueprint(probes)
+
+
 @pytest.fixture
 def app() -> Flask:
     application = create_app("testing")
+    _register_test_probes(application)
     assert_disposable_test_database(application.config["SQLALCHEMY_DATABASE_URI"])
     with application.app_context():
         _db.create_all()

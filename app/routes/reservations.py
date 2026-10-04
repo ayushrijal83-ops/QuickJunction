@@ -41,10 +41,13 @@ from app.utils.request_meta import client_ip, user_agent
 reservations_bp = Blueprint("reservations", __name__)
 
 
-def _audit(event: AuditEvent, success: bool, metadata: dict) -> None:
+def _audit(event: AuditEvent, success: bool, metadata: dict, *, commit: bool = False):
+    """Success rows are added by the service inside the change's own
+    transaction (``audit=`` callbacks below); a rejected attempt wrote
+    nothing, so its row is committed on its own (``commit=True``)."""
     user = get_current_user()
-    record_event(event, success=success, user_id=user.id, ip_address=client_ip(), user_agent=user_agent(),
-                 metadata={**metadata, "actor": user.role.value})
+    return record_event(event, success=success, user_id=user.id, ip_address=client_ip(), user_agent=user_agent(),
+                        metadata={**metadata, "actor": user.role.value}, commit=commit)
 
 
 def _flash_errors(exc: ReservationError) -> None:
@@ -81,15 +84,16 @@ def create():
         flash("Please choose a date, time, party size and table.", "error")
         return redirect(url_for("reservations.new"))
     try:
-        reservation = create_reservation(get_current_user(), form.table_id.data, form.reservation_date.data,
-                                         form.reservation_time.data, form.guest_count.data)
+        reservation = create_reservation(
+            get_current_user(), form.table_id.data, form.reservation_date.data, form.reservation_time.data,
+            form.guest_count.data, audit=lambda r: _audit(AuditEvent.RESERVATION_CREATED, True,
+                                                          {"reservation_id": r.id, "table_id": r.table_id}))
     except ReservationError as exc:
         if not wants_html():
             return jsonify(error={"status": 409, "message": next(iter(exc.errors.values()))[0]}), 409
         _flash_errors(exc)
         return redirect(url_for("reservations.new", reservation_date=form.reservation_date.data,
                                 reservation_time=form.reservation_time.data, guest_count=form.guest_count.data))
-    _audit(AuditEvent.RESERVATION_CREATED, True, {"reservation_id": reservation.id, "table_id": reservation.table_id})
     flash("Reservation confirmed.", "success")
     return redirect(url_for("reservations.detail", reservation_id=reservation.id))
 
@@ -120,16 +124,17 @@ def cancel(reservation_id: int):
     if not CancelOrderForm().validate_on_submit():
         abort(400)
     try:
-        previous = cancel_reservation_as_customer(reservation, user)
+        cancel_reservation_as_customer(reservation, user, audit=lambda previous: _audit(
+            AuditEvent.RESERVATION_STATUS_CHANGED, True,
+            {"reservation_id": reservation.id, "from": previous.value, "to": "cancelled"}))
     except ReservationError as exc:
         _audit(AuditEvent.RESERVATION_STATUS_CHANGED, False,
-               {"reservation_id": reservation.id, "from": reservation.status.value, "attempted": "cancelled"})
+               {"reservation_id": reservation.id, "from": reservation.status.value, "attempted": "cancelled"},
+               commit=True)
         if not wants_html():
             return jsonify(error={"status": 409, "message": exc.errors["status"][0]}), 409
         _flash_errors(exc)
         return redirect(url_for("reservations.detail", reservation_id=reservation.id))
-    _audit(AuditEvent.RESERVATION_STATUS_CHANGED, True,
-           {"reservation_id": reservation.id, "from": previous.value, "to": reservation.status.value})
     flash("Reservation cancelled.", "success")
     return redirect(url_for("reservations.detail", reservation_id=reservation.id))
 
@@ -154,11 +159,11 @@ def staff_set_status(reservation_id: int):
     if not form.validate_on_submit():
         abort(400)
     try:
-        previous = update_reservation_status(reservation, form.status.data)
+        update_reservation_status(reservation, form.status.data, audit=lambda previous: _audit(
+            AuditEvent.RESERVATION_STATUS_CHANGED, True,
+            {"reservation_id": reservation.id, "from": previous.value, "to": form.status.data}))
     except ReservationError as exc:
         _flash_errors(exc)
         return redirect(url_for("reservations.staff_list"))
-    _audit(AuditEvent.RESERVATION_STATUS_CHANGED, True,
-           {"reservation_id": reservation.id, "from": previous.value, "to": reservation.status.value})
     flash(f"Reservation #{reservation.id} is now {reservation.status.value.replace('_', ' ')}.", "success")
     return redirect(url_for("reservations.staff_list"))

@@ -273,7 +273,7 @@ Optional AI settings (all have working defaults):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LLM_ENABLED` | `true` | master switch for explanations |
+| `LLM_ENABLED` | `false` (since M2) | master switch for explanations; set `true` to opt in |
 | `LLM_MODEL_PATH` | `models/Qwen3-0.6B-Base` | base weights |
 | `LLM_ADAPTER_PATH` | `models/qwen3-0.6b-quickjunction-lora-v4` | LoRA adapter (production) |
 | `LLM_MAX_NEW_TOKENS` | `48` | bounds explanation latency |

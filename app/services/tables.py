@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.extensions import db
 from app.models.order import Order, OrderStatus
 from app.models.restaurant_table import MAX_CAPACITY, MIN_CAPACITY, RestaurantTable, TableStatus
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 
 S = TableStatus
@@ -53,30 +54,31 @@ def _validated(name: str | None, capacity) -> tuple[str, int]:
     return name, capacity
 
 
-def _commit_or_duplicate(name: str) -> None:
+def _commit_or_duplicate(name: str, audit=None, *args) -> None:
     try:
-        db.session.commit()
+        commit_with(audit, *args)
     except IntegrityError:
         db.session.rollback()
         raise TableError({"name": [f"A table named {name!r} already exists."]})
 
 
-def create_table(name: str | None, capacity) -> RestaurantTable:
+def create_table(name: str | None, capacity, *, audit=None) -> RestaurantTable:
     name, capacity = _validated(name, capacity)
     table = RestaurantTable(name=name, capacity=capacity, status=TableStatus.AVAILABLE)
     db.session.add(table)
-    _commit_or_duplicate(name)
+    _commit_or_duplicate(name, audit, table)
     return table
 
 
-def update_table(table: RestaurantTable, name: str | None, capacity) -> None:
+def update_table(table: RestaurantTable, name: str | None, capacity, *, audit=None) -> None:
     table.name, table.capacity = _validated(name, capacity)
-    _commit_or_duplicate(table.name)
+    _commit_or_duplicate(table.name, audit, table)
 
 
-def change_table_status(table: RestaurantTable, raw_status: str | None) -> TableStatus:
+def change_table_status(table: RestaurantTable, raw_status: str | None, *, audit=None) -> TableStatus:
     """Returns the previous status; raises ``TableError`` on an unknown value
-    or a transition outside the allow-list."""
+    or a transition outside the allow-list. ``audit(previous)`` adds the
+    audit row in the same transaction."""
     try:
         new_status = TableStatus(raw_status)
     except ValueError:
@@ -85,7 +87,7 @@ def change_table_status(table: RestaurantTable, raw_status: str | None) -> Table
     if new_status not in ALLOWED_TABLE_TRANSITIONS[previous]:
         raise TableError({"status": [f"Cannot change a table from {previous.value} to {new_status.value}."]})
     table.status = new_status
-    db.session.commit()
+    commit_with(audit, previous)
     return previous
 
 

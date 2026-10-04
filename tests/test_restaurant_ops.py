@@ -355,15 +355,19 @@ def test_database_enforces_source_table_rule(db):
     _db.session.rollback()
 
 
-def test_checkout_route_dine_in(client, db):
+def test_checkout_route_refuses_customer_dine_in(client, db):
+    """M2: was test_checkout_route_dine_in. A customer can no longer seat
+    themselves through checkout; dine-in is the staff-side ``checkout()``
+    path (test_dine_in_requires_table_and_occupies_it)."""
     table = create_table("T08", 4)
     item = make_menu_item()
     customer()
     login(client, "diner")
     client.post("/cart/add", data={"menu_item_id": item.id, "quantity": 1})
     client.post("/checkout", data={"source": "dine_in", "table_id": str(table.id)})
-    order = _db.session.query(Order).one()
-    assert (order.source, order.table_id) == (OrderSource.DINE_IN, table.id)
+    assert _db.session.query(Order).count() == 0
+    _db.session.expire_all()
+    assert _db.session.get(RestaurantTable, table.id).status == TableStatus.AVAILABLE
 
 
 def test_completed_order_keeps_its_table_after_table_is_freed(db):

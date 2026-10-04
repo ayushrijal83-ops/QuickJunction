@@ -25,6 +25,7 @@ from app.extensions import db
 from app.models.order import Order, OrderStatus
 from app.models.payment import Payment, PaymentMethod
 from app.models.user import User
+from app.services.audit import commit_with
 from app.services.errors import ValidationError
 
 _CENTS = Decimal("0.01")
@@ -38,7 +39,7 @@ def _fail(message: str):
     raise PaymentError({"payment": [message]})
 
 
-def record_payment(order: Order, raw_method, actor: User) -> Payment:
+def record_payment(order: Order, raw_method, actor: User, *, audit=None) -> Payment:
     try:
         method = PaymentMethod(raw_method)
     except ValueError:
@@ -59,15 +60,16 @@ def record_payment(order: Order, raw_method, actor: User) -> Payment:
     payment = Payment(order_id=locked.id, method=method, amount=locked.total, recorded_by_id=actor.id)
     db.session.add(payment)
     try:
-        db.session.commit()
+        commit_with(audit, payment)
     except IntegrityError:
         db.session.rollback()
         _fail(f"Order #{order.id} is already paid.")
     return payment
 
 
-def refund_payment(payment: Payment, raw_amount, reason: str | None) -> Decimal:
-    """Refund ``raw_amount`` (≤ what is still unrefunded). Returns the amount."""
+def refund_payment(payment: Payment, raw_amount, reason: str | None, *, audit=None) -> Decimal:
+    """Refund ``raw_amount`` (≤ what is still unrefunded). Returns the amount.
+    ``audit(amount)`` runs only if the refund applied, in its transaction."""
     try:
         amount = Decimal(str(raw_amount).strip()).quantize(_CENTS)
     except (InvalidOperation, ValueError):
@@ -84,7 +86,9 @@ def refund_payment(payment: Payment, raw_amount, reason: str | None) -> Decimal:
     )
     try:
         won = db.session.execute(stmt).rowcount == 1
-        db.session.commit()
+        if won:
+            db.session.refresh(payment)  # so the audit row sees the new refunded total
+        commit_with(audit if won else None, amount)
     except SQLAlchemyError:
         db.session.rollback()
         _fail("Could not record the refund. Please try again.")

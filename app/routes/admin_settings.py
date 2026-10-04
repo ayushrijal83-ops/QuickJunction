@@ -28,14 +28,15 @@ def pricing():
     if form.validate_on_submit():
         actor = get_current_user()
         try:
-            change = update_settings(form.tax_rate.data, form.staff_max_discount.data, actor)
+            update_settings(form.tax_rate.data, form.staff_max_discount.data, actor,
+                            audit=lambda change: record_event(
+                                AuditEvent.PRICING_SETTINGS_CHANGED, success=True, user_id=actor.id,
+                                ip_address=client_ip(), user_agent=user_agent(), metadata=change))
         except PricingError as exc:
             for messages in exc.errors.values():
                 for message in messages:
                     flash(message, "error")
         else:
-            record_event(AuditEvent.PRICING_SETTINGS_CHANGED, success=True, user_id=actor.id,
-                         ip_address=client_ip(), user_agent=user_agent(), metadata=change)
             flash("Pricing settings saved. They apply to new orders only.", "success")
             return redirect(url_for("admin_settings.pricing"))
     tax_rate, staff_max = current_settings()

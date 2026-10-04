@@ -17,7 +17,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from app.models.audit_log import AuditEvent
 from app.models.user import Role
 from app.routes.forms import LoginForm, RegistrationForm
-from app.services.audit import record_event
+from app.services.audit import login_identifier, record_event
 from app.services.auth import RegistrationError, RegistrationInput, authenticate_user, register_user
 from app.utils.authorization import get_current_user, login_required, login_user, logout_user
 from app.utils.ratelimit import login_limiter
@@ -65,6 +65,12 @@ def safe_next_target() -> str | None:
     return target
 
 
+def _registration_audit(event: AuditEvent):
+    """Audit callback for register_user: the row commits with the account."""
+    return lambda user: record_event(event, success=True, user_id=user.id, ip_address=_client_ip(),
+                                     user_agent=_user_agent())
+
+
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
     if get_current_user() is not None:
@@ -79,7 +85,8 @@ def register():
                     email=form.email.data,
                     password=form.password.data,
                     password_confirm=form.password_confirm.data,
-                )
+                ),
+                audit=_registration_audit(AuditEvent.REGISTER_SUCCESS),
             )
         except RegistrationError as exc:
             for field_name, messages in exc.errors.items():
@@ -89,13 +96,6 @@ def register():
                     for message in messages:
                         flash(message, "error")
         else:
-            record_event(
-                AuditEvent.REGISTER_SUCCESS,
-                success=True,
-                user_id=user.id,
-                ip_address=_client_ip(),
-                user_agent=_user_agent(),
-            )
             # Sign the new account in rather than bouncing to the login form
             # with credentials they typed ten seconds ago. This is the same
             # login_user() the login view calls -- it clears any pre-existing
@@ -122,7 +122,7 @@ def register_staff():
     form = RegistrationForm()
     if form.validate_on_submit():
         try:
-            user = register_user(
+            register_user(
                 RegistrationInput(
                     username=form.username.data,
                     email=form.email.data,
@@ -130,6 +130,7 @@ def register_staff():
                     password_confirm=form.password_confirm.data,
                 ),
                 as_staff=True,
+                audit=_registration_audit(AuditEvent.STAFF_REGISTERED),
             )
         except RegistrationError as exc:
             for field_name, messages in exc.errors.items():
@@ -139,13 +140,6 @@ def register_staff():
                     for message in messages:
                         flash(message, "error")
         else:
-            record_event(
-                AuditEvent.STAFF_REGISTERED,
-                success=True,
-                user_id=user.id,
-                ip_address=_client_ip(),
-                user_agent=_user_agent(),
-            )
             flash(
                 "Staff account requested. An administrator must approve it before you can sign in.",
                 "success",
@@ -173,7 +167,8 @@ def login(portal: str):
                 success=False,
                 ip_address=ip,
                 user_agent=_user_agent(),
-                metadata={"username": username_key},
+                metadata={"login_id": login_identifier(username_key)},
+                commit=True,
             )
             flash("Too many login attempts. Try again later.", "error")
             return render_template("login.html", form=form, portal=portal), 429
@@ -186,7 +181,9 @@ def login(portal: str):
                 success=False,
                 ip_address=ip,
                 user_agent=_user_agent(),
-                metadata={"username": username_key},
+                # Never the typed username: see login_identifier.
+                metadata={"login_id": login_identifier(username_key)},
+                commit=True,
             )
             # Deliberately generic: does not say which of username/password
             # was wrong, and identical whether or not the username exists.
@@ -204,6 +201,7 @@ def login(portal: str):
                 ip_address=ip,
                 user_agent=_user_agent(),
                 metadata={"reason": "staff_pending" if pending else f"not_{portal}"},
+                commit=True,
             )
             if pending:
                 flash("Your staff account is waiting for administrator approval. "
@@ -220,6 +218,7 @@ def login(portal: str):
                 user_id=user.id,
                 ip_address=ip,
                 user_agent=_user_agent(),
+                commit=True,
             )
             return redirect(safe_next_target() or url_for("account.index"))
 
@@ -237,5 +236,6 @@ def logout():
         user_id=user.id if user else None,
         ip_address=_client_ip(),
         user_agent=_user_agent(),
+        commit=True,  # independent: the revocation above must stand on its own
     )
     return redirect(url_for("auth.login"))
