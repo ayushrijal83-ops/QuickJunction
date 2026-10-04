@@ -876,6 +876,14 @@ repository. See the project `README.md` for the current rule set.
 
 ## 17. Not yet implemented — required before production
 
+> *[M0, 2026-10-03]* Rows corrected against the code: #3 and #14 are done,
+> #6 and #18 are partly done. The authoritative go-live list is now
+> [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md); the current
+> state is [`docs/STATUS.md`](STATUS.md). Further gaps found by the
+> 2026-10-03 audit (no production admin bootstrap, public staff sign-up,
+> customer dine-in can occupy tables, no reservation cap, audit rows committed
+> outside the business transaction, no `ProxyFix`) are tracked there.
+
 Ranked by how much damage the absence causes. Items completed in earlier
 milestones (authentication, authorization, CSRF, session fixation
 protection, an initial rate limiter, order audit logging in M04, and staff
@@ -885,10 +893,10 @@ order-status management in M05) are removed from this list.
 | --- | --- | --- |
 | 1 | Payment gateway / online card processing | first real transaction |
 | 2 | Multi-worker-safe rate limiting (Flask-Limiter + Redis) | first multi-worker/multi-instance deployment |
-| 3 | Security headers: HSTS, `X-Content-Type-Options`, `X-Frame-Options`, CSP (via Flask-Talisman or the reverse proxy) | first HTML page shipped to real users |
+| 3 | ~~Security headers~~ — **done (M16)** in `app/utils/headers.py`: CSP without inline script, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `no-store` on signed-in pages, HSTS when cookies are Secure. Still to verify on the deployed HTTPS stack | — |
 | 4 | Strip the `Server` header — the dev server advertises `Werkzeug/... Python/...` | deployment |
 | 5 | TLS termination + HTTP→HTTPS redirect | deployment |
-| 6 | A dedicated MySQL user with least privilege — no `GRANT ALL` in production | deployment |
+| 6 | Least-privilege MySQL — **partly done**: `scripts/db_setup.py` creates a dedicated account with no `GRANT ALL`, but it also holds DDL (`CREATE, ALTER, DROP, INDEX, REFERENCES`) because it runs migrations. Still needed: a DML-only runtime account plus a separate migration account. (The older `setup.ps1` still uses `GRANT ALL`.) | deployment |
 | 7 | Password reset flow (with its own rate limiting and token expiry) | first locked-out real user |
 | 8 | Email verification at registration | before email is trusted for anything (e.g. password reset) |
 | 9 | Login-time rehash (`needs_rehash()` is written but not called) | first Argon2 parameter change |
@@ -896,11 +904,11 @@ order-status management in M05) are removed from this list.
 | 11 | Audit log retention/purge policy, enforced in code | first real data / compliance review |
 | 12 | Encrypted, tested database backups | first real data |
 | 13 | Dependency scanning (`pip-audit`) in CI | first CI run |
-| 14 | Content negotiation on error responses (HTML vs JSON) | first real HTML page beyond auth forms |
+| 14 | ~~Content negotiation on error responses~~ — **done**: `app/utils/errors.py` renders HTML when the client prefers it, JSON otherwise | — |
 | 15 | ~~MySQL verification~~ — **completed in M08** against MySQL 8.0.46: constraints enforced, decimal money, foreign keys, InnoDB | — |
 | 16 | Ingredient administration beyond the menu-item form's comma-separated field (rename/merge/delete an ingredient independently of any one menu item) | first time a typo'd ingredient name needs correcting across many items |
 | 17 | Per-field price-change audit history (currently a price change is folded into the generic `menu_item_updated` event, not its own event) | if price-change history becomes a compliance or dispute-resolution need |
-| 18 | Order cancellation *handling* — M05 added the `CANCELLED` status transition, but nothing downstream of it: no refund, no restock, no customer notification, and no customer-initiated cancellation | first customer who needs to cancel a real order |
+| 18 | Order cancellation handling — **partly done**: customer self-cancellation (M10) and refunds (M11; a paid order must be refunded before cancelling) exist; stock is deducted only on completion, so nothing needs restocking. Still missing: customer notification | first customer who needs to cancel a real order |
 | 19 | Per-order staff assignment / "who is working this order" beyond the audit trail | if the kitchen needs accountability finer than "who last moved it" |
 | 20 | Cart persistence across login (an anonymous cart is discarded on login/logout since `login_user()` clears the session — see `docs/SECURITY.md` §3) | first user who builds a cart before signing in |
 | 21 | Multi-worker-safe checkout idempotency (a double-submitted checkout under concurrent requests relies on the cart being cleared client-side and server-side after the first success, not on a dedicated idempotency key) | first multi-worker/multi-instance deployment |

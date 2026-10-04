@@ -1,16 +1,22 @@
 # Quick Junction — Project Progress
 
-**Authoritative project-progress document.** Records only work that has
-actually been implemented and verified against the repository. If a
-feature is not listed here as complete, assume it does not exist.
+> **Historical milestone log.** For the current, verified state of the
+> repository see **[`docs/STATUS.md`](STATUS.md)**; for the go-live gate see
+> [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md). Where this log
+> and `STATUS.md` disagree, `STATUS.md` is correct. Corrections made on
+> 2026-10-03 (M0) are marked *[M0]*.
+>
+> **Quick Junction v0.9.0 is a prototype baseline and is not approved for
+> production deployment** — "demo-ready" below means demonstration, not
+> production.
 
-Last updated: 2026-09-30 (Final UI/UX Transformation — project frozen)
-Current state: **Final UI/UX Transformation complete — development frozen
-for documentation/demo/presentation** (see [Final UI/UX Transformation](#final-uiux-transformation)).
-Before that: **Milestone 16 complete — final integration, security and
-demo audit done. Quick Junction is feature-complete for the fast-track plan
-(M10–M16) and demo-ready; the live MySQL database is on the current schema.**
-See [Final state](#final-state-end-of-m16) at the end of this document.
+Records work that was implemented and verified, milestone by milestone.
+
+Last updated: 2026-10-03 (M0 — production foundation: documentation
+corrected, CI added, v0.9.0 baseline tagged; no application change).
+Before that: 2026-09-30, Final UI/UX Transformation (see [Final UI/UX Transformation](#final-uiux-transformation)),
+after **Milestone 16** — final integration, security and demo audit; the
+live MySQL database is on the current schema. See [Final state](#final-state-end-of-m16).
 
 > **Numbering note:** the Milestone 10 brief called itself "M08 — Restaurant
 > Operations, Customer Dashboard, Table Reservation, Customer Order
@@ -43,9 +49,9 @@ See [Final state](#final-state-end-of-m16) at the end of this document.
 | 09 | Security hardening: server-side session revocation | ✅ Complete |
 | 10 | Customer cancellation, tables, reservations, order source, sales reporting (brief "M08") | ✅ Complete (MySQL-verified) |
 | 11 | Payments, admin refunds, paid-order cancellation rule, automatic table release | ✅ Complete (live MySQL-verified) |
-| 12 | Tax (configurable, snapshotted) + staff/admin discounts | ✅ Complete (not yet applied to live DB) |
-| 13 | Inventory: stock, recipes, movement ledger, sale deduction | ✅ Complete (not yet applied to live DB) |
-| 14 | Kitchen screen: queue, one-tap workflow, prep timestamps and timings | ✅ Complete (not yet applied to live DB) |
+| 12 | Tax (configurable, snapshotted) + staff/admin discounts | ✅ Complete (applied to live DB in M16 — known issue #34) *[M0]* |
+| 13 | Inventory: stock, recipes, movement ledger, sale deduction | ✅ Complete (applied to live DB in M16 — known issue #34) *[M0]* |
+| 14 | Kitchen screen: queue, one-tap workflow, prep timestamps and timings | ✅ Complete (applied to live DB in M16 — known issue #34) *[M0]* |
 | 15 | UI/UX overhaul: design system, role nav, dashboards, admin payments + audit views | ✅ Complete (no schema change) |
 | 16 | Final integration, security and demo audit | ✅ Complete |
 | Final UI | UI/UX transformation: design system, imagery, sidebar shell, dark mode, Nepali Rs. format, redesigned dashboards/reports | ✅ Complete (no schema change) |
@@ -53,7 +59,7 @@ See [Final state](#final-state-end-of-m16) at the end of this document.
 **Test suite: 718 passing, 7 skipped (MySQL-only), 0 failing on SQLite; 724 passing, 1 skipped, 0 failing on MySQL 8.0.46** (after the Final UI pass; `pytest`; in-memory SQLite by default for
 application tests, temporary on-disk SQLite for migration tests; the LLM is
 disabled in testing and never loaded).
-**MySQL verification: COMPLETE** (MySQL 8.0.46, head `2d9f3b20045f`) — see [MySQL verification status](#mysql-verification-status).
+**MySQL verification: COMPLETE** (MySQL 8.0.46; first verified in M08 at head `2d9f3b20045f`, current head **`f3a6d9b2e8c5`** *[M0]*; since M0 the full suite also runs on MySQL 8.0 in CI) — see [MySQL verification status](#mysql-verification-status).
 
 ---
 
@@ -1141,12 +1147,12 @@ No schema change was made in M08; no migration was added.
 | 3 | Anonymous cart is discarded on login (`login_user()` clears the session for fixation protection) — no cart merge | user who builds a cart before signing in loses it |
 | 4 | Checkout idempotency relies on the cart being cleared after success, not a dedicated idempotency key | concurrent double-submit under multiple workers |
 | 5 | Rate limiter is in-process only (`dict` + lock) | ineffective across gunicorn workers/instances |
-| 6 | Error handlers always return JSON, even for HTML routes | poor UX on an unexpected error in a browser |
+| 6 | ~~Error handlers always return JSON, even for HTML routes~~ — **closed**: `app/utils/errors.py` serves an HTML error page when the client prefers HTML, JSON otherwise *[M0]* | — |
 | 7 | ~~No security headers~~ — **closed in M16**: CSP (no inline script), `X-Frame-Options: DENY` / `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS when cookies are Secure | — |
 | 8 | Audit log retention not enforced in code | `audit_logs` holds IPs; needs a purge policy |
 | 9 | `tests/__init__.py` exists solely to stop a stray `tests` package in site-packages from shadowing the local one | environment-specific workaround, not a project need |
 | 10 | ~~Order status changes have no concurrency guard~~ — **closed in M10**: every transition is a conditional `UPDATE … WHERE status = <expected>` | — |
-| 11 | `CANCELLED` now records who/when/why and customers can self-cancel (M10), but there is still no refund, restock or notification — no payment exists to refund | cancellation is not operationally complete |
+| 11 | Cancellation: refunds exist since M11 (a paid order must be refunded in full before it can be cancelled) and stock is only deducted on completion, so nothing needs restocking; **customer notification is still missing** *[M0]* | customers are not told about a cancellation |
 | 12 | The staff queue is unpaginated and unfiltered — every order, every load | degrades once order volume is non-trivial |
 | 13 | `migrations/env.py` uses `db.get_engine()`, deprecated in Flask-SQLAlchemy 3.1 (12 warnings in the suite) — pre-existing, from the Flask-Migrate template | breaks on Flask-SQLAlchemy 3.2 |
 | 14 | The TF-IDF corpus is re-vectorised on every `/recommendations` request | fine at tens–hundreds of items; needs caching before a real catalogue |
@@ -1176,7 +1182,7 @@ No schema change was made in M08; no migration was added.
 | 35 | Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative (shown "short"). Recipes are read at completion time, not snapshotted per order | deliberate — a served order is never blocked; staff correct counts with an adjustment |
 | 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
-| 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | deployment is out of scope so far |
+| 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | **blocks production** — roadmap Phase 2 *[M0]* |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
 
@@ -1184,20 +1190,29 @@ Full ranked pre-production list: `docs/SECURITY.md` §17.
 
 ## Not implemented — do not assume these exist
 
-*(M10 added customer-initiated cancellation and a sales dashboard; the rest
-of this list stands.)*
-Payment gateway / card processing / any payment record · refunds · tax ·
-discounts · profit/expense accounting · **AI chatbot / conversational assistant** (M07 built
-explanation-only inference, not a chat surface) · advanced analytics ·
-reporting dashboard · deployment configuration · styled frontend
-(Bootstrap/JS — every page is plain unstyled HTML) · password reset ·
-email verification · staff queue pagination/filtering.
+*[M0] Rewritten — the previous list was written at M04–M10 and still named
+payments, refunds, tax, discounts, a reporting dashboard and a styled
+frontend, all of which now exist (M10–M15). The current list is in
+[`docs/STATUS.md`](STATUS.md#what-does-not-exist-do-not-assume-it-does).*
 
-`ai/`, `dataset/`, `training/` are intentionally empty placeholders.
+Payment gateway / online card processing · profit/expense accounting · AI
+chatbot / conversational assistant (M07 built explanation-only inference) ·
+production deployment configuration · production admin bootstrap · admin user
+management · password change/reset · email verification and notifications ·
+pagination of the staff queue, customer history, payments and audit views ·
+server-side menu search · order notes · receipts · restaurant configuration ·
+multi-restaurant support · backups/upgrade/rollback tooling.
+
+`ai/` and `dataset/` are empty placeholders; `training/` holds the LoRA
+training and evaluation scripts and their recorded results.
 
 ---
 
-## Exact current state (verified at end of M10)
+## State snapshot (end of M10, partly updated through M16) — historical
+
+*[M0] This table was updated piecemeal after M10 and mixed values from
+different milestones. Rows known to be wrong are corrected below; for the
+current state use [`docs/STATUS.md`](STATUS.md).*
 
 | Item | Value |
 | --- | --- |
@@ -1208,9 +1223,9 @@ email verification · staff queue pagination/filtering.
 | Tables | 14: previous 9 + `restaurant_tables`, `reservations`, `payments`, `pricing_settings`, `stock_movements` |
 | Models | 14 modules in `app/models/` |
 | Services | 17 modules in `app/services/` (M10: `tables`, `sales`, `reservations`; M11: `payments`; M12: `pricing`; M13: `inventory`; M14: `kitchen`; M15: `dashboard`) |
-| Blueprints | 14: health, main, auth, account, menu, admin_menu, admin_staff, cart, orders, staff_orders, preferences, tables, reports, reservations |
+| Blueprints | *[M0]* **18**: health, main, auth, account, menu, admin_menu, admin_settings, admin_staff, admin_views, cart, orders, staff_orders, preferences, tables, inventory, kitchen, reports, reservations |
 | Audit events | 31 |
-| Local LLM | Qwen3-0.6B-Base + **v2** LoRA adapter (20 MB); CPU-only, offline, explanation-only. v1 adapter retained |
+| Local LLM | *[M0]* Qwen3-0.6B-Base + **v4** LoRA adapter (`config.py` default since M07.7, behind the deterministic preference-safety guard); CPU-only, offline, explanation-only. v1–v3 adapters retained on disk, not used |
 | Dataset | **v2: 150** hand-authored examples (120 train / 30 validation), 15 categories. v1 (60) preserved |
 | Order statuses | 7 (`pending`, `confirmed`, `preparing`, `ready`, `served`, `completed`, `cancelled`) — `served` added in M10 |
 | Order sources | 4 (`dine_in`, `takeaway`, `delivery`, `online`) |
@@ -1221,7 +1236,7 @@ email verification · staff queue pagination/filtering.
 | Recommendation engine | deterministic TF-IDF + cosine similarity, in-process; **no LLM** |
 | Frontend | Bootstrap 5.3.3, vendored locally (no CDN); 1 base layout + 3 partials + 19 pages |
 | Database (tests) | in-memory SQLite; migration tests use temporary on-disk SQLite |
-| Database (target) | **MySQL 8.0.46 — verified end to end in M08; head `b5e2f8c41a07` applied and verified in M10** |
+| Database (target) | **MySQL 8.0.46 — verified end to end in M08**; live database at head **`f3a6d9b2e8c5`** since M16 *[M0]* |
 | Runtime deps | pinned in `requirements.txt`; now includes scikit-learn/scipy/numpy |
 
 ---

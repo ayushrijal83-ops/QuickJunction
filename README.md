@@ -25,7 +25,7 @@ and no network call at inference time.
 
 Database only: `scripts\setup_database.bat`. Check an installation:
 `.venv\Scripts\python scripts\db_setup.py verify`. Start over (**deletes all
-data**): `scriptseset_database.bat`. Problems: the guide's Troubleshooting section.
+data**): `scripts\reset_database.bat`. Problems: the guide's Troubleshooting section.
 
 ---
 
@@ -511,10 +511,15 @@ history second.
 
 ## Project status
 
-Feature-complete and released. The AI line of work is finished: **v4 is the
-final production adapter**, evaluated and hardened, and no further training is
-planned.
+**v0.9.0 — audited prototype baseline; not production ready.** The feature
+set for the demonstration plan is complete, but the application is **not
+approved for deployment to a real restaurant**: production deployment, admin
+bootstrap, backups, upgrades and several security items are not done yet
+(see [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)). The AI
+line of work is finished: **v4 is the selected adapter** (optional, offline),
+and no further training is planned.
 
-Current state, verified results and known limitations:
-[`docs/PROJECT_PROGRESS.md`](docs/PROJECT_PROGRESS.md).
+Current verified state: [`docs/STATUS.md`](docs/STATUS.md).
+Release history: [`CHANGELOG.md`](CHANGELOG.md).
+Milestone history: [`docs/PROJECT_PROGRESS.md`](docs/PROJECT_PROGRESS.md).
 Handoff checklist: [`HANDOFF.md`](HANDOFF.md).
