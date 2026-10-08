@@ -18,7 +18,7 @@
 {% set role = current_user.role.value if current_user else none %}
 {% set ops = role in ("staff", "admin") %}
 <!doctype html>
-<html lang="{{ 'en' if ops else current_locale() }}" data-bs-theme="light">
+<html lang="{{ current_locale() }}" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

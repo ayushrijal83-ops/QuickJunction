@@ -12,7 +12,7 @@
 
 Records work that was implemented and verified, milestone by milestone.
 
-Last updated: 2026-10-08 (M5 — menu & restaurant foundation; see
+Last updated: 2026-10-08 (M5 locale-switching fix, then M5 — menu & restaurant foundation; see
 [M5](#m5--menu--restaurant-foundation-)). Before that: M4 — account security & staff onboarding
 ([M4](#m4--account-security--staff-onboarding-)). Before that: 2026-10-03 (M0 — production foundation: documentation
 corrected, CI added, v0.9.0 baseline tagged; no application change).
@@ -3448,3 +3448,51 @@ admin category/menu forms and lists, settings), `.github/workflows/ci.yml`,
 `tests/{test_final_audit,test_foundation,test_mysql_concurrency}.py`,
 `docs/{PROJECT_PROGRESS,STATUS,SECURITY,PRODUCTION_READINESS}.md`,
 `CHANGELOG.md`.
+
+## Locale switching fix (after merge, branch `fix/m5-locale-switching`)
+
+Manual smoke testing reported that Nepali "appears only on the dashboard"
+and "selecting Nepali does not work". Traced end to end in a real browser
+and with CSRF enabled: the server flow (POST `/locale` → validate →
+session → 303 to a safe local path → next request resolves `ne`) was
+already correct, and every customer route renders the switcher. The causes:
+
+1. **Switcher invisible over hero photos.** The unselected button is
+   `.btn-ghost` (dark ink); on `qj-has-hero` pages (home, menu, customer
+   dashboard, new reservation) the nav is dark glass, so "नेपाली" could not
+   be seen until you reached a page without a hero. Fixed in `app.css`
+   (white ink inside `.qj-has-hero .qj-topnav .qj-lang`).
+2. **No visible change after switching.** The development database has
+   **0** category/menu-item translations, so `ne` falls back to canonical
+   English everywhere -- by design. Nepali text appears once entered on the
+   admin category/item forms. No data was changed.
+3. **Ops-shell leak.** Only `base.html` forced `lang="en"` for staff/admin;
+   `current_locale()` still returned a carried-over `ne`, so staff/admin
+   saw Nepali item names on `/menu` inside the English console.
+   `current_locale()` now returns `en` for staff/admin, and `base.html` just
+   uses it.
+
+The switcher stays POST + CSRF only; unsupported values are 400;
+`safe_next` is unchanged. The documented `?lang=` GET (a display
+preference, M5 design) is unchanged. No migration.
+
+Tests (`tests/test_m5_catalog.py`, +5): en → ne → en through the rendered
+form with real CSRF tokens across every customer page (switcher present,
+choice persists, translated/fallback content), a foreign CSRF token is
+refused, staff/admin get English menu content with a Nepali session (and
+the guest choice survives logout), hero contrast rule present. The `req`
+helper now also drops Flask-WTF's `g`-cached token (known issue #29
+pattern). The staff/admin and CSS tests fail on the unfixed code.
+
+| Run | Result |
+| --- | --- |
+| M5 targeted (`test_m5_catalog.py`) | **113 passed** |
+| SQLite, full suite | **1025 passed, 12 skipped, 0 failed** |
+| MySQL 8.0.46, full suite (`quickjunction_test`) | **1036 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+
+Still English (unchanged M5 limitation): all page chrome and messages, and
+item names in cart, checkout and orders.
+
+Files: `app/utils/locale.py`, `app/templates/base.html`,
+`app/static/css/app.css`, `tests/test_m5_catalog.py`,
+`docs/PROJECT_PROGRESS.md`, `CHANGELOG.md`.

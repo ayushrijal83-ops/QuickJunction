@@ -165,6 +165,11 @@ Each release uses only the sections that apply, in this order:
 
 - `README.md`: the `scripts\reset_database.bat` path was corrupted (a
   carriage-return byte had replaced `\r`).
+- Menu language switcher: the unselected option was dark text on the dark
+  navigation bar over hero photos (home, menu, customer dashboard, new
+  reservation) and could not be seen.
+- Staff and admin no longer see Nepali menu names in the English operations
+  console when a Nepali choice was carried over from before sign-in.
 
 ### Migration
 
