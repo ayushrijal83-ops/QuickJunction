@@ -3,6 +3,7 @@ text to show for it. Not a UI translation layer -- page chrome stays English.
 
 Resolution, first match wins (``current_locale``):
 
+0. a signed-in staff or admin user is always ``en`` (English console);
 1. the session's ``locale``, set by the language switcher (POST /locale)
    or by ``?lang=en|ne`` on any page (``remember_lang_param``);
 2. the browser's ``Accept-Language`` (``ne-NP`` counts as ``ne``);
@@ -54,7 +55,15 @@ def set_locale(value) -> bool:
 
 
 def current_locale() -> str:
+    """Staff and admin always get ``en``: the operations console is English,
+    and a ``ne`` choice kept across sign-in must not leak into it."""
     if "locale" not in g:
+        from app.utils.authorization import get_current_user
+
+        user = get_current_user()
+        if user is not None and user.role.value in ("staff", "admin"):
+            g.locale = Locale.EN.value
+            return g.locale
         chosen = normalize(session.get(_SESSION_KEY)) or request.accept_languages.best_match(SUPPORTED)
         if not chosen:
             from app.services.restaurant import get_restaurant

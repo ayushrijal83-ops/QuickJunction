@@ -494,6 +494,9 @@ a { text-underline-offset: .18em; }
 .qj-has-hero .qj-topnav .nav-link:hover,
 .qj-has-hero .qj-topnav .nav-link[aria-current="page"] { background: rgba(255, 255, 255, .16); color: #fff; }
 .qj-has-hero .qj-topnav .navbar-toggler-icon { filter: invert(1); }
+/* Language switcher (M5): the unselected button is .btn-ghost, dark ink by
+   default -- invisible on the dark glass bar over a hero photo. */
+.qj-has-hero .qj-topnav .qj-lang .btn-ghost { --bs-btn-color: #fff; --bs-btn-hover-color: #fff; --bs-btn-hover-bg: rgba(255, 255, 255, .16); --bs-btn-active-color: #fff; --bs-btn-active-bg: rgba(255, 255, 255, .22); }
 
 @media (max-width: 991.98px) {
   .qj-topnav .navbar-collapse { flex-basis: 100%; padding: .5rem 0 .25rem; }

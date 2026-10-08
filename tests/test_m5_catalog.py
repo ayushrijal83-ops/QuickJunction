@@ -11,6 +11,7 @@ tests/test_mysql_concurrency.py.
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 
 import pytest
@@ -56,6 +57,7 @@ def req(client, method, url, **kw):
     g.pop("current_user", None)
     g.pop("restaurant", None)
     g.pop("locale", None)
+    g.pop("csrf_token", None)  # Flask-WTF caches the raw token in g
     return getattr(client, method)(url, **kw)
 
 
@@ -619,6 +621,80 @@ def test_nepali_font_is_vendored_and_declared(client):
     css = body(req(client, "get", "/static/css/app.css"))
     assert 'font-family: "Noto Sans Devanagari"' in css and "U+0900-097F" in css
     assert '"Inter", "Noto Sans Devanagari"' in css
+
+
+CUSTOMER_PAGES = ["/", "/account/", "/menu", "/cart", "/checkout", "/orders", "/reservations",
+                  "/reservations/new", "/preferences", "/account/password"]
+
+
+def switch(client, lang, page):
+    """Submit the switcher the way a browser does: from the rendered form,
+    with its CSRF token and hidden ``next``."""
+    html = body(req(client, "get", page))
+    form = html[html.index('action="/locale"'):]
+    form = form[:form.index("</form>")]
+    data = {"lang": lang, **dict(re.findall(r'name="(csrf_token|next)" value="([^"]*)"', form))}
+    return req(client, "post", "/locale", data=data)
+
+
+def test_switcher_round_trip_with_csrf_across_customer_pages(app, db):
+    app.config["WTF_CSRF_ENABLED"] = True
+    item = make_menu_item(name="Paneer Tikka")
+    add_translation(item)
+    untranslated = make_menu_item(category=item.category, name="Dal Bhat")
+    client = signed_in_with_csrf(app, "cust")
+    item_page = f"/menu/{item.id}"
+    for page in CUSTOMER_PAGES + [item_page]:
+        assert 'action="/locale"' in body(req(client, "get", page)), page
+
+    response = switch(client, "ne", item_page)
+    assert response.status_code == 303 and response.headers["Location"].endswith(item_page)
+    for page in CUSTOMER_PAGES + [item_page]:  # persists across pages and reloads
+        html = body(req(client, "get", page))
+        assert html_lang(html) == "ne" and 'value="ne" lang="ne" class="btn btn-sm btn-primary"' in html, page
+    menu = body(req(client, "get", "/menu"))
+    assert NEPALI_NAME in menu and untranslated.name in menu and "Paneer Tikka" not in menu
+
+    assert switch(client, "en", "/menu").status_code == 303
+    menu = body(req(client, "get", "/menu"))
+    assert html_lang(menu) == "en" and NEPALI_NAME not in menu and "Paneer Tikka" in menu
+
+
+def signed_in_with_csrf(app, username):
+    make_user(username=username, email=f"{username}@example.com", password=PASSWORD)
+    client = app.test_client()
+    token = re.search(r'name="csrf_token" value="([^"]+)"', body(req(client, "get", "/login"))).group(1)
+    assert req(client, "post", "/login", data={"username": username, "password": PASSWORD,
+                                               "csrf_token": token}).status_code == 302
+    return client
+
+
+def test_switcher_rejects_a_stale_or_foreign_csrf_token(app, client, db):
+    app.config["WTF_CSRF_ENABLED"] = True
+    other = app.test_client()
+    token = re.search(r'name="csrf_token" value="([^"]+)"', body(req(other, "get", "/menu"))).group(1)
+    req(client, "get", "/menu")
+    assert req(client, "post", "/locale", data={"lang": "ne", "next": "/menu", "csrf_token": token}).status_code == 400
+    assert html_lang(body(req(client, "get", "/menu"))) == "en"
+
+
+@pytest.mark.parametrize("role", [Role.STAFF, Role.ADMIN])
+def test_operations_users_get_english_menu_content_even_with_a_nepali_session(app, client, db, role):
+    item = make_menu_item(name="Paneer Tikka")
+    add_translation(item)
+    make_user(username="op", email="op@example.com", password=PASSWORD, role=role)
+    req(client, "get", "/menu?lang=ne")  # chosen as a guest, kept across sign-in
+    req(client, "post", "/login", data={"username": "op", "password": PASSWORD})
+    menu = body(req(client, "get", "/menu"))
+    assert html_lang(menu) == "en" and NEPALI_NAME not in menu and "Paneer Tikka" in menu
+    assert 'action="/locale"' not in menu
+    req(client, "post", "/logout")
+    assert html_lang(body(req(client, "get", "/menu"))) == "ne"  # the guest choice is still there
+
+
+def test_switcher_is_readable_over_hero_photos(client):
+    css = body(req(client, "get", "/static/css/app.css"))
+    assert ".qj-has-hero .qj-topnav .qj-lang .btn-ghost { --bs-btn-color: #fff;" in css
 
 
 # =============================================================================
