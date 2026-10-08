@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}One-time code &mdash; Quick Junction Admin{% endblock %}
+
+{% block ops_context %}Manage &middot; accounts{% endblock %}
+{% block content %}
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">Accounts</div>
+    <h1>{{ "Invitation for" if purpose == "invite" else "Password reset for" }} {{ user.username }}</h1>
+  </div>
+</div>
+<div class="row"><div class="col-lg-8">
+  <div class="card border-warning"><div class="card-body">
+    <p class="fw-semibold mb-2">One-time code &mdash; shown only once</p>
+    <p class="font-monospace fs-5 text-break user-select-all p-3 bg-body-tertiary rounded mb-3" id="one-time-code">{{ code }}</p>
+    <ul class="small text-secondary mb-3">
+      <li>Give it to {{ user.username }} directly (in person or a private message). It is not stored and cannot be shown again.</li>
+      <li>They enter it at <span class="font-monospace">{{ url_for('account.setup', _external=True) }}</span> and choose their own password.</li>
+      <li>It works once and expires in {{ config["STAFF_INVITE_TTL_HOURS"] if purpose == "invite" else config["PASSWORD_RESET_TTL_HOURS"] }} hours. Issuing a new one cancels this one.</li>
+      {% if purpose == "reset" %}<li>{{ user.username }} has been signed out everywhere.</li>{% endif %}
+    </ul>
+    <a class="btn btn-primary" href="{{ url_for('admin_accounts.account_list') }}">Done</a>
+  </div></div>
+</div></div>
+{% endblock %}

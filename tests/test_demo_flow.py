@@ -5,6 +5,7 @@ on MySQL (TEST_DATABASE_URL)."""
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -72,11 +73,13 @@ def test_full_demo_flow(app, db):
     go(admin, "post", f"/admin/menu/{burger.id}/recipe", add_ingredient_id=str(bun.id), add_quantity="1")
     t01, t02 = (_db.session.query(RestaurantTable).filter_by(name=n).one() for n in ("T01", "T02"))
 
-    # --- STAFF: sign up, approved by admin ------------------------------------------
-    go(staff, "post", "/register/staff", username="cook", email="cook@example.com", password=PW, password_confirm=PW)
-    cook = _db.session.query(User).filter_by(username="cook").one()
-    assert go(staff, "post", "/login/staff", username="cook", password=PW).status_code == 200  # pending: refused
-    go(admin, "post", f"/admin/staff/{cook.id}/approve")
+    # --- STAFF: invited by the admin (M4), sets their own password ------------------
+    assert go(staff, "post", "/register/staff", username="cook", email="cook@example.com",
+              password=PW, password_confirm=PW).status_code == 404  # no public staff sign-up
+    page = go(admin, "post", "/admin/accounts/invite", username="cook", email="cook@example.com")
+    code = re.search(r'id="one-time-code">([^<]+)<', page.get_data(as_text=True)).group(1)
+    assert go(staff, "post", "/login/staff", username="cook", password=PW).status_code == 200  # not set up: refused
+    go(staff, "post", "/account/setup", code=code, password=PW, password_confirm=PW)
     assert go(staff, "post", "/login/staff", username="cook", password=PW).status_code == 302
 
     # --- CUSTOMER: register, browse, order, cancel, reserve --------------------------

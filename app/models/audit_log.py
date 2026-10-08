@@ -94,6 +94,20 @@ class AuditEvent(str, enum.Enum):
     # the server -- so metadata only records the source.
     ADMIN_CREATED = "admin_created"
 
+    # Account security (M4). user_id is the acting account: the user for a
+    # self-service change or a code redemption, the admin for an invitation,
+    # reset or (de)activation, with the subject account's id in
+    # metadata_json as "target_user_id". No password, hash or code is ever
+    # recorded -- not even a prefix.
+    PASSWORD_CHANGED = "password_changed"
+    PASSWORD_RESET_ISSUED = "password_reset_issued"
+    PASSWORD_RESET = "password_reset"
+    STAFF_INVITED = "staff_invited"
+    STAFF_INVITATION_ACCEPTED = "staff_invitation_accepted"
+    ACCOUNT_TOKEN_REJECTED = "account_token_rejected"
+    ACCOUNT_DEACTIVATED = "account_deactivated"
+    ACCOUNT_ACTIVATED = "account_activated"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

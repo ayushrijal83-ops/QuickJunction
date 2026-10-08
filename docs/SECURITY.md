@@ -1141,9 +1141,10 @@ The same `pip-audit` commands as CI, run with pip-audit 2.10.1 on 2026-10-04:
 ### 18.10 Remaining (not M2)
 
 - ~~No staff HTTP order-entry screen~~ — **done in M3** (§19).
-- Shared-store (Redis) rate limiting, password change/reset, staff
-  invitations, DB privilege separation, audit retention, and deployment
-  (Nginx/TLS) are all still open: see `PRODUCTION_READINESS.md`.
+- ~~Password change/reset, staff invitations~~ — **done in M4** (§20).
+- Shared-store (Redis) rate limiting, DB privilege separation, audit
+  retention, and deployment (Nginx/TLS) are all still open: see
+  `PRODUCTION_READINESS.md`.
 
 ---
 
@@ -1218,3 +1219,126 @@ creates a dine-in order.
 **Not covered (by design, for now):** adding items to an order that is
 already open. A seated party's follow-up order needs either a new order
 after the table is freed, or a future "add to order" feature.
+
+---
+
+## 20. Account security and staff onboarding (M4)
+
+Code: `app/services/accounts.py` (all rules), `app/routes/account.py`
+(`/account/password`, `/account/setup`), `app/routes/admin_accounts.py`
+(`/admin/accounts…`), `app/models/account_token.py`. Tests:
+`tests/test_m4_account_security.py` (59) and two MySQL races in
+`tests/test_mysql_concurrency.py`.
+
+### 20.1 Session revocation — one mechanism
+
+M4 reuses the existing per-user `session_version` counter (M09). Every
+request's `get_current_user` compares the cookie's stamp with the row and
+also rejects `is_active = False`; M4 adds no new session store.
+
+| Event | `session_version` | Other effect |
+| --- | --- | --- |
+| Password change | +1 | The acting session is re-stamped (`login_user`); every other session ends |
+| Admin issues a reset | +1 | All of the target's sessions end at once (a reset usually means a suspected compromise). The old password still works until the code is redeemed |
+| Reset or invitation redeemed | +1 | All other open codes of that account voided |
+| Deactivation | +1 | All open codes voided; login refused while inactive |
+| Reactivation | unchanged | Old cookies stay dead (their stamp is stale); voided codes stay voided |
+
+So `is_active = False` is never the only barrier: the counter bump ends live
+sessions even if an `is_active` check were ever missed.
+
+### 20.2 Password change
+
+- Login required. The current password is verified with the existing
+  Argon2id `verify_password`; the new one goes through the existing
+  `password_policy_errors` and must be confirmed and differ from the current
+  one. Stored with `hash_password` (Argon2id).
+- Wrong current passwords are counted by the existing login limiter under a
+  per-account key (`password-change:<id>`), so a stolen session cannot
+  brute-force the password; the 6th attempt gets 429. A wrong attempt writes
+  an independent `password_changed` row with `success=false` and
+  `{"reason": "wrong_current_password"}`.
+
+### 20.3 One-time codes (invitations and resets)
+
+- 256 random bits (`secrets.token_urlsafe(32)`), shown **once** in the POST
+  response to the issuing admin. Never flashed (the flash store is the
+  signed-but-readable cookie), never put in a URL or redirect, never logged
+  or audited. Signed-in pages are `no-store`.
+- Stored only as a SHA-256 digest (`account_tokens.token_hash`, unique). An
+  unkeyed hash is sufficient: there is no dictionary for 256-bit random
+  values, and it allows a single indexed lookup.
+- Expire after `STAFF_INVITE_TTL_HOURS` (default 72) or
+  `PASSWORD_RESET_TTL_HOURS` (default 24); both must be 1–720 or the app
+  refuses to start.
+- Single use: redemption is a conditional `UPDATE … WHERE used_at IS NULL AND
+  expires_at > now`; only the transaction that changes the row wins. The MySQL
+  test `test_one_time_code_redeemed_concurrently_exactly_once` races two
+  redemptions of one code.
+- Issuing a new code of the same purpose voids the old one. A reset code for
+  a deactivated account is refused.
+- Redeemed at `/account/setup` (public by necessity, CSRF-protected, refused
+  while signed in). Unknown, used, expired and voided codes all get the same
+  message and an `account_token_rejected` row (metadata: the purpose, only
+  when the code matched a row). The password is validated before the code is
+  consumed, so a typo does not burn it.
+
+### 20.4 Staff onboarding is invitation-only
+
+- `/register/staff` is removed (404). `register_user` no longer takes
+  `as_staff`; public registration can create CUSTOMER accounts only.
+- An admin enters a username and email; the form has no role field and the
+  service fixes `role=STAFF`. The account is created **inactive**, with an
+  Argon2id hash of 256 discarded random bits — nobody, the admin included,
+  knows a password for it. Redeeming the invitation sets the staff member's
+  password and activates the account (`staff_approved=True`).
+- Existing pending staff (from before M4) are still handled by the M10
+  approval screen ("Staff approvals").
+
+### 20.5 Admin account management (`/admin/accounts`)
+
+- `require_role(ADMIN)` on every route (anonymous → 401/login redirect,
+  STAFF/CUSTOMER → 403), and each service re-checks `actor.role == ADMIN`.
+- Changes are POST + CSRF. The subject comes from the URL's `<int:user_id>`
+  and is re-fetched; no route reads a role, status or user id from the form,
+  so posting `role=admin` or `is_active=…` changes nothing (tested).
+- **Admins never set or see another user's password.** A reset issues a code
+  that the account holder redeems.
+- **Last admin.** An admin cannot deactivate themselves, and deactivating an
+  admin first locks every admin row (`SELECT … FOR UPDATE`, in id order) and
+  requires another *active* admin to remain. Two admins deactivating each
+  other at the same moment leave exactly one active (MySQL test
+  `test_two_admins_deactivating_each_other_leave_one_admin`). Admins cannot be
+  created or promoted from the web; that is still `flask create-admin` only.
+- Customers can be deactivated and reactivated the same way as staff.
+
+### 20.6 Audit
+
+| Event | `user_id` | Metadata |
+| --- | --- | --- |
+| `password_changed` | the user | none; `{"reason"}` on failure |
+| `password_reset_issued` | the admin | `{"target_user_id"}` |
+| `password_reset` | the user who redeemed | none |
+| `staff_invited` | the admin | `{"target_user_id"}` |
+| `staff_invitation_accepted` | the new staff member | none |
+| `account_token_rejected` | null | `{"purpose"}` or none |
+| `account_deactivated` / `account_activated` | the admin | `{"target_user_id", "role"}` |
+
+No password, hash or code (not even a prefix) is ever recorded; a test scans
+every audit row after a full invite/reset/change cycle. Every successful
+change and its audit row commit together (`commit_with`, M2): the tests
+monkeypatch the audit write to fail and assert the change rolled back.
+Rejections and failed attempts are independent rows (`commit=True`).
+
+### 20.7 Limitations
+
+- No email delivery: the admin passes the code to the person out of band
+  (in person or by phone). Anyone who sees the code page can use the code
+  until it expires.
+- `/account/setup` has no rate limit of its own. Guessing is infeasible
+  (256 bits), but repeated rejected attempts each add an audit row; the
+  shared limiter (`PRODUCTION_READINESS.md` S1) should cover it.
+- No "resend invitation" button. For an expired invitation: Activate, then
+  Reset password (the reset code works the same way).
+- A pending reset does not lock the account; the old password works until
+  the code is redeemed. Deactivate the account for an immediate lockout.

@@ -97,7 +97,8 @@
           <div class="qj-sidebar__group">Manage</div>
           <ul class="nav flex-column">
             {{ nav("admin_menu.menu_list", "Menu & recipes", "admin_menu.", "journal-text") }}
-            {{ nav("admin_staff.staff_list", "Users (staff accounts)", "admin_staff.", "people") }}
+            {{ nav("admin_accounts.account_list", "Accounts", "admin_accounts.", "person-gear") }}
+            {{ nav("admin_staff.staff_list", "Staff approvals", "admin_staff.", "people") }}
             {{ nav("admin_settings.pricing", "Settings", "admin_settings.", "sliders") }}
             {{ nav("admin_views.audit", "Audit log", "admin_views.audit", "shield-check") }}
           </ul>
@@ -110,6 +111,7 @@
           <div class="fw-semibold text-truncate text-white">{{ current_user.username }}</div>
           <div class="qj-role">{{ role }}</div>
         </div>
+        <a class="btn btn-sm btn-ghost px-2" href="{{ url_for('account.password') }}" title="Change password" aria-label="Change password"><i class="bi bi-key" aria-hidden="true"></i></a>
         {{ logout_form("btn btn-sm btn-ghost px-2") }}
       </div>
     </div>
@@ -177,6 +179,7 @@
                 <li><span class="dropdown-item-text small"><span class="qj-role">{{ role }}</span></span></li>
                 <li><a class="dropdown-item" href="{{ url_for('account.index') }}"><i class="bi bi-house me-2" aria-hidden="true"></i>My account</a></li>
                 <li><a class="dropdown-item" href="{{ url_for('preferences.preferences') }}"><i class="bi bi-sliders me-2" aria-hidden="true"></i>Taste preferences</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('account.password') }}"><i class="bi bi-key me-2" aria-hidden="true"></i>Change password</a></li>
                 <li><hr class="dropdown-divider"></li>
                 <li>{{ logout_form("dropdown-item") }}</li>
               </ul>

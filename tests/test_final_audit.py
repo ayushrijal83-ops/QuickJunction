@@ -15,13 +15,13 @@ PASSWORD = "correct-horse-1"
 # Everything an anonymous visitor may use. Anything not listed must refuse.
 PUBLIC_ENDPOINTS = {
     "main.home", "health.health", "menu.index", "menu.detail",
-    "auth.login", "auth.register", "auth.register_staff",
+    "auth.login", "auth.register", "account.setup",
     "cart.index", "cart.add", "cart.update", "cart.remove", "cart.clear",
 }
 # Endpoints only STAFF/ADMIN may reach, and those only ADMIN may reach.
 STAFF_PREFIXES = ("staff_orders.", "kitchen.", "tables.board", "tables.set_status", "inventory.stock",
                   "inventory.detail", "inventory.movement", "reservations.staff_")
-ADMIN_ONLY_PREFIXES = ("admin_settings.", "admin_views.", "admin_staff.", "reports.", "inventory.new",
+ADMIN_ONLY_PREFIXES = ("admin_settings.", "admin_views.", "admin_staff.", "admin_accounts.", "reports.", "inventory.new",
                        "inventory.edit", "inventory.recipe", "tables.new", "tables.edit")
 
 

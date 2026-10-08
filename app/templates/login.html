@@ -51,8 +51,8 @@
       {% if portal == "customer" %}
         New here? <a href="{{ url_for('auth.register') }}">Create a customer account</a>
       {% elif portal == "staff" %}
-        New staff member? <a href="{{ url_for('auth.register_staff') }}">Request a staff account</a>
-        <span class="d-block mt-1">An administrator approves every staff account before it can sign in.</span>
+        New staff member? Ask an administrator for an invitation, then
+        <a href="{{ url_for('account.setup') }}">set your password with your one-time code</a>.
       {% else %}
         Admin accounts are created by the system operator; there is no public sign-up.
       {% endif %}

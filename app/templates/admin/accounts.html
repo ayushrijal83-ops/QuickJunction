@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Accounts &mdash; Quick Junction Admin{% endblock %}
+
+{% block ops_context %}Manage &middot; accounts{% endblock %}
+{% block content %}
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">Manage</div>
+    <h1>Accounts</h1>
+    <p class="text-secondary mb-0">Invite staff, issue password-reset codes, and activate or deactivate accounts.</p>
+  </div>
+  <a class="btn btn-success" href="{{ url_for('admin_accounts.invite') }}"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Invite staff</a>
+</div>
+
+<nav class="mb-3" aria-label="Filter by role">
+  <a class="btn btn-sm {{ 'btn-primary' if role is none else 'btn-outline-secondary' }}" href="{{ url_for('admin_accounts.account_list') }}">All</a>
+  {% for r in roles %}
+    <a class="btn btn-sm {{ 'btn-primary' if role == r else 'btn-outline-secondary' }}" href="{{ url_for('admin_accounts.account_list', role=r.value) }}">{{ r.value | capitalize }}</a>
+  {% endfor %}
+</nav>
+
+<div class="card">
+  <div class="table-responsive qj-scroll">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th scope="col">Username</th>
+          <th scope="col">Email</th>
+          <th scope="col">Role</th>
+          <th scope="col">Status</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for account in accounts %}
+          <tr>
+            <th scope="row" class="fw-semibold">{{ account.username }}{% if account.id == me.id %} <span class="small text-secondary">(you)</span>{% endif %}</th>
+            <td class="text-break">{{ account.email }}</td>
+            <td>{{ account.role.value | capitalize }}</td>
+            <td>
+              {% if account.id in invited %}<span class="badge text-bg-info">Invited</span>
+              {% elif not account.is_active %}<span class="badge text-bg-secondary">Deactivated</span>
+              {% elif account.is_pending_staff %}<span class="badge text-bg-warning">Pending approval</span>
+              {% else %}<span class="badge text-bg-success">Active</span>{% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              {% if account.id != me.id %}
+                {% if account.is_active %}
+                  <form method="post" action="{{ url_for('admin_accounts.reset', user_id=account.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">Reset password</button>
+                  </form>
+                  <form method="post" action="{{ url_for('admin_accounts.deactivate', user_id=account.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="{{ url_for('admin_accounts.activate', user_id=account.id) }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('account.password') }}">Change password</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

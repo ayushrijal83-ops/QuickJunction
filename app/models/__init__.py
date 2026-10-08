@@ -7,6 +7,7 @@ class is referenced by another (e.g. ``MenuItem`` needs ``Ingredient`` and
 ``MenuItemIngredient`` already defined for its ``secondary=`` relationship).
 """
 
+from app.models.account_token import AccountToken, TokenPurpose
 from app.models.audit_log import AuditEvent, AuditLog
 from app.models.category import Category
 from app.models.customer_preference import CustomerPreference

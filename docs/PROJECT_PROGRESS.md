@@ -12,7 +12,8 @@
 
 Records work that was implemented and verified, milestone by milestone.
 
-Last updated: 2026-10-03 (M0 — production foundation: documentation
+Last updated: 2026-10-08 (M4 — account security & staff onboarding; see
+[M4](#m4--account-security--staff-onboarding-)). Before that: 2026-10-03 (M0 — production foundation: documentation
 corrected, CI added, v0.9.0 baseline tagged; no application change).
 Before that: 2026-09-30, Final UI/UX Transformation (see [Final UI/UX Transformation](#final-uiux-transformation)),
 after **Milestone 16** — final integration, security and demo audit; the
@@ -3136,3 +3137,130 @@ could be automated.
 - No admin-creation command exists; the first admin comes from demo data or SQL.
 - The older `setup.bat` / `setup.ps1` (winget installs, `GRANT ALL`, launches the app)
   are still in the repository; `setup_quick_junction.bat` is the documented path.
+
+---
+
+# M4 — Account Security & Staff Onboarding ✅
+
+Branch `feat/m4-account-security` (from `9787947`, M3). Date: 2026-10-08.
+Security detail: [`docs/SECURITY.md` §20](SECURITY.md).
+
+## Implementation
+
+| Feature | Where | Behaviour |
+| --- | --- | --- |
+| Password change | `GET/POST /account/password` → `accounts.change_password` | Any signed-in role. Verifies the current password (Argon2id), applies the existing policy, requires confirmation and a different password, stores an Argon2id hash. Bumps `session_version` and re-stamps the current session, so every *other* session ends. Wrong current password: per-account limiter (5 per 15 min, then 429) plus a failed `password_changed` audit row |
+| Admin-issued reset | `POST /admin/accounts/<id>/reset` → `accounts.issue_password_reset` | ADMIN only; not allowed on the admin's own account or a deactivated one. Issues a one-time code (shown once) and ends the target's sessions immediately. The account holder sets the new password at `/account/setup`; the admin never chooses or sees it |
+| Staff invitation | `GET/POST /admin/accounts/invite` → `accounts.invite_staff` | ADMIN enters username + email only; role fixed to STAFF in the service. Account created inactive, with a hash of discarded random bits. Code shown once |
+| Code redemption | `GET/POST /account/setup` → `accounts.redeem_code` | Public, CSRF-protected, refused while signed in. Validates the new password first, then consumes the code with a conditional UPDATE (single use under concurrency), sets the password, bumps `session_version`, voids the account's other codes; an invitation also activates the account |
+| Account management | `GET /admin/accounts[?role=…]`, `POST …/<id>/deactivate`, `POST …/<id>/activate` | ADMIN only. Lists every account (CUSTOMER, STAFF, ADMIN) with status (Active / Invited / Deactivated / Pending approval). Deactivation bumps `session_version` and voids open codes. No self-deactivation; the last active admin cannot be deactivated (all admin rows locked `FOR UPDATE` in id order) |
+| Public staff sign-up removed | `app/routes/auth.py`, `register_user` | `/register/staff` → 404; `register_user` can only create CUSTOMER |
+
+One-time codes (`account_tokens`): `secrets.token_urlsafe(32)` (256 bits),
+stored as SHA-256 hex only, `expires_at` from `STAFF_INVITE_TTL_HOURS` (72) /
+`PASSWORD_RESET_TTL_HOURS` (24), `used_at` set on redemption, supersession or
+deactivation. Codes travel only in POST bodies and in the one response that
+shows them: never in a URL, flash message, log line or audit row.
+
+## Security decisions
+
+1. **Revocation uses the existing `session_version` counter**, not a new
+   session table. `get_current_user` already compares it on every request
+   and rejects `is_active=False`; M4 bumps it on password change, reset
+   issue, code redemption and deactivation. Reactivating does not revive old
+   cookies or voided codes.
+2. **Reset = code, not a temporary password.** No weak/default password
+   path exists; the admin never knows the user's password.
+3. **Reset ends sessions at issue time** (suspected compromise) but does not
+   lock the old password until redemption, so a mistaken reset cannot lock a
+   user out. Deactivate for immediate lockout.
+4. **Unkeyed SHA-256 for codes** (not Argon2): codes are 256 random bits, so
+   there is nothing to brute-force, and the digest gives an indexed lookup.
+5. **One generic rejection message** for unknown/used/expired/voided codes.
+6. **No role, status or user id read from any form**; subjects come from
+   the URL and are re-fetched; services re-check `actor.role == ADMIN`.
+7. **Atomicity (M2) kept:** each change and its audit row go through
+   `commit_with`; failures/rejections are independent `commit=True` rows.
+
+## Schema / migration
+
+`e8b4d2a6c913` (revises `a7c2e9d4b1f3`), hand-written like its
+predecessors: creates `account_tokens` (FK `user_id` RESTRICT, FK
+`created_by_id` SET NULL, unique `token_hash`, CHECK on `purpose`, index on
+`(user_id, purpose)`) and widens `ck_audit_logs_event_type` by 8 events.
+Downgrade deletes M4-type audit rows, restores the old CHECK and drops the
+table (`drop_table` alone — known issue #32). Head: **`e8b4d2a6c913`**
+(13 linear revisions, single head).
+
+Verified: upgrade → downgrade (to `a7c2e9d4b1f3`) → upgrade on a scratch SQLite file and on a freshly recreated MySQL 8.0.46 `quickjunction_test` database; `flask db heads` shows the single head `e8b4d2a6c913`. The live `quickjunctiondb` was not touched and still needs `flask db upgrade`.
+
+## Tests
+
+- `tests/test_m4_account_security.py` — **59 tests**: password change (each
+  role, other sessions ended, wrong current password, rate limit, six invalid
+  new passwords, login required, plaintext never in responses/logs/DB);
+  invitations (create + complete, role-escalation attempt, invalid/duplicate
+  input, staff/customer/anonymous denied, `/register/staff` gone, code
+  randomness and hash-only storage, single use, expiry, unknown codes, a bad
+  password does not burn the code, supersession, signed-in users refused);
+  resets (full flow, code never flashed or redirected, session revocation,
+  non-admins/anonymous denied, self/unknown/deactivated refused, re-issue
+  voids the old code); account management (admin-only list, deactivation ends
+  sessions and blocks login, reactivation does not revive sessions/codes,
+  deactivated invitation unusable, non-admins denied, POST-only and no role
+  field, no self-deactivation, last-admin rule in the service and over HTTP);
+  audit (rollback when the audit write fails — management, redemption,
+  password change; no secrets in any audit row; purpose CHECK enforced).
+- `tests/test_mysql_concurrency.py` — **2 new MySQL races**:
+  `test_one_time_code_redeemed_concurrently_exactly_once`,
+  `test_two_admins_deactivating_each_other_leave_one_admin`. CI's guard now
+  expects 11.
+- Updated for the removal of public staff sign-up: `test_staff_approval.py`
+  (pending staff are created directly), `test_demo_flow.py`,
+  `test_final_audit.py`, `test_foundation.py`, `test_create_admin.py`.
+
+| Run | Result |
+| --- | --- |
+| Collected | **922** (861 after M3 + 59 + 2) |
+| Targeted (`test_m4_account_security.py`) | **59 passed** |
+| SQLite, full suite | **911 passed, 11 skipped, 0 failed** (11 = MySQL-only concurrency tests) |
+| MySQL 8.0.46, full suite (`quickjunction_test` on the local server) | **921 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| MySQL concurrency (`tests/test_mysql_concurrency.py`) | **11 of 11 executed and passed**, stable over 5 consecutive runs |
+
+## Known limitations
+
+- No email delivery; the admin hands the code over in person or by phone.
+- `/account/setup` has no dedicated rate limit (guessing is infeasible, but
+  rejected attempts add audit rows) — part of the shared-limiter item (S1).
+- No "resend invitation": for an expired one, Activate then Reset password.
+- No search box on `/admin/accounts` (role filter only); the list is
+  unpaginated (as with known issues #12/#39).
+- Admins cannot be promoted, demoted or created from the web (by design;
+  `flask create-admin` only). No role-change feature for any account.
+- The login limiter is still the in-process dict (per worker).
+
+## Remaining risks
+
+- A code shown on screen can be seen or copied by anyone who sees the
+  admin's page, until it is redeemed or expires.
+- Pre-M4 pending staff still go through the old approval screen; that path
+  stays until those accounts are gone.
+
+## Files changed
+
+Added: `app/models/account_token.py`, `app/services/accounts.py`,
+`app/routes/admin_accounts.py`, `app/templates/account/password.html`,
+`app/templates/account/setup.html`, `app/templates/admin/accounts.html`,
+`app/templates/admin/account_invite.html`,
+`app/templates/admin/account_code.html`,
+`migrations/versions/e8b4d2a6c913_add_account_tokens.py`,
+`tests/test_m4_account_security.py`.
+
+Modified: `app/models/__init__.py`, `app/models/audit_log.py`,
+`app/routes/__init__.py`, `app/routes/account.py`, `app/routes/auth.py`,
+`app/routes/forms.py`, `app/services/auth.py`, `app/templates/base.html`,
+`app/templates/login.html`, `app/templates/register.html`, `config.py`,
+`.github/workflows/ci.yml`, the five test files above,
+`tests/test_mysql_concurrency.py`, `docs/PROJECT_PROGRESS.md`,
+`docs/SECURITY.md`, `docs/STATUS.md`, `docs/PRODUCTION_READINESS.md`,
+`CHANGELOG.md`.

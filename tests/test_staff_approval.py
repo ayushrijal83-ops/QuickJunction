@@ -55,11 +55,11 @@ def post(client, path, **data):
 
 
 def register_staff(client, username="newcook", **extra):
-    fresh()
-    return client.post("/register/staff", data={
-        "username": username, "email": f"{username}@example.com",
-        "password": PASSWORD, "password_confirm": PASSWORD, **extra,
-    })
+    """A pending (unapproved) staff account. Public staff sign-up was removed
+    in M4, so these exist only as accounts created before it; they are made
+    directly here and the approval workflow below still governs them."""
+    return make_user(username=username, email=f"{username}@example.com", password=PASSWORD,
+                     role=Role.STAFF, staff_approved=False)
 
 
 def user_named(username) -> User:
@@ -70,17 +70,16 @@ def user_named(username) -> User:
 # --- 1-3. New staff start pending and get nothing -----------------------------
 
 
-def test_1_new_staff_account_defaults_to_pending(client, db):
-    response = register_staff(client)
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/login/staff")
-
-    user = user_named("newcook")
-    assert user.role == Role.STAFF
-    assert user.staff_approved is False
-    # Not signed in by registration, unlike a customer.
-    assert get(client, "/_test/me").status_code == 401
-    assert _db.session.query(AuditLog).filter_by(event_type=AuditEvent.STAFF_REGISTERED).count() == 1
+def test_1_public_staff_sign_up_no_longer_exists(client, db):
+    """M4: staff accounts come only from an admin's invitation."""
+    for method in ("get", "post"):
+        fresh()
+        response = getattr(client, method)("/register/staff", data={
+            "username": "newcook", "email": "newcook@example.com",
+            "password": PASSWORD, "password_confirm": PASSWORD})
+        assert response.status_code == 404
+    assert _db.session.query(User).filter_by(username="newcook").count() == 0
+    assert _db.session.query(AuditLog).filter_by(event_type=AuditEvent.STAFF_REGISTERED).count() == 0
 
 
 def test_2_pending_staff_cannot_sign_in_or_reach_the_dashboard(client, db):
@@ -280,10 +279,11 @@ def test_12_registration_ignores_role_and_approval_fields(client, db):
     assert user_named("sneaky").role == Role.CUSTOMER
     logout(client)
 
-    register_staff(client, "sneakycook", role="admin", is_admin="true", staff_approved="1")
-    user = user_named("sneakycook")
-    assert user.role == Role.STAFF
-    assert user.staff_approved is False
+    fresh()
+    client.post("/register/staff", data={
+        "username": "sneakycook", "email": "sneakycook@example.com", "password": PASSWORD,
+        "password_confirm": PASSWORD, "role": "admin", "is_admin": "true", "staff_approved": "1"})
+    assert _db.session.query(User).filter_by(username="sneakycook").count() == 0
 
 
 # --- Customer-only preferences and suggestions -------------------------------
