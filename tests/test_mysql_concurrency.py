@@ -16,6 +16,7 @@ index use InnoDB's locking current read, and it commits before refreshing.
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import timedelta
 
@@ -252,6 +253,41 @@ def test_two_admins_deactivating_each_other_leave_one_admin(app, db):
         _db.session.rollback()
         active = _db.session.query(User).filter(User.role == Role.ADMIN, User.is_active.is_(True)).count()
         assert active == 1
+
+
+def test_two_staff_marking_one_dish_sold_out_change_it_once(app, db):
+    """M5: two staff mark the same dish sold out at the same instant. The
+    conditional UPDATE lets exactly one change it, so there is one audit row,
+    and no other column of the item is touched."""
+    from decimal import Decimal
+
+    from app.models.audit_log import AuditEvent, AuditLog
+    from app.models.menu_item import MenuItem
+    from app.services.audit import record_event
+    from app.services.menu import set_availability
+    from tests.conftest import make_category, make_menu_item
+
+    staff = [make_user(username=f"floor{i}", email=f"floor{i}@example.com", role=Role.STAFF).id for i in (1, 2)]
+    category = make_category(name="Race")
+    for round_no in range(ROUNDS):
+        item_id = make_menu_item(category=category, name=f"Dish {round_no}", price="150.00").id
+
+        def mark_sold_out(actor_id):
+            def act():
+                actor = _db.session.get(User, actor_id)
+                return set_availability(actor, item_id, False, audit=lambda i, a: record_event(
+                    AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED, success=True, user_id=actor_id,
+                    metadata={"menu_item_id": i, "is_available": a}))
+            return act
+
+        results = _race(app, *(mark_sold_out(s) for s in staff))
+        assert sorted(map(str, results)) == ["False", "True"], results
+        _db.session.rollback()
+        item = _db.session.get(MenuItem, item_id)
+        _db.session.refresh(item)
+        assert item.is_available is False and item.price == Decimal("150.00") and item.name == f"Dish {round_no}"
+        rows = _db.session.query(AuditLog).filter_by(event_type=AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED).all()
+        assert sum(1 for r in rows if json.loads(r.metadata_json)["menu_item_id"] == item_id) == 1
 
 
 # --- Milestone 11: payments ------------------------------------------------------------

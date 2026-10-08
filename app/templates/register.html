@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/_forms.html" import field, submit %}
-{% block title %}{{ "Request a staff account" if staff else "Create an account" }} &mdash; Quick Junction{% endblock %}
+{% block title %}{{ "Request a staff account" if staff else "Create an account" }} &mdash; {{ restaurant.name }}{% endblock %}
 
 {% block content %}
 <div class="qj-auth qj-reveal my-lg-3">

@@ -9,15 +9,16 @@ class is referenced by another (e.g. ``MenuItem`` needs ``Ingredient`` and
 
 from app.models.account_token import AccountToken, TokenPurpose
 from app.models.audit_log import AuditEvent, AuditLog
-from app.models.category import Category
+from app.models.category import Category, CategoryTranslation
 from app.models.customer_preference import CustomerPreference
 from app.models.ingredient import Ingredient, StockUnit
 from app.models.menu_item_ingredient import MenuItemIngredient
-from app.models.menu_item import MenuItem
+from app.models.menu_item import MenuItem, MenuItemTranslation
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.order import CancellationActor, DiscountType, Order, OrderItem, OrderSource, OrderStatus
 from app.models.payment import Payment, PaymentMethod
 from app.models.pricing_settings import PricingSettings
+from app.models.restaurant_profile import RestaurantProfile
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.stock_movement import MovementType, StockMovement
 from app.models.user import Role, User
@@ -27,11 +28,13 @@ __all__ = [
     "CancellationActor",
     "AuditLog",
     "Category",
+    "CategoryTranslation",
     "CustomerPreference",
     "DiscountType",
     "Ingredient",
     "MenuItem",
     "MenuItemIngredient",
+    "MenuItemTranslation",
     "MovementType",
     "Order",
     "OrderItem",
@@ -40,6 +43,7 @@ __all__ = [
     "Payment",
     "PaymentMethod",
     "PricingSettings",
+    "RestaurantProfile",
     "Reservation",
     "ReservationStatus",
     "RestaurantTable",

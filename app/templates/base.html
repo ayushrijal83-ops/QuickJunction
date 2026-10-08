@@ -8,18 +8,22 @@
    photos are vendored under app/static/ rather than loaded from a CDN: the
    project is offline-first and the CSP allows 'self' only.
 
+   Two names, kept apart (M5): "Quick Junction" is the software and brands
+   the operations shell; `restaurant` (app/services/restaurant.py) is the
+   restaurant using it and brands everything a guest or customer sees.
+
    Autoescaping is on and no template in this project uses |safe -- every
    value below is rendered as text, including menu names and AI output.
    There is no inline script: behaviour lives in static/js/. #}
 {% set role = current_user.role.value if current_user else none %}
 {% set ops = role in ("staff", "admin") %}
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="{{ 'en' if ops else current_locale() }}" data-bs-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{% block title %}Quick Junction{% endblock %}</title>
+  <title>{% block title %}{{ "Quick Junction" if ops else restaurant.name }}{% endblock %}</title>
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
   <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
   {% block head %}{% endblock %}
@@ -40,11 +44,31 @@
   <li class="nav-item"><a class="nav-link" href="{{ url_for(endpoint) }}"{% if current %} aria-current="page"{% endif %}>{% if icon %}<i class="bi bi-{{ icon }}" aria-hidden="true"></i>{% endif %}<span>{{ label }}</span></a></li>
 {%- endmacro %}
 
-{% macro brand(dark=false) -%}
+{% macro brand(product=false) -%}
+  {% if product %}
   <a class="qj-brand" href="{{ url_for('main.home') }}" aria-label="Quick Junction home">
     <span class="qj-brand__mark" aria-hidden="true">Q</span>
     <span class="qj-brand__word" aria-hidden="true"><span>QUICK</span><span>JUNCTION</span></span>
   </a>
+  {% else %}
+  <a class="qj-brand" href="{{ url_for('main.home') }}" aria-label="{{ restaurant.name }} home">
+    <span class="qj-brand__mark" aria-hidden="true">{{ restaurant.name[:1] | upper }}</span>
+    <span class="qj-brand__word" aria-hidden="true"><span>{{ restaurant.name }}</span></span>
+  </a>
+  {% endif %}
+{%- endmacro %}
+
+{# Customer-menu language switcher (M5). POST + CSRF to /locale, which
+   accepts only en/ne and only a local return path. Returns to this page's
+   path; the query string is deliberately not echoed back into the page. #}
+{% macro language_switcher() -%}
+  <form method="post" action="{{ url_for('main.switch_locale') }}" class="qj-lang d-inline-flex gap-1" aria-label="Menu language">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    {% for code, label in locale_labels.items() %}
+      <button type="submit" name="lang" value="{{ code }}" lang="{{ code }}" class="btn btn-sm {{ 'btn-primary' if current_locale() == code else 'btn-ghost' }}" aria-pressed="{{ 'true' if current_locale() == code else 'false' }}">{{ label }}</button>
+    {% endfor %}
+  </form>
 {%- endmacro %}
 
 {% macro theme_toggle(extra="") -%}
@@ -71,7 +95,7 @@
   <aside class="qj-sidebar offcanvas-lg offcanvas-start" id="sidebar" tabindex="-1" aria-label="Sidebar">
     <div class="qj-sidebar__inner">
       <div class="d-flex align-items-center justify-content-between">
-        {{ brand() }}
+        {{ brand(product=true) }}
         <button type="button" class="btn-close btn-close-white d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#sidebar" aria-label="Close menu"></button>
       </div>
 
@@ -86,6 +110,7 @@
           {{ nav("kitchen.board", "Kitchen", "kitchen.", "fire") }}
           {{ nav("tables.board", "Tables", "tables.", "grid-3x3-gap") }}
           {{ nav("reservations.staff_list", "Reservations", "reservations.staff", "calendar-event") }}
+          {{ nav("staff_menu.availability_list", "Menu availability", "staff_menu.", "toggles") }}
           {{ nav("inventory.stock", "Inventory", "inventory.", "box-seam") }}
         </ul>
         {% if role == "admin" %}
@@ -99,7 +124,8 @@
             {{ nav("admin_menu.menu_list", "Menu & recipes", "admin_menu.", "journal-text") }}
             {{ nav("admin_accounts.account_list", "Accounts", "admin_accounts.", "person-gear") }}
             {{ nav("admin_staff.staff_list", "Staff approvals", "admin_staff.", "people") }}
-            {{ nav("admin_settings.pricing", "Settings", "admin_settings.", "sliders") }}
+            {{ nav("admin_settings.restaurant", "Restaurant", "admin_settings.restaurant", "shop") }}
+            {{ nav("admin_settings.pricing", "Settings", "admin_settings.pricing", "sliders") }}
             {{ nav("admin_views.audit", "Audit log", "admin_views.audit", "shield-check") }}
           </ul>
         {% endif %}
@@ -122,8 +148,8 @@
       <button class="qj-icon-btn d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar" aria-label="Open menu">
         <i class="bi bi-list" aria-hidden="true"></i>
       </button>
-      <span class="d-lg-none">{{ brand() }}</span>
-      <span class="qj-date d-none d-lg-inline">{% block ops_context %}Operations console{% endblock %}</span>
+      <span class="d-lg-none">{{ brand(product=true) }}</span>
+      <span class="qj-date d-none d-lg-inline">{% block ops_context %}{{ restaurant.name }} &middot; Operations console{% endblock %}</span>
       <div class="ms-auto d-flex align-items-center gap-2">
         {{ theme_toggle() }}
         <a class="d-flex align-items-center gap-2 text-decoration-none text-reset" href="{{ url_for('account.index') }}" title="Your dashboard">
@@ -163,6 +189,7 @@
         </ul>
 
         <ul class="navbar-nav align-items-lg-center gap-1">
+          <li class="nav-item">{{ language_switcher() }}</li>
           <li class="nav-item">
             <a class="nav-link" href="{{ url_for('cart.index') }}"{% if (request.endpoint or "").startswith("cart.") %} aria-current="page"{% endif %}>
               <i class="bi bi-bag me-1" aria-hidden="true"></i>Cart{% if cart_count %}<span class="qj-cart-count">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}
@@ -217,7 +244,12 @@
     <div class="row g-4 align-items-start">
       <div class="col-md-5">
         {{ brand() }}
-        <p class="mt-3 mb-0">Seasonal plates, honest prices and a table waiting for you &mdash; order ahead or book in seconds.</p>
+        {% if restaurant.tagline %}<p class="mt-3 mb-2">{{ restaurant.tagline }}</p>{% endif %}
+        <ul class="list-unstyled small mb-0 mt-3 d-grid gap-1">
+          {% if restaurant.address %}<li><i class="bi bi-geo-alt me-1" aria-hidden="true"></i>{{ restaurant.address }}</li>{% endif %}
+          {% if restaurant.phone %}<li><i class="bi bi-telephone me-1" aria-hidden="true"></i>{{ restaurant.phone }}</li>{% endif %}
+          {% if restaurant.email %}<li><i class="bi bi-envelope me-1" aria-hidden="true"></i>{{ restaurant.email }}</li>{% endif %}
+        </ul>
       </div>
       <div class="col-6 col-md-3">
         <div class="qj-eyebrow text-white-50 mb-2">Visit</div>
@@ -233,7 +265,7 @@
       </div>
     </div>
     <div class="border-top border-secondary border-opacity-25 mt-4 pt-3 small d-flex flex-wrap justify-content-between gap-2">
-      <span>&copy; Quick Junction &mdash; restaurant management</span>
+      <span>&copy; {{ restaurant.name }}{% if restaurant.name != "Quick Junction" %} &middot; Powered by Quick Junction{% endif %}</span>
       <span>Photography: Unsplash</span>
     </div>
   </div>

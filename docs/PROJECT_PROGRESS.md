@@ -12,8 +12,9 @@
 
 Records work that was implemented and verified, milestone by milestone.
 
-Last updated: 2026-10-08 (M4 — account security & staff onboarding; see
-[M4](#m4--account-security--staff-onboarding-)). Before that: 2026-10-03 (M0 — production foundation: documentation
+Last updated: 2026-10-08 (M5 — menu & restaurant foundation; see
+[M5](#m5--menu--restaurant-foundation-)). Before that: M4 — account security & staff onboarding
+([M4](#m4--account-security--staff-onboarding-)). Before that: 2026-10-03 (M0 — production foundation: documentation
 corrected, CI added, v0.9.0 baseline tagged; no application change).
 Before that: 2026-09-30, Final UI/UX Transformation (see [Final UI/UX Transformation](#final-uiux-transformation)),
 after **Milestone 16** — final integration, security and demo audit; the
@@ -3263,4 +3264,187 @@ Modified: `app/models/__init__.py`, `app/models/audit_log.py`,
 `.github/workflows/ci.yml`, the five test files above,
 `tests/test_mysql_concurrency.py`, `docs/PROJECT_PROGRESS.md`,
 `docs/SECURITY.md`, `docs/STATUS.md`, `docs/PRODUCTION_READINESS.md`,
+`CHANGELOG.md`.
+
+---
+
+# M5 — Menu & Restaurant Foundation ✅
+
+Branch `feat/m5-menu-restaurant-foundation` (from `2927925`, M4 merged).
+Date: 2026-10-08. Security detail: [`docs/SECURITY.md` §21](SECURITY.md).
+
+Purpose: the data and operational foundation for M6 (customer design
+system), M7 (restaurant-owned assets) and M8 (customer identity), without
+building any of them. Still one restaurant per installation.
+
+## Implementation
+
+| Capability | Where | Behaviour |
+| --- | --- | --- |
+| Restaurant profile | `RestaurantProfile` (`restaurant_profile`), `app/services/restaurant.py`, `GET/POST /admin/settings/restaurant` | One row (id 1, DB CHECK): name, tagline, address, phone, email, default menu language. `get_restaurant()` reads it once per request (cached on `g`) and falls back to the same values the migration creates if the row is missing or unreadable, so every page can name the restaurant. ADMIN-only edit; the changed fields are audited old -> new (`restaurant_profile_changed`) in the same transaction |
+| Restaurant vs software | `base.html` and the customer page titles | Customer shell: brand, `<title>`, sign-in page and footer use the profile ("© *name* · Powered by Quick Junction"; tagline and contact details replace the fixed marketing sentence). Operations shell, ops page titles, account pages and "Calculated by Quick Junction" keep the software name |
+| Display order | `categories.sort_order`, `menu_items.sort_order` (0–10000, default 0) | Categories: sort_order, name, id. Items: category order, then item sort_order, name, id. Used by the public menu, home preview, staff order entry, `/staff/menu` and the admin lists. Set as a number on the admin forms |
+| Bilingual menu | `CategoryTranslation`, `MenuItemTranslation`; `app/utils/locale.py::localized` | Per-locale name/description, one per (entity, locale). The existing columns stay canonical. `localized(entity)`: the current locale's translation if present, else canonical; a translation without a description keeps the canonical description. Admins enter Nepali on the existing category/item forms; a blank Nepali name removes it |
+| Locale | `app/utils/locale.py`, `POST /locale` | `en`/`ne` only. Session, then `Accept-Language` (`ne-NP` → `ne`), then the restaurant default, then `en`. A valid `?lang=` sets the session. The switcher (customer shell) posts to `/locale` with the current path; `next` must be local. `<html lang>` follows the locale in the customer shell, always `en` in the operations shell. The choice survives sign-in/out |
+| Nepali font | `static/fonts/noto-sans-devanagari-devanagari-wght-normal.woff2` (Fontsource 5.3.0, OFL) | Added after Inter/Fraunces in both stacks with a Devanagari `unicode-range`: only used for Devanagari glyphs and only downloaded on pages that contain them. No CDN; CSP unchanged |
+| Sold-out control | `GET /staff/menu`, `POST /staff/menu/<id>/availability`; `menu.set_availability` | STAFF and ADMIN. Explicit target state (`available=1|0`), one conditional UPDATE of `is_available` only, audited as `menu_item_availability_changed` with `"source": "staff_menu"`. Sidebar: "Menu availability" in the Service group. The admin edit form stays ADMIN-only and no longer writes `is_available` at all (see the fix below) |
+| One public-menu rule | `menu.public_menu_query` | Available item in an active category; used by the menu, `cart.get_available_menu_item` (and checkout) and recommendations. The two copies are gone |
+
+Not changed: order snapshots, kitchen, inventory, recommendation corpus,
+local LLM input (all canonical text); cart, checkout, order history and
+recommendation pages show canonical names.
+
+## Decisions and adjustments made while implementing
+
+1. **Staff sold-out page is `/staff/menu`, not a button on `/admin/menu`.**
+   The existing test contract says staff never see an `/admin/...` link; a
+   staff-namespace page keeps it.
+2. **Explicit state, not a toggle**, so duplicate or concurrent clicks
+   converge instead of flipping back and forth.
+3. **`?lang=` and `POST /locale` both exist.** `?lang=` gives shareable
+   links; the visible switcher is a CSRF-protected POST.
+4. **The switcher returns to the path without its query string.** Echoing
+   the query string put attacker-chosen text into the page (caught by the
+   existing `test_17` price-spoofing test); the cost is that a category
+   filter is dropped when switching language.
+5. **`restaurant_profile.id` is not AUTO_INCREMENT.** MySQL 8 refuses a
+   CHECK constraint on an AUTO_INCREMENT column (error 3818). This was
+   caught only by the MySQL run.
+6. **SQLite batch rebuilds run with foreign keys off** in `c2d5f8a1b3e6`:
+   rebuilding `categories`/`menu_items` otherwise fails on SQLite once rows
+   reference them. MySQL alters in place.
+7. **Translation edits touch only the locales submitted.** A Nepali-only
+   form never deletes an English translation, and a POST without the Nepali
+   fields leaves translations alone.
+8. **Audit event added:** `restaurant_profile_changed` (no existing event
+   fits). Availability reuses `menu_item_availability_changed`.
+9. **No `hours` field.** The final brief dropped opening hours ("no
+   scheduling yet"); add it with the reservation-slot work.
+
+## Schema / migrations
+
+| Revision | Content |
+| --- | --- |
+| `b1c4e7f9a2d5` (revises `e8b4d2a6c913`) | `restaurant_profile` (CHECK `id = 1`, CHECK default_locale, FK `updated_by_id` SET NULL), one row created: name "Quick Junction" (the pre-M5 name), `en`, no tagline/address/phone/email; audit CHECK + `restaurant_profile_changed` |
+| `c2d5f8a1b3e6` (revises `b1c4e7f9a2d5`) | `categories.sort_order`, `menu_items.sort_order` (NOT NULL DEFAULT 0, CHECK 0–10000); `category_translations`, `menu_item_translations` (UNIQUE (entity, locale), CHECK locale, FK CASCADE) |
+
+Head: **`c2d5f8a1b3e6`** (15 linear revisions, single head). Verified:
+upgrade → downgrade to `e8b4d2a6c913` → upgrade on a scratch SQLite file
+(CLI) and inside `tests/test_m5_migration.py` on SQLite and on MySQL 8.0.46,
+with existing menu rows that survive the downgrade; also by CLI (`flask db upgrade` / `downgrade e8b4d2a6c913` / `upgrade`) on a freshly recreated MySQL `quickjunction_test` (seed row present, translation columns `utf8mb4`). The live
+`quickjunctiondb` was not touched.
+
+## Tests
+
+- `tests/test_m5_catalog.py` — **108 tests**:
+  - **profile:** fallback, per-request cache, singleton and locale CHECKs,
+    admin update and audit metadata, no-op save writes nothing, row created
+    when missing, staff/customer/anonymous refused, service refuses
+    non-admins, posted id ignored, six invalid inputs, rollback when the
+    audit write fails, CSRF, customer vs operations branding, escaping;
+  - **ordering:** public and management order, tie-break by id, default 0,
+    rendered order, service and DB range checks, admin forms;
+  - **translations:** ne/en/fallbacks, description fallback, categories,
+    uniqueness, unsupported locale (DB and service), FK, cascade, Devanagari
+    insert/read/update, admin enter/edit/keep/clear, other locales left
+    alone, description-without-name refused, category form, escaping;
+  - **locale:** default, restaurant default, four `Accept-Language` cases,
+    `?lang=` persistence, five invalid values never reflected, switcher
+    redirect, eight off-site `next` values, unsupported locales, CSRF and
+    GET, switcher placement, operations shell stays `en`, survives
+    sign-in/out, Nepali menu and detail page, font served and declared;
+  - **availability:** staff and admin both directions with audit,
+    customer/anonymous refused, GET 405, CSRF, invalid state, 404, nothing
+    else changes, admin form still refused to staff, no duplicate audit,
+    service refuses customers, rollback on audit failure, staff nav link;
+  - **public-menu rule:** sold-out item off the menu, cart and checkout;
+    inactive category hidden everywhere;
+  - **canonical text:** snapshot unchanged by later translation edits and
+    by ordering in Nepali; kitchen and TF-IDF document have no Nepali;
+  - **queries:** `/menu` in Nepali issues the same number of queries for
+    6 or 30 items.
+- `tests/test_m5_migration.py` — 1 test (above).
+- `tests/test_mysql_concurrency.py` —
+  `test_two_staff_marking_one_dish_sold_out_change_it_once` (15 rounds).
+  CI's guard now expects 12.
+- Contract updates to existing tests: `test_final_audit.py` (`/locale` is a
+  new public endpoint; `staff_menu.` added to the staff-only sweep, which
+  also proves customers are refused), `test_foundation.py` (three new
+  tables). No existing assertion was removed or weakened.
+
+| Run | Result |
+| --- | --- |
+| Collected | **1032** (922 after M4 + 108 + 1 + 1) |
+| M5 targeted (`test_m5_catalog.py`, `test_m5_migration.py`) | **109 passed** (SQLite and MySQL) |
+| SQLite, full suite | **1020 passed, 12 skipped, 0 failed** (12 = MySQL-only concurrency tests) |
+| MySQL 8.0.46, full suite (`quickjunction_test`) | **1031 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| MySQL concurrency (`tests/test_mysql_concurrency.py`) | **12 of 12 executed and passed**, stable over 5 consecutive runs |
+
+## Review fixes (before merge)
+
+1. **Production-safe profile row.** `b1c4e7f9a2d5` no longer seeds
+   "Quick Junction Demo Restaurant". On a real installation `flask db
+   upgrade` creates exactly one row: `id = 1`, `name = "Quick Junction"`,
+   `default_locale = "en"`, and `tagline`, `address`, `phone`, `email` all
+   NULL. "Quick Junction" is what every customer page already showed before
+   M5, so the upgrade changes nothing customers see and invents no
+   restaurant; the footer omits "Powered by Quick Junction" while the name is
+   still the software's own, and shows no contact lines. The code fallback
+   (`DEFAULT_RESTAURANT_NAME`, used when the row is missing, e.g. in
+   `create_all()` tests) is the same value, so behaviour is deterministic.
+   The admin sets the real details at **Restaurant**. The single-row CHECK
+   is unchanged. (The migration was edited in place: it has never been
+   applied to the live database or merged.)
+2. **Stale admin edits can no longer restore availability.**
+   `update_menu_item` never writes `is_available`; the admin edit form no
+   longer has the checkbox (it shows the current state and links to Menu
+   availability) and records `menu_item_updated` only. Availability changes
+   only through `set_availability` (`/staff/menu`, STAFF and ADMIN). The
+   create form keeps the checkbox for a new item's initial state.
+   `test_stale_admin_edit_cannot_undo_a_sold_out_change` walks the exact
+   sequence (available → admin opens edit → staff marks sold out → admin
+   submits the old form with "Available" ticked → still sold out, price edit
+   saved); with the old code it fails. `test_menu.py::test_22` now expects
+   the availability event from the dedicated control instead of the edit
+   form.
+
+## Known limitations
+
+- Only menu content is bilingual; page chrome, messages, cart, checkout,
+  order history and recommendations are English/canonical (full i18n
+  deferred).
+- Switching language drops the page's query string (e.g. a category filter).
+- No per-user language preference; the choice lives in the session cookie.
+- Restaurant identity is text only: no logo, colours, hero or gallery
+  images; dish photos are still the keyword-chosen stock images.
+- No opening hours on the profile.
+
+## Deferred
+
+- **M6:** Obsidian + Champagne customer design system, customer shell
+  redesign, Nepali UI strings (Flask-Babel), browser test harness.
+- **M7:** restaurant assets: logo, hero, favicon, menu and gallery images,
+  upload and variant pipeline.
+- **M8:** customer identity: name, mobile/email login, `preferred_language`
+  on the user.
+
+## Files changed
+
+New: `app/models/restaurant_profile.py`, `app/services/restaurant.py`,
+`app/utils/locale.py`, `app/routes/staff_menu.py`,
+`app/templates/admin/restaurant.html`, `app/templates/staff/menu.html`,
+`app/static/fonts/noto-sans-devanagari-devanagari-wght-normal.woff2`,
+`app/static/fonts/OFL-noto-sans-devanagari.txt`,
+`migrations/versions/b1c4e7f9a2d5_add_restaurant_profile.py`,
+`migrations/versions/c2d5f8a1b3e6_add_menu_ordering_and_translations.py`,
+`tests/test_m5_catalog.py`, `tests/test_m5_migration.py`.
+
+Modified: `app/__init__.py`, `app/models/{__init__,audit_log,category,enums,menu_item}.py`,
+`app/routes/{__init__,admin_menu,admin_settings,forms,main}.py`,
+`app/services/{cart,menu,recommendations}.py`, `app/utils/authorization.py`,
+`app/static/css/app.css`, `app/static/img/CREDITS.md`, `base.html` and 26
+other templates (customer page titles, menu card/index/detail, home, login,
+admin category/menu forms and lists, settings), `.github/workflows/ci.yml`,
+`tests/{test_final_audit,test_foundation,test_mysql_concurrency}.py`,
+`docs/{PROJECT_PROGRESS,STATUS,SECURITY,PRODUCTION_READINESS}.md`,
 `CHANGELOG.md`.

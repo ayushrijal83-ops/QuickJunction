@@ -25,7 +25,9 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired, Email, InputRequired, Length, NumberRange, Optional, Regexp
 
-from app.models.enums import Cuisine, DietaryType, SpiceLevel
+from app.models.category import SORT_ORDER_MAX
+from app.models.enums import Cuisine, DietaryType, Locale, SpiceLevel
+from app.models.restaurant_profile import ADDRESS_MAX, EMAIL_MAX, NAME_MAX, PHONE_MAX, TAGLINE_MAX
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY
 from app.services.menu import MAX_PRICE, MIN_PRICE
 from app.utils.security import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
@@ -96,10 +98,19 @@ class LoginForm(FlaskForm):
     submit = SubmitField("Log in")
 
 
+def _sort_order_field():
+    return IntegerField("Display order", default=0,
+                        validators=[Optional(), NumberRange(min=0, max=SORT_ORDER_MAX)])
+
+
 class CategoryForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired(), Length(max=80)])
     description = TextAreaField("Description", validators=[Optional(), Length(max=500)])
     is_active = BooleanField("Active", default=True)
+    sort_order = _sort_order_field()
+    # M5: Nepali text for the customer menu. Blank = show the name above.
+    name_ne = StringField("Name (नेपाली)", validators=[Optional(), Length(max=80)])
+    description_ne = TextAreaField("Description (नेपाली)", validators=[Optional(), Length(max=500)])
     submit = SubmitField("Save category")
 
 
@@ -123,6 +134,9 @@ class MenuItemForm(FlaskForm):
         "Dietary type", choices=_enum_choices(DietaryType), coerce=_enum_coerce, validators=[DataRequired()]
     )
     is_available = BooleanField("Available", default=True)
+    sort_order = _sort_order_field()
+    name_ne = StringField("Name (नेपाली)", validators=[Optional(), Length(max=120)])
+    description_ne = TextAreaField("Description (नेपाली)", validators=[Optional(), Length(max=2000)])
     ingredients = StringField(
         "Ingredients (comma-separated)", validators=[Optional(), Length(max=1000)]
     )
@@ -201,6 +215,20 @@ class PricingSettingsForm(FlaskForm):
     tax_rate = StringField("Tax rate (%)", validators=[DataRequired(), Length(max=8)])
     staff_max_discount = StringField("Staff maximum discount (%)", validators=[DataRequired(), Length(max=8)])
     submit = SubmitField("Save settings")
+
+
+class RestaurantProfileForm(FlaskForm):
+    """M5. The service re-validates every field; there is no id field -- the
+    profile is a single row the route never takes from the request."""
+
+    name = StringField("Restaurant name", validators=[DataRequired(), Length(max=NAME_MAX)])
+    tagline = StringField("Tagline", validators=[Optional(), Length(max=TAGLINE_MAX)])
+    address = StringField("Address", validators=[Optional(), Length(max=ADDRESS_MAX)])
+    phone = StringField("Phone", validators=[Optional(), Length(max=PHONE_MAX)])
+    email = StringField("Email", validators=[Optional(), Length(max=EMAIL_MAX), Email()])
+    default_locale = SelectField("Default menu language", choices=[(Locale.EN.value, "English"), (Locale.NE.value, "नेपाली")],
+                                 coerce=_enum_coerce, validators=[DataRequired()])
+    submit = SubmitField("Save restaurant profile")
 
 
 class IngredientForm(FlaskForm):

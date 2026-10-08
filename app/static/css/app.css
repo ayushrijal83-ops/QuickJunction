@@ -21,6 +21,19 @@
   font-display: swap;
 }
 
+/* Nepali (M5): Noto Sans Devanagari, OFL (fonts/OFL-noto-sans-devanagari.txt).
+   Listed after the Latin fonts in each stack, so it only renders Devanagari
+   glyphs; unicode-range keeps the browser from downloading it for pages
+   with no Nepali text. */
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  src: url("../fonts/noto-sans-devanagari-devanagari-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC, U+A830-A839, U+A8E0-A8FF, U+11B00-11B09;
+}
+
 /* === Tokens ===============================================================
    Warm restaurant palette: charcoal ink on cream, one terracotta brand
    colour (5.4:1 on white -- AA for text), muted gold for highlights, sage for
@@ -49,8 +62,8 @@
   --qj-shadow-lg: 0 24px 60px rgba(29, 26, 23, .18);
   --qj-radius: 1.1rem;
   --qj-radius-sm: .7rem;
-  --qj-font-display: "Fraunces", Georgia, "Times New Roman", serif;
-  --qj-font-ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --qj-font-display: "Fraunces", "Noto Sans Devanagari", Georgia, "Times New Roman", serif;
+  --qj-font-ui: "Inter", "Noto Sans Devanagari", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --qj-ease: cubic-bezier(.2, .7, .2, 1);
   --qj-sidebar-w: 260px;
 

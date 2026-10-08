@@ -5,21 +5,21 @@
   "staff":    {"title": "Staff sign in",    "blurb": "Work the kitchen order queue."},
   "admin":    {"title": "Admin sign in",    "blurb": "Manage the menu and approve staff accounts."},
 } %}
-{% block title %}{{ portals[portal].title }} &mdash; Quick Junction{% endblock %}
+{% block title %}{{ portals[portal].title }} &mdash; {{ restaurant.name }}{% endblock %}
 
 {% block content %}
 <div class="qj-auth qj-reveal my-lg-3">
   <div class="qj-auth__visual">
     <img src="{{ scene_image('auth') }}" alt="" width="1100" height="1375">
     <div>
-      <p class="qj-eyebrow text-white-50 mb-3">Quick Junction</p>
+      <p class="qj-eyebrow text-white-50 mb-3">{{ restaurant.name }}</p>
       <blockquote>&ldquo;Good food is the shortest way between two people.&rdquo;</blockquote>
       <p class="mb-0 small opacity-75">Sign in to order ahead, book a table, or run tonight&rsquo;s service.</p>
     </div>
   </div>
 
   <div class="qj-auth__form">
-    <h1 class="h2 mb-1">Sign in to Quick Junction</h1>
+    <h1 class="h2 mb-1">Sign in to {{ restaurant.name }}</h1>
     <p class="text-secondary mb-4">{{ portals[portal].blurb }}</p>
 
     {# Portal choice is navigation only. The role stored on the account

@@ -351,11 +351,17 @@ def test_22_admin_menu_changes_create_audit_events(client, db):
     assert db.session.query(AuditLog).filter_by(event_type=AuditEvent.MENU_ITEM_CREATED).count() == 1
     assert db.session.query(AuditLog).filter_by(event_type=AuditEvent.INGREDIENT_CHANGED).count() == 1
 
-    # Flip availability only -> a dedicated availability-changed event.
+    # M5: availability changes only through the dedicated control, which
+    # records its own availability-changed event; the general edit form no
+    # longer touches it (an unticked box there changes nothing).
     client.post(
         f"/admin/menu/{item.id}/edit",
         data=valid_item_form(category_id=str(item.category_id), is_available=""),
     )
+    assert db.session.query(AuditLog).filter_by(event_type=AuditEvent.MENU_ITEM_UPDATED).count() == 1
+    db.session.refresh(item)
+    assert item.is_available is True
+    client.post(f"/staff/menu/{item.id}/availability", data={"available": "0"})
     availability_events = db.session.query(AuditLog).filter_by(
         event_type=AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED
     ).all()

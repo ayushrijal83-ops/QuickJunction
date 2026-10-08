@@ -1342,3 +1342,118 @@ Rejections and failed attempts are independent rows (`commit=True`).
   Reset password (the reset code works the same way).
 - A pending reset does not lock the account; the old password works until
   the code is redeemed. Deactivate the account for an immediate lockout.
+
+---
+
+## 21. Menu and restaurant foundation (M5)
+
+Code: `app/services/restaurant.py`, `app/utils/locale.py`,
+`app/services/menu.py` (`public_menu_query`, `set_availability`,
+translations), `app/routes/staff_menu.py`, `app/routes/admin_settings.py`
+(`restaurant`), `app/routes/main.py` (`switch_locale`). Tests:
+`tests/test_m5_catalog.py` (108), `tests/test_m5_migration.py` (1) and one
+MySQL race in `tests/test_mysql_concurrency.py`.
+
+### 21.1 Restaurant profile
+
+- The migration creates the row with name "Quick Junction" (the pre-M5
+  name) and no contact details, so a real installation never shows invented
+  or demo restaurant data before the admin fills it in.
+- One row, enforced by the database (`ck_restaurant_profile_singleton`:
+  `id = 1`; the id is not AUTO_INCREMENT because MySQL refuses a CHECK on
+  one). Nothing references it and no table gained a `restaurant_id`.
+- `GET/POST /admin/settings/restaurant`: `require_role(ADMIN)` (staff and
+  customers 403, anonymous 401), and `update_restaurant` re-checks the
+  role. There is no id in the URL or the form; posted `id`/`updated_by_id`
+  fields are ignored (tested).
+- Validation in the service: name required (≤ 120), tagline ≤ 200,
+  address ≤ 255, phone `^[0-9+()\- ]{6,32}$`, email via `email-validator`,
+  default locale in `en`/`ne`.
+- Audit: `restaurant_profile_changed`, `user_id` = the admin, metadata
+  `{"changed": {field: {"from", "to"}}}` for the changed fields only. These
+  are public business contact details; nothing secret exists in the
+  profile. An unchanged save writes nothing. Change and audit row commit
+  together (`commit_with`); a failing audit write rolls the change back
+  (tested).
+- Rendering: the profile is shown in the customer shell (brand, titles,
+  footer) and autoescaped; a `<script>` restaurant name renders as text
+  (tested). "Quick Junction" stays the software's name in the operations
+  shell.
+
+### 21.2 Staff sold-out control
+
+- `POST /staff/menu/<id>/availability` with `available=1|0`:
+  `require_role(STAFF, ADMIN)`; customers 403, anonymous 401, GET 405,
+  missing CSRF 400, any other `available` value 400, unknown item 404.
+- `set_availability` is one conditional `UPDATE menu_items SET
+  is_available = :v WHERE id = :id AND is_available = NOT :v`. It writes no
+  other column, so posted `price`, `name`, `category_id`, `sort_order` or
+  Nepali fields are ignored (tested) and a concurrent admin edit to other
+  fields is never overwritten by it. The target state is explicit, so a
+  repeated request cannot toggle it back; only the request that changes the
+  row writes the `menu_item_availability_changed` audit row (metadata
+  `{"menu_item_id", "is_available", "source": "staff_menu"}`), in the same
+  transaction. MySQL race: two staff marking one dish sold out at once give
+  one change and one audit row, 15 rounds.
+- The admin edit form stays ADMIN-only (staff POST: 403) and never writes
+  `is_available`, so an edit form opened before a sold-out change cannot
+  undo it (tested with the exact stale-form sequence). Admins change
+  availability through the same `/staff/menu` control.
+
+### 21.3 One public-menu rule
+
+`public_menu_query()` (available item AND active category) is now the only
+definition. The menu pages, `cart.get_available_menu_item` (and through it
+`checkout`) and the recommendation candidates all build on it; the copies in
+`cart.py` and `recommendations.py` were removed. Behaviour is unchanged.
+
+### 21.4 Locale
+
+- Only `en` and `ne` are ever stored or rendered (`Locale`, `normalize`).
+  Sources, first match wins: session (set by `POST /locale` or a valid
+  `?lang=`), `Accept-Language`, the restaurant default, `en`.
+- `?lang=` is read on GET because the locale is a display preference that
+  gates no data and no permission; an invalid value is ignored and never
+  reflected into the page (tested with `<script>` and NUL).
+- `POST /locale` (public, CSRF): an unsupported `lang` is a 400; `next` must
+  be a local path. `safe_next` refuses a scheme or host, `//`, any
+  backslash, control characters (CR/LF header injection) and over-long
+  values, falling back to `/menu` (tested with eight hostile values). The
+  switcher posts `request.path` only, so no query-string input is echoed
+  into the page.
+- The session keeps `locale` across sign-in and sign-out. `login_user`
+  still clears everything else first (fixation protection unchanged).
+- `<html lang>` is the resolved locale in the customer shell and always
+  `en` in the operations shell.
+
+### 21.5 Translations
+
+- `category_translations` / `menu_item_translations`: UNIQUE (entity,
+  locale), CHECK locale IN ('en', 'ne'), FK ON DELETE CASCADE, Devanagari
+  stored as utf8mb4 (round trip tested on MySQL 8.0.46).
+- Admin-only to write (the existing ADMIN-only category and item forms).
+  A Nepali name is optional; a description without a name is refused. A
+  form without the Nepali fields leaves translations untouched, and only
+  the locales submitted are changed.
+- A concurrent duplicate insert hits the unique index and is reported as
+  "changed at the same time", with nothing written.
+- Untrusted content: rendered only through autoescaped templates, no
+  `|safe` (tested with `<script>` in a translation).
+
+### 21.6 Canonical data is untouched
+
+`MenuItem.name`/`description` remain the source for order snapshots
+(`order_items.item_name_snapshot`), the kitchen board, inventory, the
+TF-IDF corpus and the local LLM. Tests: a translation added or edited after
+an order does not change its snapshot; an order placed while browsing in
+Nepali still snapshots the canonical name; the recommendation document and
+the kitchen board contain no Nepali text.
+
+### 21.7 Limitations
+
+- Page chrome (buttons, headings, messages) stays English; only menu content
+  is bilingual. Cart, checkout, order history and recommendations show the
+  canonical names.
+- Switching language returns to the page's path, dropping its query string
+  (for example a category filter).
+- Restaurant identity is text only: no logo, colours or images (M7).

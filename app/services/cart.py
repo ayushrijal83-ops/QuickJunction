@@ -15,10 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.extensions import db
-from app.models.category import Category
 from app.models.menu_item import MenuItem
 from app.services.errors import ValidationError
+from app.services.menu import public_menu_query
 
 MIN_QUANTITY = 1
 MAX_QUANTITY_PER_ITEM = 20
@@ -41,15 +40,10 @@ def validate_quantity(quantity: int) -> list[str]:
 
 
 def get_available_menu_item(menu_item_id: int) -> MenuItem | None:
-    """Same filter as app/services/menu.py::get_public_menu_item -- a cart
-    (or an order) can never hold an item a customer could not have found by
-    browsing the public menu."""
-    return (
-        db.session.query(MenuItem)
-        .join(Category)
-        .filter(MenuItem.id == menu_item_id, MenuItem.is_available.is_(True), Category.is_active.is_(True))
-        .first()
-    )
+    """The public-menu rule itself (app/services/menu.py::public_menu_query),
+    so a cart (or an order) can never hold an item a customer could not have
+    found by browsing the public menu."""
+    return public_menu_query().filter(MenuItem.id == menu_item_id).first()
 
 
 def add_item(cart: dict[str, int], menu_item_id: int, quantity: int) -> dict[str, int]:

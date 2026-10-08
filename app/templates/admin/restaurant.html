@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, select, submit %}
+{% block title %}Restaurant profile &mdash; Quick Junction Admin{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <h1 class="h3 mb-1">Restaurant profile</h1>
+    <p class="text-secondary">
+      How your restaurant appears to guests and customers: the site header, page titles and footer.
+      Quick Junction stays the name of the software.
+      <a href="{{ url_for('admin_settings.pricing') }}">Pricing settings &rarr;</a>
+    </p>
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <form method="post" novalidate>
+          {{ form.hidden_tag() }}
+          {{ field(form.name, autofocus=true) }}
+          {{ field(form.tagline, help="Optional. One short line shown in the footer and the browser title of the home page.") }}
+          {{ field(form.address) }}
+          <div class="row">
+            <div class="col-md-6">{{ field(form.phone, inputmode="tel") }}</div>
+            <div class="col-md-6">{{ field(form.email, inputmode="email") }}</div>
+          </div>
+          {{ select(form.default_locale, help="Used when a visitor has not chosen a language and their browser does not ask for English or Nepali.") }}
+          {{ submit("Save restaurant profile") }}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

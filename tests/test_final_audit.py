@@ -17,9 +17,10 @@ PUBLIC_ENDPOINTS = {
     "main.home", "health.health", "menu.index", "menu.detail",
     "auth.login", "auth.register", "account.setup",
     "cart.index", "cart.add", "cart.update", "cart.remove", "cart.clear",
+    "main.switch_locale",  # M5: guests choose the menu language too; sets only a display preference
 }
 # Endpoints only STAFF/ADMIN may reach, and those only ADMIN may reach.
-STAFF_PREFIXES = ("staff_orders.", "kitchen.", "tables.board", "tables.set_status", "inventory.stock",
+STAFF_PREFIXES = ("staff_orders.", "staff_menu.", "kitchen.", "tables.board", "tables.set_status", "inventory.stock",
                   "inventory.detail", "inventory.movement", "reservations.staff_")
 ADMIN_ONLY_PREFIXES = ("admin_settings.", "admin_views.", "admin_staff.", "admin_accounts.", "reports.", "inventory.new",
                        "inventory.edit", "inventory.recipe", "tables.new", "tables.edit")

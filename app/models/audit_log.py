@@ -108,6 +108,11 @@ class AuditEvent(str, enum.Enum):
     ACCOUNT_DEACTIVATED = "account_deactivated"
     ACCOUNT_ACTIVATED = "account_activated"
 
+    # Restaurant identity (M5). user_id is the admin; metadata_json holds
+    # {"changed": {field: {"from": old, "to": new}}} for the fields that
+    # changed -- business contact details only, nothing secret.
+    RESTAURANT_PROFILE_CHANGED = "restaurant_profile_changed"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

@@ -22,6 +22,7 @@
       <table class="table align-middle mb-0">
         <thead class="table-light">
           <tr>
+            <th scope="col" class="text-end">Order</th>
             <th scope="col">Name</th>
             <th scope="col">Category</th>
             <th scope="col">Attributes</th>
@@ -33,7 +34,9 @@
         <tbody>
           {% for item in items %}
             <tr>
-              <th scope="row" class="fw-semibold">{{ item.name }}</th>
+              <td class="text-end text-secondary">{{ item.sort_order }}</td>
+              <th scope="row" class="fw-semibold">{{ item.name }}
+                {% set ne = localized(item, "ne") %}{% if ne.name != item.name %}<span class="d-block small fw-normal text-secondary" lang="ne">{{ ne.name }}</span>{% endif %}</th>
               <td>{{ item.category.name }}</td>
               <td class="small">
                 <span class="badge rounded-pill text-bg-light border">{{ item.cuisine.value|replace("_", " ")|title }}</span>

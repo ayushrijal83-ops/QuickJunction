@@ -40,7 +40,10 @@ _VERSION_KEY = "sv"
 
 
 def login_user(user: User) -> None:
+    locale = session.get("locale")  # a display preference, not an authority (M5)
     session.clear()  # drop any pre-authentication session state first
+    if locale:
+        session["locale"] = locale
     session[_SESSION_KEY] = user.id
     # Stamp the session with the user's current revocation counter. Any later
     # logout increments the stored counter, which is what makes this session
@@ -76,7 +79,10 @@ def logout_user() -> None:
             db.session.rollback()
             logger.warning("Could not increment session_version on logout", exc_info=True)
 
+    locale = session.get("locale")
     session.clear()
+    if locale:
+        session["locale"] = locale
     g.current_user = None
 
 

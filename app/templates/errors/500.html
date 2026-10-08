@@ -1,6 +1,6 @@
 {% extends "errors/_layout.html" %}
 {% block icon %}tools{% endblock %}
-{% block title %}Something went wrong &mdash; Quick Junction{% endblock %}
+{% block title %}Something went wrong &mdash; {{ restaurant.name }}{% endblock %}
 {% block heading %}Something went wrong on our side{% endblock %}
 {# The message stays generic on purpose: the detail is in the server log,
    never in the response. See app/utils/errors.py and docs/SECURITY.md. #}

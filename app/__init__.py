@@ -20,6 +20,7 @@ from app.utils.errors import register_error_handlers
 from app.utils.formatting import register_filters
 from app.utils.headers import register_security_headers
 from app.utils.imagery import register_imagery
+from app.utils.locale import register_locale
 from app.utils.logging import configure_logging
 from config import BaseConfig, database_uses_root, get_config
 
@@ -67,6 +68,7 @@ def create_app(config_name: str | None = None) -> Flask:
     register_error_handlers(app)
     register_filters(app)
     register_imagery(app)
+    register_locale(app)
     # Cosmetic only (the dashboard greeting); business times use db_now().
     app.jinja_env.globals["local_now"] = datetime.now
     register_security_headers(app)
@@ -80,7 +82,12 @@ def create_app(config_name: str | None = None) -> Flask:
     # cart_count drives the navbar badge. It counts quantities in the signed
     # session only -- it touches no database row and grants no authority, so
     # a tampered cookie can at worst show a wrong number on a badge.
+    #
+    # restaurant is the installed restaurant's identity (M5); "Quick Junction"
+    # in templates is the software. One cached read per request
+    # (app/services/restaurant.py).
     def _template_globals() -> dict:
+        from app.services.restaurant import get_restaurant
         from app.utils.cart import get_cart
 
         total = 0
@@ -89,7 +96,7 @@ def create_app(config_name: str | None = None) -> Flask:
                 total += int(quantity)
             except (TypeError, ValueError):
                 continue
-        return {"current_user": get_current_user(), "cart_count": total}
+        return {"current_user": get_current_user(), "cart_count": total, "restaurant": get_restaurant()}
 
     app.context_processor(_template_globals)
 

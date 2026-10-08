@@ -65,6 +65,21 @@ def _ingredients_audit(item: MenuItem):
     return _audit(AuditEvent.INGREDIENT_CHANGED, menu_item_id=item.id)
 
 
+def _translations(form) -> dict | None:
+    """The Nepali fields, only when this POST actually carried them -- a
+    request without them leaves existing translations alone rather than
+    deleting them."""
+    if "name_ne" not in request.form and "description_ne" not in request.form:
+        return None
+    return {"ne": (form.name_ne.data, form.description_ne.data)}
+
+
+def _prefill_translations(form, entity) -> None:
+    for t in entity.translations:
+        if t.locale.value == "ne":
+            form.name_ne.data, form.description_ne.data = t.name, t.description
+
+
 def _category_choices() -> list[tuple[int, str]]:
     return [
         (c.id, c.name if c.is_active else f"{c.name} (inactive)") for c in list_admin_categories()
@@ -87,7 +102,8 @@ def category_create():
     if form.validate_on_submit():
         try:
             category = create_category(
-                CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data),
+                CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data,
+                              sort_order=form.sort_order.data, translations=_translations(form)),
                 audit=lambda c: _audit(AuditEvent.CATEGORY_CREATED, category_id=c.id, name=c.name),
             )
         except CategoryError as exc:
@@ -107,12 +123,15 @@ def category_edit(category_id: int):
         abort(404)
 
     form = CategoryForm() if request.method == "POST" else CategoryForm(obj=category)
+    if request.method != "POST":
+        _prefill_translations(form, category)
     if form.validate_on_submit():
         was_active = category.is_active
         try:
             update_category(
                 category,
-                CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data),
+                CategoryInput(name=form.name.data, description=form.description.data, is_active=form.is_active.data,
+                              sort_order=form.sort_order.data, translations=_translations(form)),
                 audit=lambda c: _audit(
                     AuditEvent.CATEGORY_DEACTIVATED if was_active and not c.is_active else AuditEvent.CATEGORY_UPDATED,
                     category_id=c.id, name=c.name),
@@ -153,6 +172,8 @@ def menu_create():
                     spice_level=form.spice_level.data,
                     dietary_type=form.dietary_type.data,
                     is_available=form.is_available.data,
+                    sort_order=form.sort_order.data,
+                    translations=_translations(form),
                 ),
                 audit=lambda i: _audit(AuditEvent.MENU_ITEM_CREATED, menu_item_id=i.id, name=i.name),
             )
@@ -180,10 +201,10 @@ def menu_edit(item_id: int):
     else:
         form = MenuItemForm(obj=item)
         form.ingredients.data = ", ".join(ing.name for ing in item.ingredients)
+        _prefill_translations(form, item)
     form.category_id.choices = _category_choices()
 
     if form.validate_on_submit():
-        was_available = item.is_available
         try:
             update_menu_item(
                 item,
@@ -195,13 +216,11 @@ def menu_edit(item_id: int):
                     cuisine=form.cuisine.data,
                     spice_level=form.spice_level.data,
                     dietary_type=form.dietary_type.data,
-                    is_available=form.is_available.data,
+                    sort_order=form.sort_order.data,
+                    translations=_translations(form),
                 ),
-                audit=lambda i: (
-                    _audit(AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED, menu_item_id=i.id, is_available=i.is_available)
-                    if was_available != i.is_available
-                    else _audit(AuditEvent.MENU_ITEM_UPDATED, menu_item_id=i.id, name=i.name)
-                ),
+                # Availability is not edited here (M5): /staff/menu owns it.
+                audit=lambda i: _audit(AuditEvent.MENU_ITEM_UPDATED, menu_item_id=i.id, name=i.name),
             )
         except MenuItemError as exc:
             _apply_form_errors(form, exc.errors)
