@@ -1,6 +1,6 @@
 {% extends "errors/_layout.html" %}
 {% block icon %}shield-lock{% endblock %}
-{% block title %}Not permitted &mdash; Quick Junction{% endblock %}
+{% block title %}Not permitted &mdash; {{ restaurant.name }}{% endblock %}
 {% block heading %}You do not have access to this page{% endblock %}
 {% block explanation %}
   Your account is signed in, but this area is reserved for another role.

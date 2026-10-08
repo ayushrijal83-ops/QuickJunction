@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/_dashboard.html" import steps %}
-{% block title %}Order #{{ order.id }} &mdash; Quick Junction{% endblock %}
+{% block title %}Order #{{ order.id }} &mdash; {{ restaurant.name }}{% endblock %}
 
 {% block content %}
 <nav aria-label="breadcrumb">

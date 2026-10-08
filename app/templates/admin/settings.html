@@ -6,6 +6,7 @@
 <div class="row justify-content-center">
   <div class="col-lg-6">
     <h1 class="h3 mb-1">Pricing settings</h1>
+    <p class="mb-2"><a href="{{ url_for('admin_settings.restaurant') }}">Restaurant profile &rarr;</a></p>
     <p class="text-secondary">
       Current: tax <strong>{{ tax_rate }}%</strong>, staff maximum discount <strong>{{ staff_max }}%</strong>.
       Changes apply to orders placed or discounted afterwards; existing orders keep the rate they were charged.

@@ -37,5 +37,6 @@ Photo page: `https://unsplash.com/photos/<id>` resolves via the image id
 above on `images.unsplash.com/photo-<id>`.
 
 Fonts (SIL Open Font License 1.1, via Fontsource): Fraunces (display),
-Inter (UI) — `static/fonts/`. Icons: Bootstrap Icons 1.11.3 (MIT) —
+Inter (UI), Noto Sans Devanagari 5.3.0 (Nepali text, M5; licence text in
+`static/fonts/OFL-noto-sans-devanagari.txt`) — `static/fonts/`. Icons: Bootstrap Icons 1.11.3 (MIT) —
 `static/vendor/bootstrap-icons/`.

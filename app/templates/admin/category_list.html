@@ -22,6 +22,7 @@
       <table class="table align-middle mb-0">
         <thead class="table-light">
           <tr>
+            <th scope="col" class="text-end">Order</th>
             <th scope="col">Name</th>
             <th scope="col">Description</th>
             <th scope="col">Status</th>
@@ -31,7 +32,9 @@
         <tbody>
           {% for category in categories %}
             <tr>
-              <th scope="row" class="fw-semibold">{{ category.name }}</th>
+              <td class="text-end text-secondary">{{ category.sort_order }}</td>
+              <th scope="row" class="fw-semibold">{{ category.name }}
+                {% set ne = localized(category, "ne") %}{% if ne.name != category.name %}<span class="d-block small fw-normal text-secondary" lang="ne">{{ ne.name }}</span>{% endif %}</th>
               <td class="text-secondary small">{{ category.description or "—" }}</td>
               <td>
                 {% if category.is_active %}

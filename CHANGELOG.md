@@ -60,6 +60,20 @@ Each release uses only the sections that apply, in this order:
   `account_token_rejected`, `account_deactivated`, `account_activated`.
 - Settings (M4): `STAFF_INVITE_TTL_HOURS` (default 72) and
   `PASSWORD_RESET_TTL_HOURS` (default 24), each 1–720.
+- **Menu & restaurant foundation** (M5, `docs/SECURITY.md` §21):
+  - restaurant profile (name, tagline, address, phone, email, default menu
+    language), admin-editable at `/admin/settings/restaurant`;
+  - display order for categories and menu items;
+  - Nepali names and descriptions for categories and menu items, shown on
+    the customer menu, with an English/नेपाली switcher (`POST /locale`,
+    `?lang=en|ne`) and a vendored Noto Sans Devanagari font;
+  - **Menu availability** for STAFF and ADMIN (`/staff/menu`): mark a dish
+    sold out or available again.
+
+  `tests/test_m5_catalog.py` (103), `tests/test_m5_migration.py` (1) and a
+  MySQL race (two staff marking one dish sold out); CI now expects 12 MySQL
+  concurrency tests.
+- Audit event (M5): `restaurant_profile_changed`.
 - `docs/STATUS.md` — verified current state and baseline record.
 - `docs/PRODUCTION_READINESS.md` — go-live checklist.
 - `docs/RELEASE_PROCESS.md` — branching, tagging, changelog and intended
@@ -101,6 +115,18 @@ Each release uses only the sections that apply, in this order:
 - **M4:** `register_user` no longer accepts `as_staff`; public registration
   creates CUSTOMER accounts only. Account-identity checks shared by
   `create_admin` and invitations moved to `app/services/auth.identity_errors`.
+- **M5:** customer-facing pages (header, titles, footer, sign-in) show the
+  restaurant profile's name instead of "Quick Junction"; the footer reads
+  "Powered by Quick Junction" and the operations console keeps the Quick
+  Junction brand. The footer's fixed marketing sentence is replaced by the
+  profile's tagline and contact details.
+- **M5:** the public menu, home page preview, staff order entry and the
+  admin/staff menu lists are ordered by category order, then item order,
+  then name, then id (previously by name only). Existing rows default to
+  order 0, so the order is unchanged until an admin sets one.
+- **M5:** the public-menu rule (available item in an active category) has a
+  single implementation, `app/services/menu.public_menu_query`, used by the
+  menu, cart, checkout and recommendations. Behaviour is unchanged.
 
 ### Removed
 
@@ -125,6 +151,11 @@ Each release uses only the sections that apply, in this order:
   or see another user's password. The last active admin cannot be
   deactivated (row-locked check). No password, hash or code is written to
   the audit log or application logs.
+- **M5:** restaurant settings are ADMIN-only and audited old -> new in the
+  same transaction; staff can change only a dish's availability, through a
+  single conditional UPDATE; the language switcher accepts only `en`/`ne`
+  and only a local return path (no open redirect); translated text is
+  autoescaped like all content.
 
 ### Fixed
 
@@ -142,6 +173,15 @@ Each release uses only the sections that apply, in this order:
   row changes; quick on any database size. Reversible: `downgrade()` deletes
   audit rows of the M4 types and drops `account_tokens` (outstanding codes are
   lost; accounts created by invitation are kept).
+- `b1c4e7f9a2d5` (M5, revises `e8b4d2a6c913`): creates `restaurant_profile`
+  (one row, seeded as "Quick Junction Demo Restaurant", English) and widens
+  `ck_audit_logs_event_type` by `restaurant_profile_changed`. Reversible:
+  `downgrade()` deletes those audit rows and drops the table.
+- `c2d5f8a1b3e6` (M5, revises `b1c4e7f9a2d5`): adds `sort_order` (default 0,
+  CHECK 0–10000) to `categories` and `menu_items` and creates
+  `category_translations` and `menu_item_translations` (empty). No existing
+  value changes; quick on any database size. Reversible: `downgrade()` drops
+  the translation tables (their content is lost) and the columns.
 
 ### Operator action required
 
@@ -161,6 +201,12 @@ Each release uses only the sections that apply, in this order:
 - **M4:** new staff no longer sign up. An admin invites them at **Accounts →
   Invite staff** and gives them the one-time code (there is no email
   delivery); they set their password at `/account/setup`.
+- **M5:** run `flask db upgrade` (new head `c2d5f8a1b3e6`). Then set the
+  real restaurant name and contact details at **Restaurant** in the admin
+  sidebar; until then customers see "Quick Junction Demo Restaurant".
+- **M5:** Nepali menu text is entered by hand on each category and menu item
+  (nothing is translated automatically). Staff mark dishes sold out at
+  **Menu availability**.
 
 ## [0.9.0] — 2026-10-03
 

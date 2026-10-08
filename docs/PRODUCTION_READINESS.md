@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry) and M4 (account security and staff onboarding, reviewed 2026-10-08).
+Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry), M4 (account security and staff onboarding) and M5 (menu & restaurant foundation), reviewed 2026-10-08.
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -96,10 +96,10 @@ No capacity statement may be published until these are measured.
 
 | # | Item | Status | Current state (evidence) | Required for READY |
 | --- | --- | --- | --- | --- |
-| O1 | Restaurant configuration | NOT STARTED | Slots, currency, branding are code constants | Admin-editable settings |
+| O1 | Restaurant configuration | IN PROGRESS | M5: restaurant name, tagline, address, phone, email and default menu language are admin-editable (`/admin/settings/restaurant`, audited). Still code constants: reservation slots, currency, logo/colours/images (assets: M7) | Admin-editable settings |
 | O2 | Admin bootstrap | BLOCKED (by D1) | Command exists (D10); no installation yet. M4: the owner can change the operator-chosen password at `/account/password` | Owner account created on the installation with `flask create-admin`; owner able to change the password (S2) |
 | O3 | Staff onboarding | NOT STARTED | M4: invitation workflow exists (S4); no installation yet | Staff invited and able to sign in |
-| O4 | Menu setup | IN PROGRESS | Admin menu/category/ingredient/recipe/table management exists and is tested | Restaurant's real menu, tables and tax rate entered and reviewed |
+| O4 | Menu setup | IN PROGRESS | Admin menu/category/ingredient/recipe/table management exists and is tested. M5: display order, Nepali names/descriptions, staff sold-out control (`/staff/menu`) | Restaurant's real menu, tables and tax rate entered and reviewed |
 | O5 | Backup verification | BLOCKED (by P1–P4) | — | First backup restored successfully before go-live |
 | O6 | Monitoring | BLOCKED (by D9) | — | Alerts route to the support contact |
 | O7 | Smoke test | NOT STARTED | Test-client end-to-end flows exist (`tests/test_demo_flow.py`) | Scripted smoke test against the live installation: order → kitchen → payment → report |

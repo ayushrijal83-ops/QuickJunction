@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% block title %}{{ item.name }} &mdash; Quick Junction{% endblock %}
+{% block title %}{{ localized(item).name }} &mdash; {{ restaurant.name }}{% endblock %}
 
 {% block content %}
+{% set text = localized(item) %}
 <nav aria-label="breadcrumb">
   <ol class="breadcrumb">
     <li class="breadcrumb-item"><a href="{{ url_for('menu.index') }}">Menu</a></li>
-    <li class="breadcrumb-item active" aria-current="page">{{ item.name }}</li>
+    <li class="breadcrumb-item active" aria-current="page">{{ text.name }}</li>
   </ol>
 </nav>
 
@@ -17,10 +18,10 @@
   </div>
 
   <div class="col-lg-5 qj-reveal qj-reveal-2">
-    <p class="qj-eyebrow mb-2">{{ item.category.name }}</p>
-    <h1 class="display-6 mb-2">{{ item.name }}</h1>
+    <p class="qj-eyebrow mb-2">{{ localized(item.category).name }}</p>
+    <h1 class="display-6 mb-2">{{ text.name }}</h1>
     <p class="qj-food__price qj-price h3 mb-3">{{ item.price | money }}</p>
-    {% if item.description %}<p class="lead fs-6 text-secondary mb-4">{{ item.description }}</p>{% endif %}
+    {% if text.description %}<p class="lead fs-6 text-secondary mb-4">{{ text.description }}</p>{% endif %}
 
     <dl class="qj-facts mb-4">
       <div><dt>Cuisine</dt><dd>{{ item.cuisine.value|replace("_", " ")|title }}</dd></div>

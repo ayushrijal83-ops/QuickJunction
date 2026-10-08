@@ -24,6 +24,19 @@
           {{ field(form.name, autofocus=true) }}
           {{ field(form.description, rows=3) }}
           {{ field(form.price, help="Stored exactly as entered, to two decimal places.") }}
+          {{ field(form.sort_order, min=0, max=10000, help="Position within its category: lower numbers come first. Equal numbers are sorted by name.") }}
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-3" lang="ne">
+        <div class="card-header bg-white"><strong>नेपाली</strong> <span class="small text-secondary" lang="en">(customer menu)</span></div>
+        <div class="card-body">
+          <p class="small text-secondary" lang="en">
+            Customers who choose नेपाली see these instead of the name and description above. Orders, the kitchen
+            and receipts always use the name above.
+          </p>
+          {{ field(form.name_ne, help="Shown on the customer menu in Nepali. Leave blank to show the name above.") }}
+          {{ field(form.description_ne, rows=3) }}
         </div>
       </div>
 

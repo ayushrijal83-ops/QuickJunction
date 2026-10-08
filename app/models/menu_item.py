@@ -22,7 +22,8 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
-from app.models.enums import Cuisine, DietaryType, SpiceLevel, enum_column
+from app.models.category import SORT_ORDER_MAX
+from app.models.enums import Cuisine, DietaryType, Locale, SpiceLevel, enum_column
 from app.models.ingredient import Ingredient
 from app.models.menu_item_ingredient import MenuItemIngredient
 
@@ -34,6 +35,7 @@ class MenuItem(db.Model):
         # Backs the public menu's most common query: items in a given
         # category that are currently available.
         sa.Index("ix_menu_items_category_available", "category_id", "is_available"),
+        sa.CheckConstraint(f"sort_order >= 0 AND sort_order <= {SORT_ORDER_MAX}", name="ck_menu_items_sort_order_range"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -60,6 +62,8 @@ class MenuItem(db.Model):
     )
 
     is_available: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.true())
+    # M5: position within its category (0 first; ties by name, then id).
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, server_default="0", default=0)
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -70,6 +74,36 @@ class MenuItem(db.Model):
     ingredients: Mapped[list[Ingredient]] = relationship(
         secondary=MenuItemIngredient.__table__, order_by=Ingredient.name
     )
+    translations: Mapped[list["MenuItemTranslation"]] = relationship(
+        back_populates="menu_item", cascade="all, delete-orphan", order_by="MenuItemTranslation.locale"
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
         return f"<MenuItem id={self.id} name={self.name!r} price={self.price} available={self.is_available}>"
+
+
+class MenuItemTranslation(db.Model):
+    """A menu item's name/description in one locale (M5), shown on the
+    customer menu only. Orders, the kitchen, inventory, recommendations and
+    the local LLM keep using the canonical ``MenuItem.name``/``description``,
+    and an order line's ``item_name_snapshot`` never changes."""
+
+    __tablename__ = "menu_item_translations"
+    __table_args__ = (
+        sa.UniqueConstraint("menu_item_id", "locale", name="uq_menu_item_translations_item_locale"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    menu_item_id: Mapped[int] = mapped_column(sa.ForeignKey("menu_items.id", ondelete="CASCADE"), nullable=False)
+    locale: Mapped[Locale] = mapped_column(
+        enum_column(Locale, 8, name="ck_menu_item_translations_locale"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.String(2000), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False
+    )
+
+    menu_item: Mapped[MenuItem] = relationship(back_populates="translations")

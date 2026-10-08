@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Menu availability &mdash; Quick Junction Staff{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <h1 class="h3 mb-1">Menu availability</h1>
+  <p class="text-secondary mb-0">
+    Mark a dish sold out the moment the kitchen runs out; customers stop seeing it and it can no longer be ordered.
+    Mark it available again when it is back. Everything else about a dish is changed by an administrator.
+  </p>
+</div>
+
+{% if items %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col">Dish</th>
+            <th scope="col">Category</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="text-end"><span class="visually-hidden">Action</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <th scope="row" class="fw-semibold">{{ item.name }}</th>
+              <td>{{ item.category.name }}{% if not item.category.is_active %} <span class="small text-secondary">(category hidden)</span>{% endif %}</td>
+              <td>
+                {% if item.is_available %}
+                  <span class="badge text-bg-success">Available</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">Sold out</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('staff_menu.set_item_availability', item_id=item.id) }}" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  {% if item.is_available %}
+                    <input type="hidden" name="available" value="0">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Mark {{ item.name }} sold out">Mark sold out</button>
+                  {% else %}
+                    <input type="hidden" name="available" value="1">
+                    <button type="submit" class="btn btn-sm btn-outline-primary" aria-label="Mark {{ item.name }} available">Mark available</button>
+                  {% endif %}
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="qj-empty border rounded-3">
+    <h2 class="h5">No menu items yet</h2>
+    <p class="mb-0">An administrator has not added any menu items yet.</p>
+  </div>
+{% endif %}
+{% endblock %}

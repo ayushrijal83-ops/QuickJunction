@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Your cart &mdash; Quick Junction{% endblock %}
+{% block title %}Your cart &mdash; {{ restaurant.name }}{% endblock %}
 
 {% block content %}
 <div class="qj-page-header"><div><div class="qj-eyebrow">Almost there</div><h1>Your cart</h1></div><a class="btn btn-outline-secondary" href="{{ url_for('menu.index') }}"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Keep browsing</a></div>

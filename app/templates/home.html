@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/_dashboard.html" import empty %}
-{% block title %}Quick Junction &mdash; good food, gathered well{% endblock %}
+{% block title %}{{ restaurant.name }}{% if restaurant.tagline %} &mdash; {{ restaurant.tagline }}{% endif %}{% endblock %}
 {% block body_class %}qj-has-hero{% endblock %}
 
 {% set is_customer = current_user and current_user.role.value == "customer" %}
@@ -40,7 +40,7 @@
 {% endblock %}
 
 {% block content %}
-<section class="row g-3 my-2" aria-label="Why Quick Junction">
+<section class="row g-3 my-2" aria-label="Why {{ restaurant.name }}">
   {% for icon, title, text in [
     ("stars", "Personalised", "Suggestions come from your stated preferences and completed orders — and never recommend something your diet excludes."),
     ("receipt", "Transparent", "Every suggestion shows the facts behind it: cuisine, dietary type, spice level and the price from our menu."),
@@ -79,7 +79,7 @@
   <img class="qj-hero__img" src="{{ scene_image('reserve') }}" alt="" loading="lazy" width="1600" height="900">
   <div class="row w-100 align-items-end g-3">
     <div class="col-lg-8">
-      <p class="qj-eyebrow mb-2">Evenings at Quick Junction</p>
+      <p class="qj-eyebrow mb-2">Evenings at {{ restaurant.name }}</p>
       <h2 class="display-6 mb-2" id="reserve-title">Your table, held for two unhurried hours.</h2>
       <p class="mb-0 opacity-75">Pick a date, a time and your party size &mdash; we&rsquo;ll show you exactly which tables are free.</p>
     </div>

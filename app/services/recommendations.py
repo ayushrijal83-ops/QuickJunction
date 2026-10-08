@@ -58,11 +58,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import db
-from app.models.category import Category
 from app.models.customer_preference import CustomerPreference
 from app.models.enums import Cuisine, DietaryType, SpiceLevel
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem, OrderStatus
+from app.services.menu import public_menu_query
 
 # How much a customer's completed-order history counts relative to their
 # explicitly stated preferences. Deliberately below 1.0: what someone *says*
@@ -275,14 +275,12 @@ def candidate_items(preference: CustomerPreference | None) -> list[MenuItem]:
     excluded item.
     """
     items = (
-        db.session.query(MenuItem)
-        .join(Category)
+        public_menu_query()
         # build_item_document() reads item.category.name and item.ingredients
         # for every candidate. Without eager loading that is one extra query
         # per item (an N+1 measured at 14 statements for a 9-item menu in
         # M08); with it, the whole candidate set costs three.
         .options(joinedload(MenuItem.category), selectinload(MenuItem.ingredients))
-        .filter(MenuItem.is_available.is_(True), Category.is_active.is_(True))
         .order_by(MenuItem.name)
         .all()
     )

@@ -40,6 +40,15 @@ class Cuisine(str, enum.Enum):
     OTHER = "other"
 
 
+class Locale(str, enum.Enum):
+    """Languages the customer menu can be shown in (M5). ``en`` is also the
+    language of the canonical ``name``/``description`` columns. Adding one is
+    a value here plus a CHECK-widening migration for every column using it."""
+
+    EN = "en"
+    NE = "ne"
+
+
 def enum_column(enum_cls: type[enum.Enum], length: int, *, name: str) -> sa.Enum:
     """A constrained-string column (VARCHAR + CHECK, not a native DB enum)
     for one of the classes above.
