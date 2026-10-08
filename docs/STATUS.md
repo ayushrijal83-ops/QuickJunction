@@ -97,6 +97,12 @@ a client. CI reports these advisories without failing.
 | SQLite after M3 | **852 passed, 9 skipped, 0 failed** (9 = MySQL-only concurrency tests) |
 | MySQL 8.0.46 after M3 (disposable container) | **860 passed, 1 skipped, 0 failed** (skip = known issue #32) |
 | MySQL concurrency after M3 | **9 of 9 executed and passed** (stable over 5 consecutive runs) |
+| M4 — account security & staff onboarding | password change (`/account/password`); admin account management (`/admin/accounts`: list, deactivate/activate, reset codes, staff invitations); one-time codes redeemed at `/account/setup`; public `/register/staff` removed; revocation via `session_version`; last-active-admin protection. Details: `docs/SECURITY.md` §20 |
+| Migration head after M4 | **`e8b4d2a6c913`** (13 linear revisions) — adds `account_tokens` and 8 audit events |
+| Tests collected after M4 | **922** (59 new in `tests/test_m4_account_security.py`, 2 new MySQL races) |
+| SQLite after M4 | **911 passed, 11 skipped, 0 failed** (11 = MySQL-only concurrency tests) |
+| MySQL 8.0.46 after M4 (local `quickjunction_test`) | **921 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| MySQL concurrency after M4 | **11 of 11 executed and passed** (stable over 5 consecutive runs) |
 | Dependency audit (M2 re-run) | runtime: no known vulnerabilities; AI stack: same 13 advisories, accepted for the disabled-by-default optional model (`docs/SECURITY.md` §18.9) |
 
 ---
@@ -113,8 +119,9 @@ LoRA **v4** explanations.
 3 roles (admin, staff, customer).
 
 **Features present and covered by tests:** registration and login (three
-sign-in portals), server-side session revocation, staff sign-up with admin
-approval, administrator creation via `flask create-admin` (CLI only), public menu with category filter and an in-page (client-side) dish
+sign-in portals), server-side session revocation, password change, staff
+onboarding by admin invitation, admin account management with
+reset codes and deactivation (M4), administrator creation via `flask create-admin` (CLI only), public menu with category filter and an in-page (client-side) dish
 filter, session cart, checkout with server-side pricing and tax, order history
 and customer cancellation, staff order workflow (atomic status transitions),
 kitchen board, tables, reservations (fixed slots), payments and admin refunds,
@@ -165,6 +172,6 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | 32 | Full downgrade to base fails on MySQL (pre-M10 revisions) |
 | 35 / 36 | Stock checked not reserved; no ingredient costs |
 | 37 | No order notes |
-| — | Runtime DB account also holds DDL privileges; public `/register/staff` (from the 2026-10-03 audit; scheduled for Phase 1). Customer dine-in and the reservation cap were closed in M2 |
+| — | Runtime DB account also holds DDL privileges; from the 2026-10-03 audit; scheduled for Phase 1. Customer dine-in and the reservation cap were closed in M2; public `/register/staff` was removed in M4 |
 | — | No "add items to an open order": a seated table takes one open order at a time (M3), so a party's follow-up order needs a new order once the table is freed |
 | — | AI-stack dependency advisories (above) |

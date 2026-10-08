@@ -78,6 +78,12 @@ class BaseConfig:
     # app/services/reservations.py::create_reservation.
     RESERVATION_ACTIVE_LIMIT: int = int(os.environ.get("RESERVATION_ACTIVE_LIMIT", "2"))
 
+    # --- account codes (M4) ------------------------------------------------
+    # Lifetime of the one-time codes in app/services/accounts.py. An unused
+    # invitation or reset code stops working after this many hours.
+    STAFF_INVITE_TTL_HOURS: int = int(os.environ.get("STAFF_INVITE_TTL_HOURS", "72"))
+    PASSWORD_RESET_TTL_HOURS: int = int(os.environ.get("PASSWORD_RESET_TTL_HOURS", "24"))
+
     # --- request limits --------------------------------------------------
     MAX_CONTENT_LENGTH: int = 2 * 1024 * 1024  # 2 MiB
 
@@ -147,6 +153,8 @@ class BaseConfig:
         ]
         if cls.TRUSTED_PROXY_COUNT < 0:
             raise ConfigError("TRUSTED_PROXY_COUNT must be 0 or a positive number of proxies.")
+        if not (1 <= cls.STAFF_INVITE_TTL_HOURS <= 720 and 1 <= cls.PASSWORD_RESET_TTL_HOURS <= 720):
+            raise ConfigError("STAFF_INVITE_TTL_HOURS and PASSWORD_RESET_TTL_HOURS must be 1-720.")
         if cls.RESERVATION_ACTIVE_LIMIT < 1:
             raise ConfigError("RESERVATION_ACTIVE_LIMIT must be at least 1.")
         if missing:

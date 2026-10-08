@@ -47,6 +47,19 @@ Each release uses only the sections that apply, in this order:
   staff-entered orders show as "Walk-in". `tests/test_m3_staff_orders.py`
   (48 tests) and a MySQL two-staff same-table race test; CI now expects 9
   MySQL concurrency tests.
+- **Account security** (M4, `docs/SECURITY.md` §20): password change at
+  `/account/password` (any signed-in user); admin account management at
+  `/admin/accounts` (list/filter all accounts, deactivate/activate, issue
+  password-reset codes, invite staff); one-time code redemption at
+  `/account/setup`. Codes are 256-bit, single-use, expiring and stored only
+  as SHA-256 digests. `tests/test_m4_account_security.py` (59 tests) and two
+  MySQL races (concurrent code redemption, admins deactivating each other);
+  CI now expects 11 MySQL concurrency tests.
+- Audit events (M4): `password_changed`, `password_reset_issued`,
+  `password_reset`, `staff_invited`, `staff_invitation_accepted`,
+  `account_token_rejected`, `account_deactivated`, `account_activated`.
+- Settings (M4): `STAFF_INVITE_TTL_HOURS` (default 72) and
+  `PASSWORD_RESET_TTL_HOURS` (default 24), each 1–720.
 - `docs/STATUS.md` — verified current state and baseline record.
 - `docs/PRODUCTION_READINESS.md` — go-live checklist.
 - `docs/RELEASE_PROCESS.md` — branching, tagging, changelog and intended
@@ -82,10 +95,18 @@ Each release uses only the sections that apply, in this order:
 - **M3:** a dine-in order may only seat a table that is AVAILABLE or
   RESERVED and has no open order; the check runs on a row-locked read inside
   `checkout()`. Seating an OCCUPIED table is now refused for every caller.
+- **M4:** staff accounts are created only by an admin's invitation. The
+  "Users (staff accounts)" menu entry is now "Staff approvals" (for staff
+  accounts that predate M4); "Accounts" is the new management page.
+- **M4:** `register_user` no longer accepts `as_staff`; public registration
+  creates CUSTOMER accounts only. Account-identity checks shared by
+  `create_admin` and invitations moved to `app/services/auth.identity_errors`.
 
 ### Removed
 
 - **M2:** `/account/me`, `/account/staff`, `/account/admin` probe endpoints.
+- **M4:** public staff sign-up, `/register/staff` (now 404). The
+  `staff_registered` event type stays in the allow-list for existing rows.
 
 ### Security
 
@@ -98,6 +119,12 @@ Each release uses only the sections that apply, in this order:
   input is no longer stored in the audit log; the local LLM is off unless
   explicitly enabled. Dependency audit re-run: runtime clean, optional AI
   stack unchanged (13 advisories, accepted while disabled).
+- **M4 — account security:** password change, deactivation, reset issue and
+  reset/invitation redemption all revoke existing sessions through
+  `session_version`; deactivation also voids open codes. Admins never choose
+  or see another user's password. The last active admin cannot be
+  deactivated (row-locked check). No password, hash or code is written to
+  the audit log or application logs.
 
 ### Fixed
 
@@ -110,6 +137,11 @@ Each release uses only the sections that apply, in this order:
   CHECK constraint to allow `admin_created`. No table or column change; quick on
   any database size. Reversible: `downgrade()` deletes `admin_created` audit rows
   (the admin accounts themselves are kept) and restores the previous list.
+- `e8b4d2a6c913` (M4, revises `a7c2e9d4b1f3`): creates `account_tokens`
+  and widens `ck_audit_logs_event_type` by the eight M4 events. No existing
+  row changes; quick on any database size. Reversible: `downgrade()` deletes
+  audit rows of the M4 types and drops `account_tokens` (outstanding codes are
+  lost; accounts created by invitation are kept).
 
 ### Operator action required
 
@@ -124,6 +156,11 @@ Each release uses only the sections that apply, in this order:
   `LLM_ENABLED=true`. They are now off by default.
 - **M2/M3:** staff take dine-in and takeaway orders at **Orders → New order**
   (`/staff/orders/new`), not `/checkout`.
+- **M4:** run `flask db upgrade` (new head `e8b4d2a6c913`). Until it is
+  applied, every account-management action fails and changes nothing.
+- **M4:** new staff no longer sign up. An admin invites them at **Accounts →
+  Invite staff** and gives them the one-time code (there is no email
+  delivery); they set their password at `/account/setup`.
 
 ## [0.9.0] — 2026-10-03
 

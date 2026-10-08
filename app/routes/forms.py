@@ -62,6 +62,34 @@ class RegistrationForm(FlaskForm):
     submit = SubmitField("Register")
 
 
+class PasswordChangeForm(FlaskForm):
+    """M4. The policy itself is app/services/auth.py's; these validators only
+    bound the input before Argon2 sees it."""
+
+    current_password = PasswordField("Current password", validators=[DataRequired(), Length(max=PASSWORD_MAX_LENGTH)])
+    password = PasswordField("New password", validators=[DataRequired(), Length(max=PASSWORD_MAX_LENGTH)])
+    password_confirm = PasswordField("Confirm new password", validators=[DataRequired(), Length(max=PASSWORD_MAX_LENGTH)])
+    submit = SubmitField("Change password")
+
+
+class AccountSetupForm(FlaskForm):
+    """M4: redeem an invitation or reset code. The code is a POST field, never
+    part of a URL."""
+
+    code = StringField("One-time code", validators=[DataRequired(), Length(max=128)])
+    password = PasswordField("New password", validators=[DataRequired(), Length(max=PASSWORD_MAX_LENGTH)])
+    password_confirm = PasswordField("Confirm new password", validators=[DataRequired(), Length(max=PASSWORD_MAX_LENGTH)])
+    submit = SubmitField("Set password")
+
+
+class InviteStaffForm(FlaskForm):
+    """M4. No role field: invitations create STAFF accounts only."""
+
+    username = StringField("Username", validators=[DataRequired(), Length(min=3, max=32)])
+    email = StringField("Email", validators=[DataRequired(), Length(max=255), Email()])
+    submit = SubmitField("Create invitation")
+
+
 class LoginForm(FlaskForm):
     username = StringField("Username", validators=[DataRequired(), Length(max=32)])
     password = PasswordField("Password", validators=[DataRequired(), Length(max=PASSWORD_MAX_LENGTH)])

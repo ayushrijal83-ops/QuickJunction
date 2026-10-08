@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening) and M3 (staff order entry).
+Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry) and M4 (account security and staff onboarding, reviewed 2026-10-08).
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -26,9 +26,9 @@ Overall: **NOT READY FOR PRODUCTION.**
 | # | Item | Status | Current state (evidence) | Required for READY |
 | --- | --- | --- | --- | --- |
 | S1 | Rate limiting | IN PROGRESS | Login only; in-process dict per worker (`app/utils/ratelimit.py`), keyed on `remote_addr`. M2: `ProxyFix` behind explicit `TRUSTED_PROXY_COUNT` (default 0), spoofed `X-Forwarded-For` tests (`tests/test_m2_security.py`) — limiter itself unchanged | Shared-store limiter (Redis) per IP and per account on login, registration, password reset, checkout, reservations, AI explain; `ProxyFix` with a configured hop count; tests incl. spoofed `X-Forwarded-For` |
-| S2 | Authentication | IN PROGRESS | Argon2id, session fixation protection, server-side revocation — tested (`tests/test_auth.py`, `tests/test_session_revocation.py`); rehash on login done in M2 (`docs/SECURITY.md` §18.6) | Password change; admin-issued reset; rehash on login; tests |
-| S3 | Account management | NOT STARTED | No admin UI to list/deactivate users; `is_active` cannot be set by the app | Admin list/search/deactivate/reactivate with session revocation; last-admin protection; audited; tests |
-| S4 | Staff onboarding security | NOT STARTED | Public `/register/staff` with admin approval | Invitation-only staff accounts; public staff sign-up removed |
+| S2 | Authentication | READY (application) | Argon2id, session fixation protection, server-side revocation — tested (`tests/test_auth.py`, `tests/test_session_revocation.py`); rehash on login done in M2 (`docs/SECURITY.md` §18.6). M4: self-service password change (revokes other sessions, per-account attempt limit) and admin-issued reset by one-time code — admins never see a password (`tests/test_m4_account_security.py`, `docs/SECURITY.md` §20). No email delivery: codes are handed over in person | Password change; admin-issued reset; rehash on login; tests |
+| S3 | Account management | READY (application) | M4: `/admin/accounts` (ADMIN only) lists all accounts with a role filter, deactivates/reactivates with session revocation and code voiding, last-active-admin protection under a row lock (MySQL race test); audited in the same transaction. No search box yet | Admin list/search/deactivate/reactivate with session revocation; last-admin protection; audited; tests |
+| S4 | Staff onboarding security | READY (application) | M4: `/register/staff` removed; staff accounts only by admin invitation — 256-bit single-use expiring code stored as a SHA-256 digest, account inactive until the code is redeemed (`docs/SECURITY.md` §20.3–20.4) | Invitation-only staff accounts; public staff sign-up removed |
 | S5 | Authorization | READY (application) | `require_role` on every non-public route; owner-scoped customer queries; tests across role boundaries | Re-verify after each Phase 1 change |
 | S6 | Dine-in abuse protection | READY (application) | M2: customer checkout is CUSTOMER-only and takeaway/online only; any `table_id` refused server-side; crafted-request tests incl. RESERVED and unknown tables (`tests/test_m2_security.py`, `docs/SECURITY.md` §18.2). M3: dine-in is created only through staff order entry (STAFF/ADMIN), which seats a table under a row lock; MySQL two-staff race test (`docs/SECURITY.md` §19) | Customer checkout cannot occupy tables; tests |
 | S7 | Reservation abuse protection | READY (application) | M2: `RESERVATION_ACTIVE_LIMIT` (default 2 active future CONFIRMED) under a `users`-row lock; MySQL race test passes 15/15 rounds × 5 runs and fails without the lock (`docs/SECURITY.md` §18.3) | Per-account cap enforced under concurrency (MySQL test) |
@@ -97,8 +97,8 @@ No capacity statement may be published until these are measured.
 | # | Item | Status | Current state (evidence) | Required for READY |
 | --- | --- | --- | --- | --- |
 | O1 | Restaurant configuration | NOT STARTED | Slots, currency, branding are code constants | Admin-editable settings |
-| O2 | Admin bootstrap | BLOCKED (by S2, D1) | Command exists (D10); no installation yet; no password change, so the owner cannot replace an operator-chosen password | Owner account created on the installation with `flask create-admin`; owner able to change the password (S2) |
-| O3 | Staff onboarding | BLOCKED (by S4) | — | Staff invited and able to sign in |
+| O2 | Admin bootstrap | BLOCKED (by D1) | Command exists (D10); no installation yet. M4: the owner can change the operator-chosen password at `/account/password` | Owner account created on the installation with `flask create-admin`; owner able to change the password (S2) |
+| O3 | Staff onboarding | NOT STARTED | M4: invitation workflow exists (S4); no installation yet | Staff invited and able to sign in |
 | O4 | Menu setup | IN PROGRESS | Admin menu/category/ingredient/recipe/table management exists and is tested | Restaurant's real menu, tables and tax rate entered and reviewed |
 | O5 | Backup verification | BLOCKED (by P1–P4) | — | First backup restored successfully before go-live |
 | O6 | Monitoring | BLOCKED (by D9) | — | Alerts route to the support contact |

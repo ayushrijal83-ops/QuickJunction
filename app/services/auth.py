@@ -48,16 +48,18 @@ class RegistrationInput:
     password_confirm: str
 
 
-def _account_errors(data: RegistrationInput, username: str, email: str) -> dict[str, list[str]]:
-    """Password policy, confirmation and duplicate checks shared by every way
-    an account is created. ``username``/``email`` are already normalized."""
+def _password_errors(data: RegistrationInput) -> dict[str, list[str]]:
+    """Password policy and confirmation, shared by every way a password is set."""
     errors: dict[str, list[str]] = {}
-
     if password_errors := password_policy_errors(data.password):
         errors["password"] = password_errors
     if data.password != data.password_confirm:
         errors.setdefault("password_confirm", []).append("Passwords do not match.")
+    return errors
 
+
+def _duplicate_errors(username: str, email: str) -> dict[str, list[str]]:
+    errors: dict[str, list[str]] = {}
     # Pre-check for a friendly, field-specific message. The database's
     # unique constraint is the real backstop against the race between this
     # check and the insert that follows.
@@ -68,11 +70,44 @@ def _account_errors(data: RegistrationInput, username: str, email: str) -> dict[
     return errors
 
 
-def register_user(data: RegistrationInput, *, as_staff: bool = False, audit=None) -> User:
-    """Create a CUSTOMER account, or -- when the *route* passes
-    ``as_staff=True`` -- a STAFF account that starts unapproved and cannot
-    sign in until an admin approves it. Never an admin: no HTTP route can
-    create one (admins come only from ``create_admin``, the CLI path).
+def _account_errors(data: RegistrationInput, username: str, email: str) -> dict[str, list[str]]:
+    """Password policy, confirmation and duplicate checks shared by every way
+    an account is created. ``username``/``email`` are already normalized."""
+    errors = _password_errors(data)
+    for field, messages in _duplicate_errors(username, email).items():
+        errors.setdefault(field, []).extend(messages)
+    return errors
+
+
+def identity_errors(raw_username: str | None, raw_email: str | None) -> tuple[str, str, dict[str, list[str]]]:
+    """Username pattern, email syntax and duplicates for an account created
+    without the web registration form in front of it (``flask create-admin``,
+    staff invitations). Returns the normalized username and email plus any
+    errors. Email syntax uses the same ``email_validator`` package as the
+    registration form's ``Email()`` validator."""
+    from email_validator import EmailNotValidError, validate_email
+
+    errors: dict[str, list[str]] = {}
+    if not USERNAME_PATTERN.fullmatch((raw_username or "").strip()):
+        errors["username"] = ["Username must be 3-32 characters: letters, digits or underscores."]
+    raw_email = (raw_email or "").strip()
+    try:
+        if len(raw_email) > 255:
+            raise EmailNotValidError("too long")
+        validate_email(raw_email, check_deliverability=False)
+    except EmailNotValidError:
+        errors["email"] = ["Enter a valid email address."]
+    username, email = normalize_username(raw_username or ""), normalize_email(raw_email)
+    for field, messages in _duplicate_errors(username, email).items():
+        errors.setdefault(field, []).extend(messages)
+    return username, email, errors
+
+
+def register_user(data: RegistrationInput, *, audit=None) -> User:
+    """Create a CUSTOMER account -- the only role public registration can
+    create. STAFF accounts come only from an admin's invitation
+    (app/services/accounts.py, M4); ADMIN accounts only from ``create_admin``,
+    the CLI path.
 
     ``audit(user)`` adds the registration's audit row in the same transaction
     as the account (app/services/audit.py::commit_with)."""
@@ -86,7 +121,7 @@ def register_user(data: RegistrationInput, *, as_staff: bool = False, audit=None
         username=username,
         email=email,
         password_hash=hash_password(data.password),
-        role=Role.STAFF if as_staff else Role.CUSTOMER,  # never a client-supplied role
+        role=Role.CUSTOMER,  # never a client-supplied role
         staff_approved=False,
     )
     db.session.add(user)
@@ -112,27 +147,12 @@ def create_admin(data: RegistrationInput) -> User:
     transaction**: either both commit or neither does, so a failure can leave
     neither a half-created admin nor an orphaned audit row.
     """
-    # Local imports: audit sits beside this module in the service layer and
-    # email_validator is only needed on this path.
-    from email_validator import EmailNotValidError, validate_email
-
+    # Local imports: audit sits beside this module in the service layer.
     from app.models.audit_log import AuditEvent
     from app.services.audit import mirror_to_security_log, record_event
 
-    errors: dict[str, list[str]] = {}
-    if not USERNAME_PATTERN.fullmatch((data.username or "").strip()):
-        errors["username"] = ["Username must be 3-32 characters: letters, digits or underscores."]
-    raw_email = (data.email or "").strip()
-    try:
-        if len(raw_email) > 255:
-            raise EmailNotValidError("too long")
-        validate_email(raw_email, check_deliverability=False)
-    except EmailNotValidError:
-        errors["email"] = ["Enter a valid email address."]
-
-    username = normalize_username(data.username or "")
-    email = normalize_email(raw_email)
-    for field, messages in _account_errors(data, username, email).items():
+    username, email, errors = identity_errors(data.username, data.email)
+    for field, messages in _password_errors(data).items():
         errors.setdefault(field, []).extend(messages)
     if errors:
         raise RegistrationError(errors)

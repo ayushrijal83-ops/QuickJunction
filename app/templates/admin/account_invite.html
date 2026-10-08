@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, submit %}
+{% block title %}Invite staff &mdash; Quick Junction Admin{% endblock %}
+
+{% block ops_context %}Manage &middot; accounts{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('admin_accounts.account_list') }}">Accounts</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Invite staff</li>
+  </ol>
+</nav>
+<div class="qj-page-header"><div><div class="qj-eyebrow">Accounts</div><h1>Invite a staff member</h1></div></div>
+<div class="row"><div class="col-lg-6">
+  <div class="card"><div class="card-body">
+    <p class="text-secondary">
+      This creates a staff account that cannot be used until the person sets a
+      password with the one-time code shown on the next page.
+    </p>
+    <form method="post" action="{{ url_for('admin_accounts.invite') }}" novalidate>
+      {{ form.hidden_tag() }}
+      {{ field(form.username, autofocus=true, help="3–32 characters: letters, digits and underscores.") }}
+      {{ field(form.email, type="email") }}
+      <div class="d-grid">{{ submit("Create invitation", "btn btn-primary") }}</div>
+    </form>
+  </div></div>
+</div></div>
+{% endblock %}

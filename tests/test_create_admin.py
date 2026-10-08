@@ -141,7 +141,7 @@ def test_lost_duplicate_race_creates_nothing(run, monkeypatch):
     insert, the unique constraint wins and neither the account nor the audit
     row is left behind."""
     make_user(username="owner", email="first@example.com")
-    monkeypatch.setattr(auth_service, "_account_errors", lambda *args: {})
+    monkeypatch.setattr(auth_service, "_duplicate_errors", lambda *args: {})
 
     result = run(username="owner", email="second@example.com")
 

@@ -195,6 +195,65 @@ def test_two_staff_seating_one_table_exactly_one_wins(app, db):
         assert _db.session.get(RestaurantTable, table_id).status == TableStatus.OCCUPIED
 
 
+def test_one_time_code_redeemed_concurrently_exactly_once(app, db):
+    """M4: two requests redeem the same reset code with different passwords at
+    the same instant. The conditional UPDATE on used_at lets exactly one win;
+    the stored password is the winner's."""
+    from app.services.accounts import CodeRejected, issue_password_reset, redeem_code
+    from app.utils.security import verify_password
+
+    admin = make_user(username="codeadmin", email="codeadmin@example.com", role=Role.ADMIN)
+    for round_no in range(ROUNDS):
+        target = make_user(username=f"resetme{round_no}", email=f"resetme{round_no}@example.com")
+        target_id = target.id
+        code = issue_password_reset(admin, target)
+
+        def redeemer(password):
+            def act():
+                try:
+                    redeem_code(code, password, password)
+                    return password
+                except CodeRejected:
+                    return "rejected"
+            return act
+
+        results = _race(app, redeemer("first-pass-111"), redeemer("second-pass-222"))
+        assert sorted(results).count("rejected") == 1, results
+        winner = next(r for r in results if r != "rejected")
+        _db.session.rollback()
+        assert verify_password(_db.session.get(User, target_id).password_hash, winner)
+
+
+def test_two_admins_deactivating_each_other_leave_one_admin(app, db):
+    """M4: the only two active admins deactivate each other at the same
+    instant. The admin-row locks serialise them; the second sees the first's
+    change and is refused, so an active admin always remains."""
+    from app.services.accounts import AccountError, set_active
+
+    for round_no in range(ROUNDS):
+        a = make_user(username=f"adm_a{round_no}", email=f"adm_a{round_no}@example.com", role=Role.ADMIN).id
+        b = make_user(username=f"adm_b{round_no}", email=f"adm_b{round_no}@example.com", role=Role.ADMIN).id
+        # Earlier rounds' admins are deactivated directly, so each round starts with exactly two.
+        _db.session.query(User).filter(User.role == Role.ADMIN, User.id.notin_([a, b])).update(
+            {"is_active": False}, synchronize_session=False)
+        _db.session.commit()
+
+        def deactivate(actor_id, target_id):
+            def act():
+                try:
+                    set_active(_db.session.get(User, actor_id), _db.session.get(User, target_id), False)
+                    return "ok"
+                except AccountError:
+                    return "refused"
+            return act
+
+        results = _race(app, deactivate(a, b), deactivate(b, a))
+        assert sorted(map(str, results)) == ["ok", "refused"], results
+        _db.session.rollback()
+        active = _db.session.query(User).filter(User.role == Role.ADMIN, User.is_active.is_(True)).count()
+        assert active == 1
+
+
 # --- Milestone 11: payments ------------------------------------------------------------
 
 

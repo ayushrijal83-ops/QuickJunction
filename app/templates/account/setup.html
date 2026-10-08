@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "partials/_forms.html" import field, submit %}
+{% block title %}Set your password &mdash; Quick Junction{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-8 col-lg-6">
+    <div class="qj-page-header"><div><div class="qj-eyebrow">One-time code</div><h1>Set your password</h1></div></div>
+    <div class="card"><div class="card-body">
+      <p class="text-secondary">
+        Enter the one-time code an administrator gave you (a staff invitation or a
+        password reset) and choose your password. Each code works once and expires.
+      </p>
+      <form method="post" action="{{ url_for('account.setup') }}" novalidate autocomplete="off">
+        {{ form.hidden_tag() }}
+        {{ field(form.code, autofocus=true, autocomplete="one-time-code", spellcheck="false") }}
+        {{ field(form.password, autocomplete="new-password",
+                 help="At least 10 characters, including a letter and a digit.") }}
+        {{ field(form.password_confirm, autocomplete="new-password") }}
+        <div class="d-grid">{{ submit("Set password", "btn btn-primary") }}</div>
+      </form>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

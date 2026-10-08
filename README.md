@@ -341,9 +341,9 @@ A five-minute demo path:
 6. Add to cart → checkout → order appears as `PENDING`
 7. Sign in as `staff` at `/login/staff` → **Order queue** → walk `PENDING → … → COMPLETED`
 8. Back as `customer` → the status is updated
-9. Request a staff account at `/register/staff` → try to sign in (refused, pending) →
-   sign in as `admin` at `/login/admin` → **Staff accounts** → *Approve* → the new
-   staff member can now sign in
+9. Sign in as `admin` at `/login/admin` → **Accounts** → *Invite staff* → copy the
+   one-time code → sign out → set the password at `/account/setup` → the new staff
+   member can now sign in at `/login/staff`
 
 ---
 

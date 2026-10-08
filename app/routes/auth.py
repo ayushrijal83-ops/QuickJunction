@@ -110,45 +110,6 @@ def register():
     return render_template("register.html", form=form, staff=False)
 
 
-@auth_bp.route("/register/staff", methods=["GET", "POST"])
-def register_staff():
-    """Staff sign-up. Creates a STAFF account that starts **pending**: it
-    cannot sign in, holds no session and reaches no staff route until an
-    admin approves it (app/routes/admin_staff.py). So, unlike customer
-    registration, it deliberately does not sign the new account in."""
-    if get_current_user() is not None:
-        return redirect(url_for("account.index"))
-
-    form = RegistrationForm()
-    if form.validate_on_submit():
-        try:
-            register_user(
-                RegistrationInput(
-                    username=form.username.data,
-                    email=form.email.data,
-                    password=form.password.data,
-                    password_confirm=form.password_confirm.data,
-                ),
-                as_staff=True,
-                audit=_registration_audit(AuditEvent.STAFF_REGISTERED),
-            )
-        except RegistrationError as exc:
-            for field_name, messages in exc.errors.items():
-                if hasattr(form, field_name):
-                    getattr(form, field_name).errors.extend(messages)
-                else:
-                    for message in messages:
-                        flash(message, "error")
-        else:
-            flash(
-                "Staff account requested. An administrator must approve it before you can sign in.",
-                "success",
-            )
-            return redirect(url_for("auth.login", portal="staff"))
-
-    return render_template("register.html", form=form, staff=True)
-
-
 @auth_bp.route("/login", methods=["GET", "POST"], defaults={"portal": "customer"})
 @auth_bp.route("/login/<any(staff, admin):portal>", methods=["GET", "POST"])
 def login(portal: str):

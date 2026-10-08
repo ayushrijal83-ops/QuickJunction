@@ -10,6 +10,7 @@ from __future__ import annotations
 from flask import Flask
 
 from app.routes.account import account_bp
+from app.routes.admin_accounts import admin_accounts_bp
 from app.routes.admin_menu import admin_menu_bp
 from app.routes.admin_settings import admin_settings_bp
 from app.routes.admin_staff import admin_staff_bp
@@ -38,6 +39,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(admin_menu_bp)
     app.register_blueprint(admin_settings_bp)
     app.register_blueprint(admin_staff_bp)
+    app.register_blueprint(admin_accounts_bp)
     app.register_blueprint(admin_views_bp)
     app.register_blueprint(cart_bp)
     app.register_blueprint(orders_bp)
