@@ -265,7 +265,7 @@
       </div>
     </div>
     <div class="border-top border-secondary border-opacity-25 mt-4 pt-3 small d-flex flex-wrap justify-content-between gap-2">
-      <span>&copy; {{ restaurant.name }} &middot; Powered by Quick Junction</span>
+      <span>&copy; {{ restaurant.name }}{% if restaurant.name != "Quick Junction" %} &middot; Powered by Quick Junction{% endif %}</span>
       <span>Photography: Unsplash</span>
     </div>
   </div>

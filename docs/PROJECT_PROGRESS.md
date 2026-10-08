@@ -3281,13 +3281,13 @@ building any of them. Still one restaurant per installation.
 
 | Capability | Where | Behaviour |
 | --- | --- | --- |
-| Restaurant profile | `RestaurantProfile` (`restaurant_profile`), `app/services/restaurant.py`, `GET/POST /admin/settings/restaurant` | One row (id 1, DB CHECK): name, tagline, address, phone, email, default menu language. `get_restaurant()` reads it once per request (cached on `g`) and falls back to the demo defaults if the row is missing or unreadable, so every page can name the restaurant. ADMIN-only edit; the changed fields are audited old -> new (`restaurant_profile_changed`) in the same transaction |
+| Restaurant profile | `RestaurantProfile` (`restaurant_profile`), `app/services/restaurant.py`, `GET/POST /admin/settings/restaurant` | One row (id 1, DB CHECK): name, tagline, address, phone, email, default menu language. `get_restaurant()` reads it once per request (cached on `g`) and falls back to the same values the migration creates if the row is missing or unreadable, so every page can name the restaurant. ADMIN-only edit; the changed fields are audited old -> new (`restaurant_profile_changed`) in the same transaction |
 | Restaurant vs software | `base.html` and the customer page titles | Customer shell: brand, `<title>`, sign-in page and footer use the profile ("© *name* · Powered by Quick Junction"; tagline and contact details replace the fixed marketing sentence). Operations shell, ops page titles, account pages and "Calculated by Quick Junction" keep the software name |
 | Display order | `categories.sort_order`, `menu_items.sort_order` (0–10000, default 0) | Categories: sort_order, name, id. Items: category order, then item sort_order, name, id. Used by the public menu, home preview, staff order entry, `/staff/menu` and the admin lists. Set as a number on the admin forms |
 | Bilingual menu | `CategoryTranslation`, `MenuItemTranslation`; `app/utils/locale.py::localized` | Per-locale name/description, one per (entity, locale). The existing columns stay canonical. `localized(entity)`: the current locale's translation if present, else canonical; a translation without a description keeps the canonical description. Admins enter Nepali on the existing category/item forms; a blank Nepali name removes it |
 | Locale | `app/utils/locale.py`, `POST /locale` | `en`/`ne` only. Session, then `Accept-Language` (`ne-NP` → `ne`), then the restaurant default, then `en`. A valid `?lang=` sets the session. The switcher (customer shell) posts to `/locale` with the current path; `next` must be local. `<html lang>` follows the locale in the customer shell, always `en` in the operations shell. The choice survives sign-in/out |
 | Nepali font | `static/fonts/noto-sans-devanagari-devanagari-wght-normal.woff2` (Fontsource 5.3.0, OFL) | Added after Inter/Fraunces in both stacks with a Devanagari `unicode-range`: only used for Devanagari glyphs and only downloaded on pages that contain them. No CDN; CSP unchanged |
-| Sold-out control | `GET /staff/menu`, `POST /staff/menu/<id>/availability`; `menu.set_availability` | STAFF and ADMIN. Explicit target state (`available=1|0`), one conditional UPDATE of `is_available` only, audited as `menu_item_availability_changed` with `"source": "staff_menu"`. Sidebar: "Menu availability" in the Service group. The admin edit form stays ADMIN-only |
+| Sold-out control | `GET /staff/menu`, `POST /staff/menu/<id>/availability`; `menu.set_availability` | STAFF and ADMIN. Explicit target state (`available=1|0`), one conditional UPDATE of `is_available` only, audited as `menu_item_availability_changed` with `"source": "staff_menu"`. Sidebar: "Menu availability" in the Service group. The admin edit form stays ADMIN-only and no longer writes `is_available` at all (see the fix below) |
 | One public-menu rule | `menu.public_menu_query` | Available item in an active category; used by the menu, `cart.get_available_menu_item` (and checkout) and recommendations. The two copies are gone |
 
 Not changed: order snapshots, kitchen, inventory, recommendation corpus,
@@ -3325,7 +3325,7 @@ recommendation pages show canonical names.
 
 | Revision | Content |
 | --- | --- |
-| `b1c4e7f9a2d5` (revises `e8b4d2a6c913`) | `restaurant_profile` (CHECK `id = 1`, CHECK default_locale, FK `updated_by_id` SET NULL), seeded "Quick Junction Demo Restaurant" / `en`; audit CHECK + `restaurant_profile_changed` |
+| `b1c4e7f9a2d5` (revises `e8b4d2a6c913`) | `restaurant_profile` (CHECK `id = 1`, CHECK default_locale, FK `updated_by_id` SET NULL), one row created: name "Quick Junction" (the pre-M5 name), `en`, no tagline/address/phone/email; audit CHECK + `restaurant_profile_changed` |
 | `c2d5f8a1b3e6` (revises `b1c4e7f9a2d5`) | `categories.sort_order`, `menu_items.sort_order` (NOT NULL DEFAULT 0, CHECK 0–10000); `category_translations`, `menu_item_translations` (UNIQUE (entity, locale), CHECK locale, FK CASCADE) |
 
 Head: **`c2d5f8a1b3e6`** (15 linear revisions, single head). Verified:
@@ -3336,7 +3336,7 @@ with existing menu rows that survive the downgrade; also by CLI (`flask db upgra
 
 ## Tests
 
-- `tests/test_m5_catalog.py` — **103 tests**:
+- `tests/test_m5_catalog.py` — **108 tests**:
   - **profile:** fallback, per-request cache, singleton and locale CHECKs,
     admin update and audit metadata, no-op save writes nothing, row created
     when missing, staff/customer/anonymous refused, service refuses
@@ -3374,11 +3374,39 @@ with existing menu rows that survive the downgrade; also by CLI (`flask db upgra
 
 | Run | Result |
 | --- | --- |
-| Collected | **1027** (922 after M4 + 103 + 1 + 1) |
-| M5 targeted (`test_m5_catalog.py`, `test_m5_migration.py`) | **104 passed** (SQLite and MySQL) |
-| SQLite, full suite | **1015 passed, 12 skipped, 0 failed** (12 = MySQL-only concurrency tests) |
-| MySQL 8.0.46, full suite (`quickjunction_test`) | **1026 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| Collected | **1032** (922 after M4 + 108 + 1 + 1) |
+| M5 targeted (`test_m5_catalog.py`, `test_m5_migration.py`) | **109 passed** (SQLite and MySQL) |
+| SQLite, full suite | **1020 passed, 12 skipped, 0 failed** (12 = MySQL-only concurrency tests) |
+| MySQL 8.0.46, full suite (`quickjunction_test`) | **1031 passed, 1 skipped, 0 failed** (skip = known issue #32) |
 | MySQL concurrency (`tests/test_mysql_concurrency.py`) | **12 of 12 executed and passed**, stable over 5 consecutive runs |
+
+## Review fixes (before merge)
+
+1. **Production-safe profile row.** `b1c4e7f9a2d5` no longer seeds
+   "Quick Junction Demo Restaurant". On a real installation `flask db
+   upgrade` creates exactly one row: `id = 1`, `name = "Quick Junction"`,
+   `default_locale = "en"`, and `tagline`, `address`, `phone`, `email` all
+   NULL. "Quick Junction" is what every customer page already showed before
+   M5, so the upgrade changes nothing customers see and invents no
+   restaurant; the footer omits "Powered by Quick Junction" while the name is
+   still the software's own, and shows no contact lines. The code fallback
+   (`DEFAULT_RESTAURANT_NAME`, used when the row is missing, e.g. in
+   `create_all()` tests) is the same value, so behaviour is deterministic.
+   The admin sets the real details at **Restaurant**. The single-row CHECK
+   is unchanged. (The migration was edited in place: it has never been
+   applied to the live database or merged.)
+2. **Stale admin edits can no longer restore availability.**
+   `update_menu_item` never writes `is_available`; the admin edit form no
+   longer has the checkbox (it shows the current state and links to Menu
+   availability) and records `menu_item_updated` only. Availability changes
+   only through `set_availability` (`/staff/menu`, STAFF and ADMIN). The
+   create form keeps the checkbox for a new item's initial state.
+   `test_stale_admin_edit_cannot_undo_a_sold_out_change` walks the exact
+   sequence (available → admin opens edit → staff marks sold out → admin
+   submits the old form with "Available" ticked → still sold out, price edit
+   saved); with the old code it fails. `test_menu.py::test_22` now expects
+   the availability event from the dedicated control instead of the edit
+   form.
 
 ## Known limitations
 
@@ -3389,9 +3417,6 @@ with existing menu rows that survive the downgrade; also by CLI (`flask db upgra
 - No per-user language preference; the choice lives in the session cookie.
 - Restaurant identity is text only: no logo, colours, hero or gallery
   images; dish photos are still the keyword-chosen stock images.
-- The admin item form still writes `is_available` from its checkbox, so an
-  admin saving a form opened before a staff sold-out change can undo it
-  (the sold-out route itself never overwrites other fields).
 - No opening hours on the profile.
 
 ## Deferred

@@ -235,6 +235,16 @@ def test_customer_pages_show_the_restaurant_and_ops_pages_the_software(app, clie
     assert 'aria-label="Quick Junction home"' in ops and "Thakali Ghar &middot; Operations console" in ops
 
 
+def test_unconfigured_installation_shows_no_invented_restaurant(client, db):
+    """What `flask db upgrade` leaves on a real installation: the pre-M5 name,
+    no contact details, no demo text."""
+    seed_profile(name=DEFAULT_RESTAURANT_NAME)
+    page = body(req(client, "get", "/"))
+    assert DEFAULT_RESTAURANT_NAME == "Quick Junction"
+    assert "&copy; Quick Junction</span>" in page and "Powered by" not in page
+    assert "Demo" not in page and "bi-geo-alt" not in page and "bi-telephone" not in page
+
+
 def test_restaurant_identity_is_escaped(app, client, db):
     seed_profile(name="<script>alert(1)</script>", tagline='"><img src=x onerror=alert(1)>')
     page = body(req(client, "get", "/"))
@@ -723,6 +733,54 @@ def test_availability_change_rolls_back_when_audit_fails(app, db, monkeypatch):
     monkeypatch.setattr("app.routes.staff_menu.record_event", boom)
     assert set_avail(client, item.id, "0").status_code == 500
     assert fresh(item).is_available is True
+
+
+def test_stale_admin_edit_cannot_undo_a_sold_out_change(app, db):
+    """1. available  2. admin opens the edit form  3. staff marks it sold out
+    4. admin submits the old form (with "Available" still ticked)  5. still
+    sold out -- and the admin's real edit is saved."""
+    item = make_menu_item(name="Paneer Tikka", price="199.00")
+    assert item.is_available is True                                       # 1
+    admin, _ = signed_in(app, "boss", Role.ADMIN)
+    assert req(admin, "get", f"/admin/menu/{item.id}/edit").status_code == 200  # 2
+    stale_form = {"category_id": item.category_id, "name": "Paneer Tikka", "price": "249.00",
+                  "cuisine": "indian", "spice_level": "medium", "dietary_type": "vegetarian",
+                  "is_available": "y"}
+    staff, _ = signed_in(app, "cook", Role.STAFF)
+    assert set_avail(staff, item.id, "0").status_code == 302                # 3
+    assert req(admin, "post", f"/admin/menu/{item.id}/edit", data=stale_form).status_code == 302  # 4
+    item = fresh(item)
+    assert item.is_available is False and item.price == Decimal("249.00")    # 5
+    assert len(audit(AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED)) == 1
+    assert len(audit(AuditEvent.MENU_ITEM_UPDATED)) == 1
+
+
+def test_general_edit_never_writes_availability_either_way(db):
+    item = make_menu_item(is_available=False)
+    data = MenuItemInput(item.category_id, "Renamed", None, "199", "indian", "medium", "vegetarian",
+                         is_available=True)
+    update_menu_item(item, data)
+    assert fresh(item).is_available is False and fresh(item).name == "Renamed"
+    available = make_menu_item(category=make_category(name="Other"), name="Kept")
+    update_menu_item(available, MenuItemInput(available.category_id, "Kept", None, "199", "indian", "medium",
+                                              "vegetarian", is_available=False))
+    assert fresh(available).is_available is True
+
+
+def test_edit_form_has_no_availability_box_but_create_does(app, db):
+    item = make_menu_item()
+    client, _ = signed_in(app, "boss", Role.ADMIN)
+    edit_page = body(req(client, "get", f"/admin/menu/{item.id}/edit"))
+    assert 'name="is_available"' not in edit_page and 'href="/staff/menu"' in edit_page
+    assert 'name="is_available"' in body(req(client, "get", "/admin/menu/create"))
+
+
+def test_admin_uses_the_dedicated_control_for_availability(app, db):
+    item = make_menu_item()
+    client, _ = signed_in(app, "boss", Role.ADMIN)
+    set_avail(client, item.id, "0")
+    assert fresh(item).is_available is False
+    assert len(audit(AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED)) == 1
 
 
 def test_staff_nav_links_to_menu_availability(app, db):

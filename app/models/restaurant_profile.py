@@ -1,11 +1,13 @@
 """The installed restaurant's identity (M5): the business the customer sees.
 
 Quick Junction is the software; this row is the restaurant running it. A
-single row (id = 1, enforced by ``ck_restaurant_profile_singleton``), seeded
-by migration b1c4e7f9a2d5 with an obviously fictional demo name. It is read
-through ``app/services/restaurant.py::get_restaurant`` (which falls back to
-the same defaults if the row is missing) and changed only by an admin at
-``/admin/settings/restaurant``.
+single row (id = 1, enforced by ``ck_restaurant_profile_singleton``), created
+by migration b1c4e7f9a2d5. Until an admin enters the restaurant's own details
+at ``/admin/settings/restaurant`` the row holds only the name the site already
+showed before M5 ("Quick Junction") and no contact details -- no invented
+restaurant, no demo text. It is read through
+``app/services/restaurant.py::get_restaurant`` (which falls back to the same
+values if the row is missing).
 
 Deliberately not a tenant: nothing else references this table, and no
 other table carries a ``restaurant_id``.
@@ -22,7 +24,9 @@ from app.extensions import db
 from app.models.enums import Locale, enum_column
 
 PROFILE_ID = 1
-DEFAULT_RESTAURANT_NAME = "Quick Junction Demo Restaurant"
+# Not a restaurant: the name every customer page used before M5, kept until
+# the admin sets the real one, so upgrading changes nothing customers see.
+DEFAULT_RESTAURANT_NAME = "Quick Junction"
 
 NAME_MAX = 120
 TAGLINE_MAX = 200

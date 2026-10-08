@@ -105,9 +105,9 @@ a client. CI reports these advisories without failing.
 | MySQL concurrency after M4 | **11 of 11 executed and passed** (stable over 5 consecutive runs) |
 | M5 — menu & restaurant foundation | single-row restaurant profile (`/admin/settings/restaurant`, audited) shown in the customer shell; category/item display order; Nepali names/descriptions with an English/नेपाली menu switcher and a vendored Devanagari font; staff sold-out control (`/staff/menu`); one public-menu rule (`public_menu_query`). Details: `docs/SECURITY.md` §21 |
 | Migration head after M5 | **`c2d5f8a1b3e6`** (15 linear revisions) — `restaurant_profile`, `sort_order` columns, two translation tables, `restaurant_profile_changed` audit event |
-| Tests collected after M5 | **1027** (103 in `tests/test_m5_catalog.py`, 1 in `tests/test_m5_migration.py`, 1 new MySQL race) |
-| SQLite after M5 | **1015 passed, 12 skipped, 0 failed** (12 = MySQL-only concurrency tests) |
-| MySQL 8.0.46 after M5 (local `quickjunction_test`) | **1026 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+| Tests collected after M5 | **1032** (108 in `tests/test_m5_catalog.py`, 1 in `tests/test_m5_migration.py`, 1 new MySQL race) |
+| SQLite after M5 | **1020 passed, 12 skipped, 0 failed** (12 = MySQL-only concurrency tests) |
+| MySQL 8.0.46 after M5 (local `quickjunction_test`) | **1031 passed, 1 skipped, 0 failed** (skip = known issue #32) |
 | MySQL concurrency after M5 | **12 of 12 executed and passed**, stable over 5 consecutive runs |
 | Dependencies after M5 | unchanged (the Devanagari font is a vendored static file, OFL-1.1) |
 | Dependency audit (M2 re-run) | runtime: no known vulnerabilities; AI stack: same 13 advisories, accepted for the disabled-by-default optional model (`docs/SECURITY.md` §18.9) |

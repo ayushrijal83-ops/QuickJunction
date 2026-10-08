@@ -47,7 +47,10 @@ def test_m5_upgrade_downgrade_upgrade_keeps_existing_menu(tmp_path):
         upgrade()
         with db.engine.begin() as conn:
             assert conn.execute(sa.text("SELECT id, name, default_locale FROM restaurant_profile")).all() == [
-                (1, "Quick Junction Demo Restaurant", "en")]
+                (1, "Quick Junction", "en")]
+            # No invented restaurant details on a real installation.
+            assert conn.execute(sa.text("SELECT tagline, address, phone, email FROM restaurant_profile")).one() == (
+                None, None, None, None)
             assert conn.execute(sa.text("SELECT sort_order FROM categories")).scalar() == 0
             assert conn.execute(sa.text("SELECT sort_order FROM menu_items")).scalar() == 0
             conn.execute(sa.text("INSERT INTO menu_item_translations (menu_item_id, locale, name, created_at,"

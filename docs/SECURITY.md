@@ -1351,11 +1351,14 @@ Code: `app/services/restaurant.py`, `app/utils/locale.py`,
 `app/services/menu.py` (`public_menu_query`, `set_availability`,
 translations), `app/routes/staff_menu.py`, `app/routes/admin_settings.py`
 (`restaurant`), `app/routes/main.py` (`switch_locale`). Tests:
-`tests/test_m5_catalog.py` (103), `tests/test_m5_migration.py` (1) and one
+`tests/test_m5_catalog.py` (108), `tests/test_m5_migration.py` (1) and one
 MySQL race in `tests/test_mysql_concurrency.py`.
 
 ### 21.1 Restaurant profile
 
+- The migration creates the row with name "Quick Junction" (the pre-M5
+  name) and no contact details, so a real installation never shows invented
+  or demo restaurant data before the admin fills it in.
 - One row, enforced by the database (`ck_restaurant_profile_singleton`:
   `id = 1`; the id is not AUTO_INCREMENT because MySQL refuses a CHECK on
   one). Nothing references it and no table gained a `restaurant_id`.
@@ -1392,7 +1395,10 @@ MySQL race in `tests/test_mysql_concurrency.py`.
   `{"menu_item_id", "is_available", "source": "staff_menu"}`), in the same
   transaction. MySQL race: two staff marking one dish sold out at once give
   one change and one audit row, 15 rounds.
-- The admin edit form stays ADMIN-only (staff POST: 403).
+- The admin edit form stays ADMIN-only (staff POST: 403) and never writes
+  `is_available`, so an edit form opened before a sold-out change cannot
+  undo it (tested with the exact stale-form sequence). Admins change
+  availability through the same `/staff/menu` control.
 
 ### 21.3 One public-menu rule
 

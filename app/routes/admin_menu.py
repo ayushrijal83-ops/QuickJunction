@@ -205,7 +205,6 @@ def menu_edit(item_id: int):
     form.category_id.choices = _category_choices()
 
     if form.validate_on_submit():
-        was_available = item.is_available
         try:
             update_menu_item(
                 item,
@@ -217,15 +216,11 @@ def menu_edit(item_id: int):
                     cuisine=form.cuisine.data,
                     spice_level=form.spice_level.data,
                     dietary_type=form.dietary_type.data,
-                    is_available=form.is_available.data,
                     sort_order=form.sort_order.data,
                     translations=_translations(form),
                 ),
-                audit=lambda i: (
-                    _audit(AuditEvent.MENU_ITEM_AVAILABILITY_CHANGED, menu_item_id=i.id, is_available=i.is_available)
-                    if was_available != i.is_available
-                    else _audit(AuditEvent.MENU_ITEM_UPDATED, menu_item_id=i.id, name=i.name)
-                ),
+                # Availability is not edited here (M5): /staff/menu owns it.
+                audit=lambda i: _audit(AuditEvent.MENU_ITEM_UPDATED, menu_item_id=i.id, name=i.name),
             )
         except MenuItemError as exc:
             _apply_form_errors(form, exc.errors)

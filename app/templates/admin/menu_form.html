@@ -53,8 +53,16 @@
             <div class="col-md-4">{{ select(form.dietary_type) }}</div>
           </div>
           {{ field(form.ingredients, help="Comma separated, e.g. paneer, yogurt, chilli.") }}
-          {{ checkbox(form.is_available,
-                      help="Unavailable items are hidden from the menu and can never be recommended or ordered.") }}
+          {% if item %}
+            {# Not editable here, so a form opened before a sold-out change cannot undo it. #}
+            <p class="mb-0">
+              Availability: <strong>{{ "Available" if item.is_available else "Sold out" }}</strong>
+              &mdash; change it on <a href="{{ url_for('staff_menu.availability_list') }}">Menu availability</a>.
+            </p>
+          {% else %}
+            {{ checkbox(form.is_available,
+                        help="Unavailable items are hidden from the menu and can never be recommended or ordered.") }}
+          {% endif %}
         </div>
       </div>
 

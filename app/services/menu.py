@@ -231,6 +231,8 @@ class MenuItemInput:
     sort_order: int = 0
     # {"ne": (name, description)}; None leaves translations unchanged.
     translations: dict | None = None
+    # ``is_available`` above is used by create_menu_item only. After that,
+    # availability changes only through set_availability (M5).
 
 
 def _validate_price(raw: str) -> tuple[Decimal | None, list[str]]:
@@ -320,6 +322,9 @@ def create_menu_item(data: MenuItemInput, *, audit=None) -> MenuItem:
 
 
 def update_menu_item(item: MenuItem, data: MenuItemInput, *, audit=None) -> MenuItem:
+    """Edit an item's details. Never writes ``is_available`` -- not even the
+    value it was loaded with -- so an edit form opened before a sold-out
+    change cannot undo it; availability changes only via ``set_availability``."""
     (name, description, category, price, cuisine, spice_level, dietary_type, sort_order,
      translations) = _validate_menu_item_input(data)
 
@@ -330,7 +335,6 @@ def update_menu_item(item: MenuItem, data: MenuItemInput, *, audit=None) -> Menu
     item.cuisine = cuisine
     item.spice_level = spice_level
     item.dietary_type = dietary_type
-    item.is_available = data.is_available
     item.sort_order = sort_order
     _apply_translations(item, MenuItemTranslation, translations)
     _commit_menu_item(item, audit)

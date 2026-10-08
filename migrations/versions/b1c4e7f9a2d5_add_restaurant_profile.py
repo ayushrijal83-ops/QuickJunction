@@ -7,11 +7,13 @@ Create Date: 2026-10-08 18:00:00.000000
 M5 (menu & restaurant foundation), part 1 of 2.
 
 - ``restaurant_profile``: the installed restaurant's identity, one row
-  (``ck_restaurant_profile_singleton``: id = 1), seeded with the obviously
-  fictional name "Quick Junction Demo Restaurant" and English as the default
-  menu language. An admin replaces it at /admin/settings/restaurant. Nothing
-  references this table and no other table gains a column: this is not
-  tenancy.
+  (``ck_restaurant_profile_singleton``: id = 1). The row created here holds
+  only name "Quick Junction" -- what every customer page already showed
+  before M5, so the upgrade changes nothing customers see -- English as the
+  default menu language, and no tagline, address, phone or email. It makes
+  no claim about any restaurant; an admin enters the real details at
+  /admin/settings/restaurant. Nothing references this table and no other
+  table gains a column: this is not tenancy.
 - ``ck_audit_logs_event_type`` widened by ``restaurant_profile_changed``.
 
 No existing row is changed. Written by hand (reason in 2d9f3b20045f).
@@ -71,7 +73,7 @@ def upgrade():
         sa.ForeignKeyConstraint(['updated_by_id'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.bulk_insert(profile, [{'id': 1, 'name': 'Quick Junction Demo Restaurant', 'default_locale': 'en'}])
+    op.bulk_insert(profile, [{'id': 1, 'name': 'Quick Junction', 'default_locale': 'en'}])
 
     with op.batch_alter_table('audit_logs', schema=None) as batch_op:
         batch_op.drop_constraint('ck_audit_logs_event_type', type_='check')
