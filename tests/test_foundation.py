@@ -9,6 +9,10 @@ debug on.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+import traceback
+from pathlib import Path
 
 import pytest
 from flask import Flask
@@ -94,6 +98,78 @@ def test_database_configuration_loads(app: Flask) -> None:
             "pricing_settings",
             "stock_movements",
         }
+
+
+@pytest.mark.parametrize("uri", ["sqlite://", "sqlite:///:memory:", "sqlite:///file::memory:?cache=shared",
+                                 "sqlite:///x.db?mode=memory"])
+def test_development_refuses_an_in_memory_database(monkeypatch, uri) -> None:
+    """A DATABASE_URL left in the shell overrides .env; an in-memory one used
+    to start a server on an empty database that failed every page with
+    "no such table". It now stops at startup with a safe message."""
+    monkeypatch.setattr(DevelopmentConfig, "SECRET_KEY", "dev-secret")
+    monkeypatch.setattr(DevelopmentConfig, "SQLALCHEMY_DATABASE_URI", uri)
+    with pytest.raises(ConfigError, match="in-memory SQLite") as refused:
+        create_app("development")
+    assert "Remove-Item Env:DATABASE_URL" in str(refused.value) and uri not in str(refused.value)
+
+
+@pytest.mark.parametrize("uri", ["mysql+pymysql://qj_user:pw@127.0.0.1:3306/quickjunctiondb", "sqlite:///dev.db"])
+def test_development_accepts_a_persistent_database(monkeypatch, uri) -> None:
+    monkeypatch.setattr(DevelopmentConfig, "SECRET_KEY", "dev-secret")
+    monkeypatch.setattr(DevelopmentConfig, "SQLALCHEMY_DATABASE_URI", uri)
+    DevelopmentConfig.validate()  # a deliberately supplied MySQL or file URL still wins
+
+
+def test_invalid_database_url_fails_without_echoing_it(monkeypatch) -> None:
+    monkeypatch.setattr(DevelopmentConfig, "SECRET_KEY", "dev-secret")
+    monkeypatch.setattr(DevelopmentConfig, "SQLALCHEMY_DATABASE_URI", "not a url s3cr3t-password")
+    with pytest.raises(ConfigError, match="not a valid database URL") as refused:
+        DevelopmentConfig.validate()
+    assert "s3cr3t-password" not in str(refused.value)
+
+
+def test_password_typed_into_the_port_fails_safely(monkeypatch) -> None:
+    """A swapped ':'/'@' puts the password where the port goes; SQLAlchemy
+    then raises ValueError quoting it. Startup must stop with the safe
+    ConfigError instead, with the secret nowhere in the traceback."""
+    secret = "qj-test-secret-7f3a9c"
+    monkeypatch.setattr(DevelopmentConfig, "SECRET_KEY", "dev-secret")
+    monkeypatch.setattr(DevelopmentConfig, "SQLALCHEMY_DATABASE_URI",
+                        f"mysql+pymysql://qj_user@127.0.0.1:{secret}/quickjunctiondb")
+    with pytest.raises(ConfigError, match="not a valid database URL") as refused:
+        create_app("development")
+    error = refused.value
+    formatted = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+    assert secret not in str(error) and secret not in formatted
+    assert error.__context__ is None and error.__cause__ is None
+
+
+def test_environment_database_url_takes_precedence_over_dotenv(tmp_path) -> None:
+    """The precedence behind the incident: .env never overrides a variable
+    already in the process environment. Run in a fresh interpreter so the
+    module-level config is read from that environment; only True/False is
+    printed, never the URL. Holds whether or not a .env file exists."""
+    sentinel = f"sqlite:///{(tmp_path / 'sentinel.db').as_posix()}"
+    env = {**os.environ, "DATABASE_URL": sentinel, "QJ_EXPECTED_URI": sentinel}
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import os, config; print(config.DevelopmentConfig.SQLALCHEMY_DATABASE_URI == os.environ['QJ_EXPECTED_URI'])"],
+        cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "True"
+    assert not (tmp_path / "sentinel.db").exists()  # importing config opens no database
+
+
+def test_testing_keeps_its_in_memory_database(monkeypatch) -> None:
+    """In-memory SQLite stays valid for tests; only development refuses it."""
+    monkeypatch.setattr(TestingConfig, "SQLALCHEMY_DATABASE_URI", "sqlite://")
+    TestingConfig.validate()
+    assert create_app("testing").config["SQLALCHEMY_DATABASE_URI"] == "sqlite://"
+
+    monkeypatch.setattr(DevelopmentConfig, "SECRET_KEY", "dev-secret")
+    monkeypatch.setattr(DevelopmentConfig, "SQLALCHEMY_DATABASE_URI", "sqlite://")
+    with pytest.raises(ConfigError, match="in-memory SQLite"):
+        DevelopmentConfig.validate()
 
 
 def test_production_database_must_be_mysql(monkeypatch) -> None:
