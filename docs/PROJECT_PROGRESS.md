@@ -3603,4 +3603,3 @@ Modified: `app/templates/{base,home}.html`, `app/templates/menu/{index,detail}.h
 `app/templates/reservations/new.html`, `app/static/css/app.css`,
 `app/utils/{locale,imagery}.py`, `tests/test_m5_catalog.py`,
 `docs/{PROJECT_PROGRESS,ARCHITECTURE}.md`, `CHANGELOG.md`.
-
