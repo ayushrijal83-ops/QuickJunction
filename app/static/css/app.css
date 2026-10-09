@@ -47,6 +47,8 @@
   --qj-ink: #1d1a17;
   --qj-muted: #6b6158;
   --qj-line: rgba(29, 26, 23, .09);
+  --qj-line-strong: rgba(29, 26, 23, .15);
+  --qj-on-brand: #fff; /* text on a --qj-brand fill */
   --qj-brand: #b4462b;
   --qj-brand-dark: #933820;
   --qj-brand-rgb: 180, 70, 43;
@@ -95,6 +97,7 @@
   --qj-ink: #f2ece4;
   --qj-muted: #b1a699;
   --qj-line: rgba(255, 245, 235, .09);
+  --qj-line-strong: rgba(255, 245, 235, .14);
   --qj-brand: #e27a58;
   --qj-brand-dark: #f09a7c;
   --qj-brand-rgb: 226, 122, 88;
@@ -202,7 +205,7 @@ a { text-underline-offset: .18em; }
   --bs-btn-bg: var(--qj-surface);
   --bs-btn-hover-bg: var(--qj-surface-2);
   --bs-btn-hover-color: var(--qj-ink);
-  --bs-btn-hover-border-color: rgba(29, 26, 23, .18);
+  --bs-btn-hover-border-color: var(--qj-line-strong);
   --bs-btn-active-bg: var(--qj-surface-2);
   --bs-btn-active-color: var(--qj-ink);
 }
@@ -254,7 +257,7 @@ a { text-underline-offset: .18em; }
 .form-control,
 .form-select {
   background-color: var(--qj-surface);
-  border-color: rgba(29, 26, 23, .14);
+  border-color: var(--qj-line-strong);
   border-radius: var(--qj-radius-sm);
   padding: .6rem .85rem;
   transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
@@ -283,7 +286,7 @@ a { text-underline-offset: .18em; }
 
 .form-text { color: var(--qj-muted); }
 
-.input-group-text { background: var(--qj-surface-2); border-color: rgba(29, 26, 23, .14); }
+.input-group-text { background: var(--qj-surface-2); border-color: var(--qj-line-strong); }
 
 .card {
   --bs-card-bg: var(--qj-surface);
@@ -423,7 +426,7 @@ a { text-underline-offset: .18em; }
   height: 2.1rem;
   border-radius: .65rem;
   background: linear-gradient(135deg, var(--qj-brand), var(--qj-gold));
-  color: #fff;
+  color: var(--qj-on-brand);
   font-family: var(--qj-font-display);
   font-weight: 700;
   font-size: 1.05rem;
@@ -439,70 +442,10 @@ a { text-underline-offset: .18em; }
 }
 
 .qj-brand__word span + span { color: var(--qj-gold-text); margin-top: .18rem; }
-/* On dark surfaces (sidebar, footer, over photos) the bright gold reads well. */
-.qj-sidebar .qj-brand__word span + span,
-.qj-footer .qj-brand__word span + span,
-.qj-has-hero .qj-topnav .qj-brand__word span + span { color: #e2b25f; }
+/* On the dark sidebar the bright gold reads well. */
+.qj-sidebar .qj-brand__word span + span { color: #e2b25f; }
 
-/* === Shell: top navigation (public + customer) ============================ */
-.qj-topnav {
-  position: sticky;
-  top: 0;
-  z-index: 1030;
-  padding: .65rem 0;
-  transition: background-color .25s ease, box-shadow .25s ease;
-}
-
-.qj-topnav.navbar { --bs-navbar-color: var(--qj-ink); --bs-navbar-hover-color: var(--qj-brand); --bs-navbar-active-color: var(--qj-brand); }
-.qj-topnav .qj-glass { box-shadow: var(--qj-shadow-sm); }
-
-.qj-topnav__bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: .5rem 1rem;
-  padding: .45rem .6rem .45rem 1rem;
-  border-radius: 1.1rem;
-}
-
-.qj-topnav .nav-link {
-  position: relative;
-  padding: .45rem .8rem !important;
-  border-radius: .6rem;
-  font-weight: 550;
-  font-size: .92rem;
-  color: var(--qj-ink);
-  transition: background-color .15s ease, color .15s ease;
-}
-
-.qj-topnav .nav-link:hover { background: rgba(var(--qj-brand-rgb), .08); color: var(--qj-brand); }
-
-.qj-topnav .nav-link[aria-current="page"] {
-  background: rgba(var(--qj-brand-rgb), .12);
-  color: var(--qj-brand);
-}
-
-.qj-topnav .navbar-toggler { border: 0; padding: .4rem .55rem; border-radius: .6rem; }
-.qj-topnav .navbar-toggler:focus { box-shadow: 0 0 0 .2rem rgba(var(--qj-brand-rgb), .25); }
-
-/* Over a hero photo the bar starts transparent and light-on-dark. */
-.qj-has-hero .qj-topnav { position: absolute; left: 0; right: 0; }
-.qj-has-hero .qj-topnav .qj-glass { background: rgba(20, 16, 13, .28); border-color: rgba(255, 255, 255, .14); }
-.qj-has-hero .qj-topnav .nav-link,
-.qj-has-hero .qj-topnav .qj-brand,
-.qj-has-hero .qj-topnav .qj-icon-btn { color: #fff; }
-.qj-has-hero .qj-topnav .nav-link:hover,
-.qj-has-hero .qj-topnav .nav-link[aria-current="page"] { background: rgba(255, 255, 255, .16); color: #fff; }
-.qj-has-hero .qj-topnav .navbar-toggler-icon { filter: invert(1); }
-/* Language switcher (M5): the unselected button is .btn-ghost, dark ink by
-   default -- invisible on the dark glass bar over a hero photo. */
-.qj-has-hero .qj-topnav .qj-lang .btn-ghost { --bs-btn-color: #fff; --bs-btn-hover-color: #fff; --bs-btn-hover-bg: rgba(255, 255, 255, .16); --bs-btn-active-color: #fff; --bs-btn-active-bg: rgba(255, 255, 255, .22); }
-
-@media (max-width: 991.98px) {
-  .qj-topnav .navbar-collapse { flex-basis: 100%; padding: .5rem 0 .25rem; }
-  .qj-has-hero .qj-topnav .navbar-collapse.show,
-  .qj-has-hero .qj-topnav .navbar-collapse.collapsing { background: rgba(20, 16, 13, .8); border-radius: .8rem; padding: .5rem; }
-}
+/* Customer top navigation, cart count and footer live in css/site.css (M6.1). */
 
 .qj-icon-btn {
   display: inline-grid;
@@ -519,20 +462,6 @@ a { text-underline-offset: .18em; }
 
 .qj-icon-btn:hover { background: rgba(var(--qj-brand-rgb), .1); }
 
-.qj-cart-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  padding: 0 .3rem;
-  margin-left: .2rem;
-  border-radius: 99px;
-  background: var(--qj-brand);
-  color: #fff;
-  font-size: .7rem;
-  font-weight: 700;
-}
-
 .qj-avatar {
   display: inline-grid;
   place-items: center;
@@ -540,7 +469,7 @@ a { text-underline-offset: .18em; }
   height: 2.1rem;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--qj-gold), var(--qj-brand));
-  color: #fff;
+  color: var(--qj-on-brand);
   font-weight: 700;
   font-size: .85rem;
   text-transform: uppercase;
@@ -657,17 +586,6 @@ a { text-underline-offset: .18em; }
 /* === Main / footer ======================================================== */
 .qj-main { flex: 1 0 auto; }
 .qj-container { padding-top: 1.75rem; padding-bottom: 3rem; }
-
-.qj-footer {
-  margin-top: auto;
-  padding: 2.5rem 0 2rem;
-  background: #17130f;
-  color: rgba(233, 225, 215, .75);
-  font-size: .88rem;
-}
-
-.qj-footer .qj-brand { color: #fff; }
-.qj-footer a { color: #f0c9b8; }
 
 /* === Components =========================================================== */
 
@@ -848,7 +766,7 @@ a { text-underline-offset: .18em; }
   text-align: center;
   color: var(--qj-muted);
   background: var(--qj-surface);
-  border: 1px dashed rgba(29, 26, 23, .15);
+  border: 1px dashed var(--qj-line-strong);
   border-radius: var(--qj-radius);
 }
 
@@ -877,7 +795,7 @@ a { text-underline-offset: .18em; }
 .qj-summary > div { display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; }
 .qj-summary dt { font-weight: 450; color: var(--qj-muted); }
 .qj-summary dd { margin: 0; font-variant-numeric: tabular-nums; }
-.qj-summary .qj-summary__total { margin-top: .5rem; padding-top: .8rem; border-top: 1px dashed rgba(29, 26, 23, .2); }
+.qj-summary .qj-summary__total { margin-top: .5rem; padding-top: .8rem; border-top: 1px dashed var(--qj-line-strong); }
 .qj-summary .qj-summary__total dt { color: var(--qj-ink); font-weight: 700; }
 .qj-summary .qj-summary__total dd { font-family: var(--qj-font-display); font-size: 1.5rem; font-weight: 600; }
 
@@ -1237,9 +1155,7 @@ button[disabled] .spinner-border { vertical-align: -.125em; }
   font-weight: 700;
   letter-spacing: .04em;
   color: #1d1a17; /* fixed: the chip is light in both themes */
-  background: rgba(255, 252, 247, .88);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: rgba(255, 252, 247, .92);
 }
 
 .qj-food__diet {
@@ -1255,9 +1171,7 @@ button[disabled] .spinner-border { vertical-align: -.125em; }
   font-size: .7rem;
   font-weight: 700;
   color: #fff;
-  background: rgba(15, 11, 8, .55);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: rgba(15, 11, 8, .7);
 }
 
 /* Indian-menu convention: green square = vegetarian, red = non-veg. Always
@@ -1420,7 +1334,7 @@ button[disabled] .spinner-border { vertical-align: -.125em; }
   box-shadow: 0 0 0 4px rgba(var(--qj-brand-rgb), .15), var(--qj-shadow);
 }
 
-.qj-table-pick input:checked + label .qj-table-pick__check { background: var(--qj-brand); border-color: var(--qj-brand); color: #fff; }
+.qj-table-pick input:checked + label .qj-table-pick__check { background: var(--qj-brand); border-color: var(--qj-brand); color: var(--qj-on-brand); }
 .qj-table-pick input:focus-visible + label { outline: 3px solid var(--qj-brand); outline-offset: 3px; }
 
 /* Reservation ticket card. */
@@ -1647,7 +1561,6 @@ main:focus { outline: none; }
 }
 
 /* On hero pages the top bar scrolls away, so sticky toolbars sit at the top. */
-.qj-has-hero .qj-toolbar { top: .75rem; }
 .qj-hero .breadcrumb { --bs-breadcrumb-divider-color: rgba(255, 255, 255, .5); }
 
 /* KPI tiles placed in a page header keep a readable width (size containment

@@ -358,8 +358,8 @@ def test_localized_prefers_the_requested_translation(db):
     item = make_menu_item(name="Paneer Tikka")
     item.description = "Spiced paneer."
     add_translation(item)
-    assert localized(item, "ne") == (NEPALI_NAME, NEPALI_DESC)
-    assert localized(item, "en") == ("Paneer Tikka", "Spiced paneer.")  # no English row: canonical
+    assert localized(item, "ne") == (NEPALI_NAME, NEPALI_DESC, "ne", "ne")
+    assert localized(item, "en") == ("Paneer Tikka", "Spiced paneer.", "en", "en")  # no English row: canonical
 
 
 def test_english_translation_is_used_when_present(db):
@@ -372,14 +372,14 @@ def test_missing_nepali_falls_back_to_canonical(db):
     item = make_menu_item(name="Paneer Tikka")
     item.description = "Spiced paneer."
     _db.session.commit()
-    assert localized(item, "ne") == ("Paneer Tikka", "Spiced paneer.")
+    assert localized(item, "ne") == ("Paneer Tikka", "Spiced paneer.", "en", "en")  # canonical text is English
 
 
 def test_translation_without_description_keeps_the_canonical_description(db):
     item = make_menu_item(name="Paneer Tikka")
     item.description = "Spiced paneer."
     add_translation(item, description=None)
-    assert localized(item, "ne") == (NEPALI_NAME, "Spiced paneer.")
+    assert localized(item, "ne") == (NEPALI_NAME, "Spiced paneer.", "ne", "en")  # each string keeps its own language
 
 
 def test_category_translation(db):
@@ -449,7 +449,7 @@ def test_admin_enters_edits_and_clears_nepali_text(app, db):
             "name_ne": NEPALI_NAME, "description_ne": NEPALI_DESC}
     req(client, "post", "/admin/menu/create", data=form)
     item = _db.session.query(MenuItem).one()
-    assert localized(item, "ne") == (NEPALI_NAME, NEPALI_DESC)
+    assert localized(item, "ne") == (NEPALI_NAME, NEPALI_DESC, "ne", "ne")
     assert NEPALI_NAME in body(req(client, "get", f"/admin/menu/{item.id}/edit"))  # pre-filled
 
     req(client, "post", f"/admin/menu/{item.id}/edit", data={**form, "name_ne": "मःम"})
@@ -515,13 +515,23 @@ def html_lang(page: str) -> str:
     return page[start:page.index('"', start)]
 
 
+def menu_locale(page: str) -> str:
+    """The active customer menu language: the switcher's pressed button.
+    Since M6.1 <html lang> stays "en" (the interface is English) and only
+    translated text is marked lang="ne", so <html lang> no longer shows the
+    menu language -- asserted by test_page_stays_english_and_marks_translated_text."""
+    match = re.search(r'value="(en|ne)"[^>]*aria-pressed="true"', page)
+    assert match, "no active language in the switcher"
+    return match.group(1)
+
+
 def test_default_locale_is_english(client, db):
-    assert html_lang(body(req(client, "get", "/menu"))) == "en"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "en"
 
 
 def test_restaurant_default_locale_applies_without_a_preference(client, db):
     seed_profile(default_locale=Locale.NE)
-    assert html_lang(body(req(client, "get", "/menu"))) == "ne"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "ne"
 
 
 @pytest.mark.parametrize("header, expected", [("ne-NP,ne;q=0.9,en;q=0.5", "ne"), ("ne", "ne"),
@@ -529,30 +539,30 @@ def test_restaurant_default_locale_applies_without_a_preference(client, db):
 def test_browser_language_comes_before_the_restaurant_default(client, db, header, expected):
     seed_profile(default_locale=Locale.NE)
     page = body(req(client, "get", "/menu", headers={"Accept-Language": header}))
-    assert html_lang(page) == expected
+    assert menu_locale(page) == expected
 
 
 def test_lang_param_switches_and_is_remembered(client, db):
     item = make_menu_item(name="Paneer Tikka")
     add_translation(item)
     page = body(req(client, "get", "/menu?lang=ne"))
-    assert html_lang(page) == "ne" and NEPALI_NAME in page
+    assert menu_locale(page) == "ne" and NEPALI_NAME in page
     page = body(req(client, "get", "/menu", headers={"Accept-Language": "en"}))
-    assert html_lang(page) == "ne"  # the session choice beats the browser
+    assert menu_locale(page) == "ne"  # the session choice beats the browser
     page = body(req(client, "get", "/menu?lang=en"))
-    assert html_lang(page) == "en" and NEPALI_NAME not in page and "Paneer Tikka" in page
+    assert menu_locale(page) == "en" and NEPALI_NAME not in page and "Paneer Tikka" in page
 
 
 @pytest.mark.parametrize("value", ["fr", "NE-np", "", "<script>alert(1)</script>", "ne\x00"])
 def test_invalid_lang_param_is_ignored_and_never_reflected(client, db, value):
     page = body(req(client, "get", "/menu", query_string={"lang": value}))
-    assert html_lang(page) == "en" and "<script>alert(1)" not in page
+    assert menu_locale(page) == "en" and "<script>alert(1)" not in page
 
 
 def test_switcher_sets_the_locale_and_returns_to_a_local_page(client, db):
     response = req(client, "post", "/locale", data={"lang": "ne", "next": "/menu/5"})
     assert response.status_code == 303 and response.headers["Location"].endswith("/menu/5")
-    assert html_lang(body(req(client, "get", "/"))) == "ne"
+    assert menu_locale(body(req(client, "get", "/"))) == "ne"
 
 
 @pytest.mark.parametrize("target", ["https://evil.example/", "//evil.example/x", "/\\evil.example",
@@ -572,14 +582,14 @@ def test_safe_next_accepts_local_paths_with_queries():
 def test_switcher_refuses_unsupported_locales(client, db, value):
     data = {"next": "/menu"} if value is None else {"lang": value, "next": "/menu"}
     assert req(client, "post", "/locale", data=data).status_code == 400
-    assert html_lang(body(req(client, "get", "/menu"))) == "en"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "en"
 
 
 def test_switcher_requires_csrf_and_get_cannot_use_it(app, client, db):
     assert req(client, "get", "/locale").status_code == 405
     app.config["WTF_CSRF_ENABLED"] = True
     assert req(client, "post", "/locale", data={"lang": "ne", "next": "/menu"}).status_code == 400
-    assert html_lang(body(req(client, "get", "/menu"))) == "en"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "en"
 
 
 def test_switcher_is_on_customer_pages_only(app, client, db):
@@ -599,9 +609,9 @@ def test_chosen_language_survives_sign_in_and_sign_out(app, client, db):
     make_user(username="cust", email="cust@example.com", password=PASSWORD)
     req(client, "get", "/menu?lang=ne")
     req(client, "post", "/login", data={"username": "cust", "password": PASSWORD})
-    assert html_lang(body(req(client, "get", "/menu"))) == "ne"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "ne"
     req(client, "post", "/logout")
-    assert html_lang(body(req(client, "get", "/menu"))) == "ne"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "ne"
 
 
 def test_nepali_menu_renders_translated_items_and_categories(client, db):
@@ -611,8 +621,24 @@ def test_nepali_menu_renders_translated_items_and_categories(client, db):
     menu = body(req(client, "get", "/menu?lang=ne"))
     assert NEPALI_NAME in menu and NEPALI_DESC in menu and NEPALI_CATEGORY in menu
     detail = body(req(client, "get", f"/menu/{item.id}"))
-    assert f"<h1 class=\"display-6 mb-2\">{NEPALI_NAME}</h1>" in detail
+    assert f'<h1 class="qj-dish__name" lang="ne">{NEPALI_NAME}</h1>' in detail
     assert "paneer tikka" in menu  # canonical stays in the (lower-cased) search text
+
+
+def test_page_stays_english_and_marks_translated_text(client, db):
+    """Option A (M6.1): the interface is English, so <html lang="en"> even in
+    Nepali; translated menu text carries lang="ne", untranslated text "en"."""
+    item = make_menu_item(name="Paneer Tikka")
+    item.description = "Spiced paneer."
+    add_translation(item, description=None)
+    plain = make_menu_item(category=item.category, name="Dal Bhat")
+    menu = body(req(client, "get", "/menu?lang=ne"))
+    assert html_lang(menu) == "en" and menu_locale(menu) == "ne"
+    assert f'lang="ne">{NEPALI_NAME}</a>' in menu
+    assert 'lang="en">Spiced paneer.</p>' in menu  # canonical description, marked English
+    assert f'lang="en">{plain.name}</a>' in menu
+    detail = body(req(client, "get", f"/menu/{item.id}"))
+    assert html_lang(detail) == "en" and f'lang="ne">{NEPALI_NAME}</h1>' in detail
 
 
 def test_nepali_font_is_vendored_and_declared(client):
@@ -651,13 +677,13 @@ def test_switcher_round_trip_with_csrf_across_customer_pages(app, db):
     assert response.status_code == 303 and response.headers["Location"].endswith(item_page)
     for page in CUSTOMER_PAGES + [item_page]:  # persists across pages and reloads
         html = body(req(client, "get", page))
-        assert html_lang(html) == "ne" and 'value="ne" lang="ne" class="btn btn-sm btn-primary"' in html, page
+        assert menu_locale(html) == "ne" and html_lang(html) == "en", page
     menu = body(req(client, "get", "/menu"))
     assert NEPALI_NAME in menu and untranslated.name in menu and "Paneer Tikka" not in menu
 
     assert switch(client, "en", "/menu").status_code == 303
     menu = body(req(client, "get", "/menu"))
-    assert html_lang(menu) == "en" and NEPALI_NAME not in menu and "Paneer Tikka" in menu
+    assert menu_locale(menu) == "en" and NEPALI_NAME not in menu and "Paneer Tikka" in menu
 
 
 def signed_in_with_csrf(app, username):
@@ -675,7 +701,7 @@ def test_switcher_rejects_a_stale_or_foreign_csrf_token(app, client, db):
     token = re.search(r'name="csrf_token" value="([^"]+)"', body(req(other, "get", "/menu"))).group(1)
     req(client, "get", "/menu")
     assert req(client, "post", "/locale", data={"lang": "ne", "next": "/menu", "csrf_token": token}).status_code == 400
-    assert html_lang(body(req(client, "get", "/menu"))) == "en"
+    assert menu_locale(body(req(client, "get", "/menu"))) == "en"
 
 
 @pytest.mark.parametrize("role", [Role.STAFF, Role.ADMIN])
@@ -689,12 +715,15 @@ def test_operations_users_get_english_menu_content_even_with_a_nepali_session(ap
     assert html_lang(menu) == "en" and NEPALI_NAME not in menu and "Paneer Tikka" in menu
     assert 'action="/locale"' not in menu
     req(client, "post", "/logout")
-    assert html_lang(body(req(client, "get", "/menu"))) == "ne"  # the guest choice is still there
+    assert menu_locale(body(req(client, "get", "/menu"))) == "ne"  # the guest choice is still there
 
 
-def test_switcher_is_readable_over_hero_photos(client):
-    css = body(req(client, "get", "/static/css/app.css"))
-    assert ".qj-has-hero .qj-topnav .qj-lang .btn-ghost { --bs-btn-color: #fff;" in css
+def test_switcher_is_readable_on_the_customer_nav(client):
+    """M5 fix, carried into M6.1: the nav is solid obsidian now, and both
+    switcher states set an explicit colour (contrast: tests/test_m6_design.py)."""
+    css = body(req(client, "get", "/static/css/site.css"))
+    assert ".qj-site .qj-lang__btn {" in css and "color: var(--qj-ink);" in css
+    assert '.qj-site .qj-lang__btn[aria-pressed="true"] { background: var(--qj-brand); color: var(--qj-on-brand); }' in css
 
 
 # =============================================================================

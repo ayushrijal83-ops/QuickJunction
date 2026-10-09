@@ -164,6 +164,9 @@ class BaseConfig:
                 f"{cls.__name__}: missing required environment variable(s): "
                 f"{required}. Copy .env.example to .env and fill it in."
             )
+        # SQLAlchemy's own parse error repeats the whole URL, password included.
+        if _parse_database_url(cls.SQLALCHEMY_DATABASE_URI) is None:
+            raise ConfigError(f"{cls.__name__}: DATABASE_URL is not a valid database URL (value not shown).")
 
 
 class DevelopmentConfig(BaseConfig):
@@ -175,6 +178,20 @@ class DevelopmentConfig(BaseConfig):
     # One process, one model: warming up here is free and removes the 18 s
     # first-request wait that a demonstration would otherwise hit.
     LLM_WARMUP: bool = _env_bool("LLM_WARMUP", True)
+
+    @classmethod
+    def validate(cls) -> None:
+        super().validate()
+        # An in-memory database is empty on every start, so the server would
+        # answer every page with "no such table". The usual cause is a
+        # DATABASE_URL set in the shell: it overrides .env, because
+        # load_dotenv never replaces a variable that is already set.
+        if database_is_in_memory(cls.SQLALCHEMY_DATABASE_URI):
+            raise ConfigError(
+                "DevelopmentConfig: DATABASE_URL points at an in-memory SQLite database, which is "
+                "empty on every start. A DATABASE_URL set in this shell overrides .env -- check with "
+                "'Get-ChildItem Env:DATABASE_URL' and remove it with 'Remove-Item Env:DATABASE_URL'."
+            )
 
 
 class TestingConfig(BaseConfig):
@@ -219,18 +236,34 @@ class ProductionConfig(BaseConfig):
             )
 
 
-def database_uses_root(uri: str | None) -> bool:
-    """True when the DSN's user is MySQL ``root``. Parses the URL rather than
-    pattern-matching it, and never returns or logs any part of it."""
-    if not uri:
-        return False
+def _parse_database_url(uri: str | None):
+    """The parsed SQLAlchemy URL, or None if ``uri`` cannot be parsed.
+    ValueError too: a non-numeric port (e.g. a password typed after the
+    host) raises it with the offending text in its message."""
     from sqlalchemy.engine import make_url
     from sqlalchemy.exc import ArgumentError
 
     try:
-        return (make_url(uri).username or "").lower() == "root"
-    except ArgumentError:
+        return make_url(uri)
+    except (ArgumentError, ValueError):
+        return None
+
+
+def database_uses_root(uri: str | None) -> bool:
+    """True when the DSN's user is MySQL ``root``. Parses the URL rather than
+    pattern-matching it, and never returns or logs any part of it."""
+    url = _parse_database_url(uri) if uri else None
+    return url is not None and (url.username or "").lower() == "root"
+
+
+def database_is_in_memory(uri: str | None) -> bool:
+    """True for an in-memory SQLite URL (``sqlite://``, ``sqlite:///:memory:``,
+    ``file::memory:`` or ``mode=memory``). Never returns any part of it."""
+    url = _parse_database_url(uri) if uri else None
+    if url is None or not url.drivername.startswith("sqlite"):
         return False
+    database = url.database or ""
+    return database in ("", ":memory:") or database.startswith("file::memory:") or url.query.get("mode") == "memory"
 
 
 _WEAK_SECRETS = {

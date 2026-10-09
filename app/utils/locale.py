@@ -18,6 +18,10 @@ data and no permission, so a ``?lang=`` GET may set it.
 current locale: the translation for that locale if it exists, otherwise the
 canonical columns. A translation without a description falls back to the
 canonical description, so text is never blank when the canonical row has it.
+It also says which language each string is in (``lang``,
+``description_lang``; canonical text is English), so a page can mark only
+genuinely translated text ``lang="ne"`` while ``<html lang>`` stays ``en``
+until the interface itself is translated (M6.1).
 """
 
 from __future__ import annotations
@@ -73,9 +77,14 @@ def current_locale() -> str:
     return g.locale
 
 
+CANONICAL = Locale.EN.value
+
+
 class Text(NamedTuple):
     name: str
     description: str | None
+    lang: str = CANONICAL
+    description_lang: str = CANONICAL
 
 
 def localized(entity, locale: str | None = None) -> Text:
@@ -84,7 +93,8 @@ def localized(entity, locale: str | None = None) -> Text:
     locale = locale or current_locale()
     for translation in entity.translations:
         if translation.locale.value == locale and translation.name:
-            return Text(translation.name, translation.description or entity.description)
+            return Text(translation.name, translation.description or entity.description, locale,
+                        locale if translation.description else CANONICAL)
     return Text(entity.name, entity.description)
 
 

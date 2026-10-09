@@ -1,21 +1,14 @@
 {% extends "base.html" %}
 {% from "partials/_dashboard.html" import section, empty, steps, greeting %}
+{% from "partials/_site.html" import hero %}
 {% block title %}My account &mdash; {{ restaurant.name }}{% endblock %}
-{% block body_class %}qj-has-hero{% endblock %}
-
 {% block hero %}
-<section class="qj-hero qj-hero--band" aria-labelledby="welcome-title">
-  <img class="qj-hero__img" src="{{ scene_image('dashboard') }}" alt="" fetchpriority="high" width="1600" height="900">
-  <div class="container qj-reveal">
-    <p class="qj-eyebrow mb-2">My account</p>
-    <h1 id="welcome-title">{{ greeting() }}, <em>{{ user.username }}</em>.</h1>
-    <p class="lead mb-0">Order ahead, book a table, and see what suits your taste.</p>
-  </div>
-</section>
+{{ hero("band", scene_image("dashboard"), greeting() ~ ",", em=user.username, after=".", eyebrow="My account",
+        lead="Order ahead, book a table, and see what suits your taste.", id="welcome-title") }}
 {% endblock %}
 
 {% block content %}
-<div class="row g-3 mb-4" style="margin-top:-3.25rem; position:relative; z-index:2">
+<div class="row g-3 mb-4">
   {% for icon, label, note, href in [
     ("bag-plus", "Order food", "Browse the menu", url_for('menu.index')),
     ("calendar-heart", "Book a table", "Held for two hours", url_for('reservations.new')),
@@ -46,7 +39,7 @@
           {% with status = active_order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
         </div>
         {{ steps(active_order) }}
-        <a class="btn btn-glass btn-sm mt-3" href="{{ url_for('orders.detail', order_id=active_order.id) }}">View order <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+        <a class="btn btn-outline-light btn-sm mt-3" href="{{ url_for('orders.detail', order_id=active_order.id) }}">View order <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
       </section>
     {% endif %}
 

@@ -24,6 +24,18 @@ Each release uses only the sections that apply, in this order:
 
 ### Added
 
+- **Customer design system (M6.1), Obsidian + Champagne.**
+  - New `static/css/site.css`, loaded only for guests and customers:
+    palette, semantic tokens, spacing/type/radius/motion scales, Bootstrap
+    mapping, rules for Nepali text, reduced motion, high contrast and print.
+  - Mobile-first customer nav: language and cart are always visible.
+  - Phone bottom bar (Menu / Cart / Book / Account) below 576px.
+  - Reusable hero macro (`partials/_site.html`).
+  - Restaurant-first home page.
+  - Redesigned menu, food cards and dish page, with 44px touch targets and
+    a "Sold out" flag.
+  - Cache-busted stylesheet URLs (`?v=`).
+
 - **`flask create-admin`** (M1): the production way to create an
   administrator. Interactive only — prompts for username, email and password
   (hidden, entered twice); refuses to run without a terminal and never takes
@@ -85,6 +97,16 @@ Each release uses only the sections that apply, in this order:
 
 ### Changed
 
+- **Customer pages (M6.1):**
+  - Customer pages are always dark and no longer have a light/dark theme
+    toggle; staff and admin keep theirs.
+  - `<html lang>` is always `en` (the interface is English). Translated
+    menu text is marked `lang="ne"` on its own element.
+  - Staff/admin sign-in (`/login/staff`, `/login/admin`) and
+    `/account/setup` use a neutral operations-styled shell.
+  - Glass and blur effects and decorative gradients are gone from customer
+    pages.
+  - `localized()` now also returns each string's language.
 - `docs/PROJECT_PROGRESS.md` and `docs/SECURITY.md`: stale and contradictory
   statements corrected (migration head, production adapter, implemented
   features, closed known issues). Both now defer to `docs/STATUS.md` for the

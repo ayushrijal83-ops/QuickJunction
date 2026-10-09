@@ -12,7 +12,8 @@
 
 Records work that was implemented and verified, milestone by milestone.
 
-Last updated: 2026-10-08 (M5 locale-switching fix, then M5 — menu & restaurant foundation; see
+Last updated: 2026-10-08 (M6.1 — customer design system foundation; see
+[M6.1](#m61--customer-design-system-foundation-)). Before that: M5 locale-switching fix, then M5 — menu & restaurant foundation; see
 [M5](#m5--menu--restaurant-foundation-)). Before that: M4 — account security & staff onboarding
 ([M4](#m4--account-security--staff-onboarding-)). Before that: 2026-10-03 (M0 — production foundation: documentation
 corrected, CI added, v0.9.0 baseline tagged; no application change).
@@ -3496,3 +3497,109 @@ item names in cart, checkout and orders.
 Files: `app/utils/locale.py`, `app/templates/base.html`,
 `app/static/css/app.css`, `tests/test_m5_catalog.py`,
 `docs/PROJECT_PROGRESS.md`, `CHANGELOG.md`.
+
+# M6.1 — Customer Design System Foundation ✅
+
+Date: 2026-10-08. Branch `feat/m6.1-customer-design-system`. Presentation
+only: no route, model, migration, authorization, CSRF, availability, order
+or security-policy change. Architecture: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#presentation-shells-and-the-customer-design-system-m61).
+
+## Locked decisions implemented
+
+1. **Mobile bottom bar:**
+   - customer shell only, below 576px: Menu / Cart / Book / Account;
+   - stays inside the safe-area insets (`viewport-fit=cover` on customer
+     pages only);
+   - 56px items, and the body reserves the bar's height;
+   - `aria-current` shows the active item, with a top marker as well as
+     colour;
+   - shows the cart count.
+2. **Language accessibility, option A:** `<html lang="en">` everywhere.
+   `localized()` now returns `Text(name, description, lang,
+   description_lang)`, and templates mark translated text `lang="ne"`
+   (food card, category pills, dish page, breadcrumb). A Nepali name with
+   the canonical English description marks each correctly.
+3. **Staff/admin sign-in stays neutral.** `/login/staff`, `/login/admin` and
+   `/account/setup` render a neutral shell: product brand, operations theme
+   and toggle; no customer nav, hero, footer, bottom bar or `site.css`. The
+   customer `/login` is a customer page.
+4. **CSS architecture.**
+   - `app.css` holds shared and operations styles.
+   - `site.css` is customer-only, loaded only in the customer branch, with
+     every rule scoped to `.qj-site`.
+   - The customer nav, cart count and footer rules moved out of `app.css`;
+     they only ever rendered in the customer shell.
+   - No build toolchain.
+5. **Behaviour preserved:** same forms, endpoints, fields, CSRF and
+   availability filter. Locale resolution is unchanged.
+
+## Implementation
+
+| Area | Change |
+| --- | --- |
+| `site.css` (new) | Obsidian/Champagne primitives, semantic tokens (incl. `--qj-on-brand`, `--qj-accent`, `--qj-on-accent`), spacing/type/radius/motion/touch scales, Bootstrap `--bs-*` mapping on `.qj-site`, customer nav, language switcher, bottom bar, footer, controls (44px min), hero, menu toolbar and category scroller (scroll-snap), food card, dish page, home, `:lang(ne)` rules, reduced motion, `forced-colors`, print |
+| `base.html` | Three shells (`site` / `neutral` / operations). Customer shell: `qj-site`, `data-bs-theme="dark"`, no `theme.js`, no theme toggle, mobile-first nav (brand, language and cart outside the collapse), bottom bar. Stylesheets through `asset()` (`?v=` mtime) |
+| `partials/_site.html` (new) | `hero()` macro, used by home (full + card), menu, customer dashboard, new reservation |
+| Home | Restaurant name as the headline, tagline, address and phone, then today's dishes, ways to eat (dine in / takeaway / reserve), the booking panel, and "Made for you" (personalisation) last and visually secondary |
+| Menu / food card | Solid toolbar (sticky from 768px), category scroller, quiet card with champagne price, 44px quantity and Add, "Sold out" flag and wording for unavailable items |
+| Dish page | Category link in the breadcrumb, large name and price, "Available now" status, facts with the veg/non-veg mark, ingredient chips, order panel; no inline styles |
+| `app.css` | Shared literals turned into tokens (`--qj-line-strong`, `--qj-on-brand`) for borders and text on brand fills. Blur removed from the food-card chips. Customer-only nav, cart-count and footer rules removed. Operations values unchanged |
+| Glass and gradients | Customer templates no longer use `qj-glass`, `qj-glass-dark` or `btn-glass`. Spotlight, steps, brand mark, avatar, error code and table-pick are solid in `site.css`. The only gradient left is the hero scrim |
+
+## Verification
+
+Visual check with headless Chrome over CDP, using true device metrics.
+Throwaway SQLite database with sample dishes, one Nepali category and
+dishes, and a generated test customer.
+
+- **Pages checked:** home, menu, dish (en and ne), cart, checkout, orders,
+  booking, reservations, preferences, recommendations, password, sign-in,
+  register, 404, and staff/admin sign-in.
+- **Widths:** 360, 390, 768, 1024, 1280 and 1440px.
+- **Result:** no horizontal page overflow, and no customer control under
+  44px.
+- **Fixed during the check:**
+  - the menu toggler showed at desktop width;
+  - language buttons were 38px tall;
+  - the phone nav wrapped onto two rows;
+  - the brand mark squashed on narrow screens;
+  - print rendered pale link and badge colours.
+- **Accessibility modes:**
+  - forced colours: borders and system highlight on the selected language
+    and category;
+  - reduced motion: the hero animation is off;
+  - print: dark on white, with the nav, bars and footer hidden.
+
+| Run | Result |
+| --- | --- |
+| M6 focused (`tests/test_m6_design.py`) | **45 passed** |
+| M5 (`tests/test_m5_catalog.py`) | **114 passed** (16 updated on purpose: 4-field `localized()` results, active language read from the switcher's `aria-pressed` and not from `<html lang>`, the new dish heading, the switcher contrast rule moved to `site.css`; +1 test for `<html lang="en">` with `lang="ne"` content) |
+| SQLite, full suite | **1071 passed, 12 skipped, 0 failed** |
+| MySQL 8.0.46, full suite (`quickjunction_test`) | **1082 passed, 1 skipped, 0 failed** (skip = known issue #32) |
+
+## Known limitations
+
+- Cart, checkout, orders, reservations, account and preferences only
+  inherit the tokens; their layouts are unchanged (M6.2). On phones the
+  cart and checkout tables scroll sideways inside their card.
+- Checkout's "Place order" button is still the operations green.
+- Dashboard picks, cart and order lines show canonical (English) dish
+  names.
+- Interface text is English (Flask-Babel is out of scope); only menu
+  content is bilingual.
+- Hero and dish photos are still the vendored stock images (M7).
+- The contrast test covers the declared token pairs. Text over photos
+  relies on the scrim and was checked by eye.
+- Staff and admin who open customer URLs (`/`, `/menu`) still see them in
+  the operations shell, as before.
+
+## Files changed
+
+New: `app/static/css/site.css`, `app/templates/partials/_site.html`,
+`tests/test_m6_design.py`.
+
+Modified: `app/templates/{base,home}.html`, `app/templates/menu/{index,detail}.html`,
+`app/templates/partials/_menu_card.html`, `app/templates/dashboard/customer.html`,
+`app/templates/reservations/new.html`, `app/static/css/app.css`,
+`app/utils/{locale,imagery}.py`, `tests/test_m5_catalog.py`,
+`docs/{PROJECT_PROGRESS,ARCHITECTURE}.md`, `CHANGELOG.md`.

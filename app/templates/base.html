@@ -17,22 +17,33 @@
    There is no inline script: behaviour lives in static/js/. #}
 {% set role = current_user.role.value if current_user else none %}
 {% set ops = role in ("staff", "admin") %}
+{# Three shells (M6.1). `site` -- guests and customers -- gets the Obsidian +
+   Champagne design system: class qj-site, css/site.css, a fixed dark theme
+   and no theme toggle. Staff/admin sign-in and staff onboarding stay
+   `neutral`: no customer nav, hero or bottom bar, the operations theme.
+   Signed-in staff/admin get the operations shell, as before. #}
+{% set neutral = not ops and (request.endpoint == "account.setup"
+   or (request.endpoint == "auth.login" and (request.view_args or {}).get("portal") in ("staff", "admin"))) %}
+{% set site = not ops and not neutral %}
 <!doctype html>
-<html lang="{{ current_locale() }}" data-bs-theme="light">
+{# lang stays "en": the interface is English; translated menu text carries
+   its own lang="ne" (app/utils/locale.py::localized). #}
+<html lang="en" data-bs-theme="{{ 'dark' if site else 'light' }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
-  <title>{% block title %}{{ "Quick Junction" if ops else restaurant.name }}{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1{{ ', viewport-fit=cover' if site }}">
+  <meta name="color-scheme" content="{{ 'dark' if site else 'light dark' }}">
+  <title>{% block title %}{{ restaurant.name if site else "Quick Junction" }}{% endblock %}</title>
   <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
-  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+  {% if not site %}<script src="{{ url_for('static', filename='js/theme.js') }}"></script>{% endif %}
   {% block head %}{% endblock %}
   <link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-wght-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ asset('css/app.css') }}">
+  {% if site %}<link rel="stylesheet" href="{{ asset('css/site.css') }}">{% endif %}
 </head>
-<body class="d-flex flex-column min-vh-100 {% block body_class %}{% endblock %}">
+<body class="d-flex flex-column min-vh-100{{ ' qj-site' if site }} {% block body_class %}{% endblock %}">
 <a class="visually-hidden-focusable qj-skip-link" href="#main">Skip to content</a>
 
 {# One nav link. `section` is the blueprint (or endpoint prefix) that marks
@@ -60,15 +71,23 @@
 
 {# Customer-menu language switcher (M5). POST + CSRF to /locale, which
    accepts only en/ne and only a local return path. Returns to this page's
-   path; the query string is deliberately not echoed back into the page. #}
+   path; the query string is deliberately not echoed back into the page.
+   The pressed button is the active menu language. #}
 {% macro language_switcher() -%}
-  <form method="post" action="{{ url_for('main.switch_locale') }}" class="qj-lang d-inline-flex gap-1" aria-label="Menu language">
+  <form method="post" action="{{ url_for('main.switch_locale') }}" class="qj-lang" aria-label="Menu language">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="next" value="{{ request.path }}">
     {% for code, label in locale_labels.items() %}
-      <button type="submit" name="lang" value="{{ code }}" lang="{{ code }}" class="btn btn-sm {{ 'btn-primary' if current_locale() == code else 'btn-ghost' }}" aria-pressed="{{ 'true' if current_locale() == code else 'false' }}">{{ label }}</button>
+      <button type="submit" name="lang" value="{{ code }}" lang="{{ code }}" class="qj-lang__btn" aria-pressed="{{ 'true' if current_locale() == code else 'false' }}">{{ label }}</button>
     {% endfor %}
   </form>
+{%- endmacro %}
+
+{# One customer link with its current-page state (bottom bar). #}
+{% macro bar_link(href, label, icon, section) -%}
+  <a class="qj-bottombar__item" href="{{ href }}"{% if (request.endpoint or "").startswith(section) %} aria-current="page"{% endif %}>
+    <i class="bi bi-{{ icon }}" aria-hidden="true"></i><span>{{ label }}</span>{{ caller() if caller }}
+  </a>
 {%- endmacro %}
 
 {% macro theme_toggle(extra="") -%}
@@ -161,23 +180,39 @@
 
     <main id="main" class="qj-main" tabindex="-1">
       <div class="container-fluid qj-container px-3 px-lg-4 px-xxl-5">
+{% elif neutral %}
+{# ====================== Neutral shell (staff/admin sign-in) ====================== #}
+<header class="qj-ops__topbar navbar">
+  {{ brand(product=true) }}
+  <div class="ms-auto">{{ theme_toggle() }}</div>
+</header>
+<main id="main" class="qj-main" tabindex="-1">
+  <div class="container qj-container">
 {% else %}
 {# ====================== Restaurant shell (guest / customer) ====================== #}
+{# Mobile-first: brand, language and cart stay in the bar at every width;
+   only the page links and account controls collapse below lg. #}
 <header class="qj-topnav navbar navbar-expand-lg">
   <div class="container">
-    <nav class="qj-topnav__bar qj-glass w-100" aria-label="Main">
+    <nav class="qj-topnav__bar" aria-label="Main">
       {{ brand() }}
-      <button class="navbar-toggler ms-auto" type="button" data-bs-toggle="collapse"
-              data-bs-target="#nav" aria-controls="nav" aria-expanded="false"
-              aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
+      <div class="qj-topnav__quick">
+        {{ language_switcher() }}
+        <a class="qj-topnav__cart" href="{{ url_for('cart.index') }}"{% if (request.endpoint or "").startswith("cart.") %} aria-current="page"{% endif %}>
+          <i class="bi bi-bag" aria-hidden="true"></i><span class="qj-topnav__cart-label">Cart</span>{% if cart_count %}<span class="qj-count">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                data-bs-target="#nav" aria-controls="nav" aria-expanded="false"
+                aria-label="Toggle navigation">
+          <i class="bi bi-list" aria-hidden="true"></i>
+        </button>
+      </div>
 
       <div class="collapse navbar-collapse" id="nav">
         {# Display convenience only. Every route re-checks the role
            server-side via require_role -- hiding a link is not the control
            (docs/SECURITY.md). Each role sees only links it may use. #}
-        <ul class="navbar-nav mx-lg-auto gap-lg-1">
+        <ul class="navbar-nav mx-lg-auto">
           {% if role %}{{ nav("account.index", "Dashboard") }}{% endif %}
           {{ nav("menu.index", "Menu", "menu.") }}
           {% if role == "customer" %}
@@ -188,14 +223,7 @@
           {% endif %}
         </ul>
 
-        <ul class="navbar-nav align-items-lg-center gap-1">
-          <li class="nav-item">{{ language_switcher() }}</li>
-          <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('cart.index') }}"{% if (request.endpoint or "").startswith("cart.") %} aria-current="page"{% endif %}>
-              <i class="bi bi-bag me-1" aria-hidden="true"></i>Cart{% if cart_count %}<span class="qj-cart-count">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}
-            </a>
-          </li>
-          <li class="nav-item">{{ theme_toggle() }}</li>
+        <ul class="navbar-nav qj-topnav__account">
           {% if current_user %}
             <li class="nav-item dropdown">
               <a class="nav-link d-flex align-items-center gap-2" href="{{ url_for('account.index') }}" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Your account">
@@ -235,6 +263,9 @@
     </main>
   </div>
 </div>
+{% elif neutral %}
+  </div>
+</main>
 {% else %}
   </div>
 </main>
@@ -270,6 +301,15 @@
     </div>
   </div>
 </footer>
+
+{# Phone quick actions (below 576px, customer shell only). Fixed to the
+   bottom inside the safe area; the page reserves its height (site.css). #}
+<nav class="qj-bottombar d-sm-none" aria-label="Quick actions">
+  {{ bar_link(url_for('menu.index'), "Menu", "book", "menu.") }}
+  {% call bar_link(url_for('cart.index'), "Cart", "bag", "cart.") %}{% if cart_count %}<span class="qj-count">{{ cart_count }}<span class="visually-hidden"> items</span></span>{% endif %}{% endcall %}
+  {{ bar_link(url_for('reservations.new') if role == "customer" else url_for('auth.login'), "Book", "calendar-event", "reservations.") }}
+  {{ bar_link(url_for('account.index') if current_user else url_for('auth.login'), "Account" if current_user else "Sign in", "person", "account.") }}
+</nav>
 {% endif %}
 
 {# Flash messages as toasts. Rendered server-side so they are readable
