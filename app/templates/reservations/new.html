@@ -1,26 +1,21 @@
 {% extends "base.html" %}
 {% from "partials/_dashboard.html" import empty %}
+{% from "partials/_site.html" import hero %}
 {% block title %}Book a table &mdash; {{ restaurant.name }}{% endblock %}
-{% block body_class %}qj-has-hero{% endblock %}
-
 {% block hero %}
-<section class="qj-hero qj-hero--band pb-5" aria-labelledby="reserve-title">
-  <img class="qj-hero__img" src="{{ scene_image('reserve') }}" alt="" fetchpriority="high" width="1600" height="900">
-  <div class="container qj-reveal pb-5">
-    <nav aria-label="breadcrumb">
-      <ol class="breadcrumb mb-3">
-        <li class="breadcrumb-item"><a class="link-light" href="{{ url_for('reservations.mine') }}">My reservations</a></li>
-        <li class="breadcrumb-item active text-white-50" aria-current="page">Book a table</li>
-      </ol>
-    </nav>
-    <h1 id="reserve-title">Book a table</h1>
-    <p class="lead mb-0">Choose your evening. Each booking holds your table for two hours. You are booking as <strong>{{ current_user.username }}</strong>.</p>
-  </div>
-</section>
+{{ hero("band", scene_image("reserve"), "Book a table", eyebrow="Reservations",
+        lead="Choose your evening. Each booking holds your table for two hours. You are booking as " ~ current_user.username ~ ".",
+        id="reserve-title") }}
 {% endblock %}
 
 {% block content %}
-<div class="qj-reserve-form qj-glass qj-reveal qj-reveal-2">
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('reservations.mine') }}">My reservations</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Book a table</li>
+  </ol>
+</nav>
+<div class="qj-reserve-form qj-panel qj-reveal qj-reveal-2">
   <form method="get" class="row g-3 align-items-end" novalidate>
     <div class="col-sm-6 col-lg-4">
       <label class="form-label" for="reservation_date"><i class="bi bi-calendar3 me-1" aria-hidden="true"></i>Date</label>

@@ -1,21 +1,15 @@
 {% extends "base.html" %}
 {% from "partials/_dashboard.html" import empty %}
+{% from "partials/_site.html" import hero %}
 {% block title %}Menu &mdash; {{ restaurant.name }}{% endblock %}
-{% block body_class %}qj-has-hero{% endblock %}
 
 {% block hero %}
-<section class="qj-hero qj-hero--band" aria-labelledby="menu-title">
-  <img class="qj-hero__img" src="{{ scene_image('dashboard') }}" alt="" fetchpriority="high" width="1600" height="900">
-  <div class="container qj-reveal">
-    <p class="qj-eyebrow mb-2">The menu</p>
-    <h1 id="menu-title">Discover something <em>delicious</em>.</h1>
-    <p class="lead mb-0">Everything below is available to order right now &mdash; plated fresh, priced honestly.</p>
-  </div>
-</section>
+{{ hero("band", scene_image("dashboard"), "Discover something", em="delicious", after=".", eyebrow="The menu at " ~ restaurant.name,
+        lead="Everything below is available to order right now — plated fresh, priced honestly.", id="menu-title") }}
 {% endblock %}
 
 {% block content %}
-<div class="qj-toolbar qj-glass">
+<div class="qj-toolbar qj-panel">
   <div class="qj-search">
     <i class="bi bi-search" aria-hidden="true"></i>
     <label class="visually-hidden" for="menu-search">Search dishes on this page</label>
@@ -25,7 +19,8 @@
   <nav class="qj-pills" aria-label="Menu categories">
     <a class="qj-pill" href="{{ url_for('menu.index') }}"{% if not selected_category_id %} aria-current="page"{% endif %}>All</a>
     {% for category in categories %}
-      <a class="qj-pill" href="{{ url_for('menu.index', category_id=category.id) }}"{% if selected_category_id == category.id %} aria-current="page"{% endif %}>{{ localized(category).name }}</a>
+      {% set c = localized(category) %}
+      <a class="qj-pill" href="{{ url_for('menu.index', category_id=category.id) }}" lang="{{ c.lang }}"{% if selected_category_id == category.id %} aria-current="page"{% endif %}>{{ c.name }}</a>
     {% endfor %}
   </nav>
   {% if current_user %}

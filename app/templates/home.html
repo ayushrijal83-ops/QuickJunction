@@ -1,61 +1,37 @@
 {% extends "base.html" %}
 {% from "partials/_dashboard.html" import empty %}
+{% from "partials/_site.html" import hero %}
 {% block title %}{{ restaurant.name }}{% if restaurant.tagline %} &mdash; {{ restaurant.tagline }}{% endif %}{% endblock %}
-{% block body_class %}qj-has-hero{% endblock %}
 
 {% set is_customer = current_user and current_user.role.value == "customer" %}
 
+{# Restaurant first (M6.1): the restaurant's own name, tagline, contact
+   details and today's food lead; the software's personalisation features
+   follow as secondary content. #}
 {% block hero %}
-<section class="qj-hero qj-hero--full" aria-labelledby="hero-title">
-  <img class="qj-hero__img" src="{{ scene_image('home') }}" alt="" fetchpriority="high" width="1600" height="900">
-  <div class="container">
-    <div class="row align-items-end g-4">
-      <div class="col-lg-7 qj-reveal">
-        <p class="qj-eyebrow mb-3">Kitchen open &middot; order ahead or dine in</p>
-        <h1 id="hero-title">Every table<br>is a <em>junction</em>.</h1>
-        <p class="lead mb-4">Where good friends, honest plates and unhurried evenings meet. Browse
-          today&rsquo;s kitchen, order ahead, or save the best seat in the house.</p>
-        <div class="d-flex flex-wrap gap-2">
-          <a class="btn btn-primary btn-lg" href="{{ url_for('menu.index') }}"><i class="bi bi-book me-2" aria-hidden="true"></i>Explore the menu</a>
-          {% if is_customer %}
-            <a class="btn btn-glass btn-lg" href="{{ url_for('reservations.new') }}"><i class="bi bi-calendar-heart me-2" aria-hidden="true"></i>Reserve a table</a>
-          {% elif current_user %}
-            <a class="btn btn-glass btn-lg" href="{{ url_for('account.index') }}">Go to your console</a>
-          {% else %}
-            <a class="btn btn-glass btn-lg" href="{{ url_for('auth.register') }}">Create an account</a>
-          {% endif %}
-        </div>
-      </div>
-      <div class="col-lg-5 d-flex justify-content-lg-end qj-reveal qj-reveal-3">
-        <div class="qj-hero__stats qj-glass-dark">
-          <div><strong><i class="bi bi-shop" aria-hidden="true"></i></strong><span>Dine-in</span></div>
-          <div><strong><i class="bi bi-bag" aria-hidden="true"></i></strong><span>Takeaway</span></div>
-          <div><strong><i class="bi bi-phone" aria-hidden="true"></i></strong><span>Order online</span></div>
-          <div><strong>2 h</strong><span>tables held for you</span></div>
-        </div>
-      </div>
-    </div>
+{% call hero("full", scene_image("home"), restaurant.name, eyebrow=restaurant.tagline or "Kitchen open · dine in or take away",
+             lead="Honest plates from our kitchen. Order ahead, dine in, or save the best seat in the house.") %}
+  <div class="d-flex flex-wrap gap-2 mt-4">
+    <a class="btn btn-primary btn-lg" href="{{ url_for('menu.index') }}"><i class="bi bi-book me-2" aria-hidden="true"></i>Explore the menu</a>
+    {% if is_customer %}
+      <a class="btn btn-outline-light btn-lg" href="{{ url_for('reservations.new') }}"><i class="bi bi-calendar-heart me-2" aria-hidden="true"></i>Reserve a table</a>
+    {% elif current_user %}
+      <a class="btn btn-outline-light btn-lg" href="{{ url_for('account.index') }}">Go to your console</a>
+    {% else %}
+      <a class="btn btn-outline-light btn-lg" href="{{ url_for('auth.login') }}"><i class="bi bi-calendar-heart me-2" aria-hidden="true"></i>Sign in to book</a>
+    {% endif %}
   </div>
-</section>
+  {% if restaurant.address or restaurant.phone %}
+    <ul class="qj-hero__facts">
+      {% if restaurant.address %}<li><i class="bi bi-geo-alt" aria-hidden="true"></i>{{ restaurant.address }}</li>{% endif %}
+      {% if restaurant.phone %}<li><i class="bi bi-telephone" aria-hidden="true"></i>{{ restaurant.phone }}</li>{% endif %}
+    </ul>
+  {% endif %}
+{% endcall %}
 {% endblock %}
 
 {% block content %}
-<section class="row g-3 my-2" aria-label="Why {{ restaurant.name }}">
-  {% for icon, title, text in [
-    ("stars", "Personalised", "Suggestions come from your stated preferences and completed orders — and never recommend something your diet excludes."),
-    ("receipt", "Transparent", "Every suggestion shows the facts behind it: cuisine, dietary type, spice level and the price from our menu."),
-    ("shield-lock", "Private", "Our AI explanations run on this server. Nothing about your order or your preferences leaves the restaurant."),
-  ] %}
-    <div class="col-md-4 qj-reveal qj-reveal-{{ loop.index + 1 }}">
-      <div class="qj-action h-100 align-items-start">
-        <span class="qj-action__icon" aria-hidden="true"><i class="bi bi-{{ icon }}"></i></span>
-        <span><h2 class="h6 mb-1">{{ title }}</h2><small>{{ text }}</small></span>
-      </div>
-    </div>
-  {% endfor %}
-</section>
-
-<div class="qj-section-head">
+<div class="qj-section-head mt-0">
   <div>
     <div class="qj-eyebrow">From the kitchen</div>
     <h2>Available today</h2>
@@ -75,19 +51,41 @@
   {{ empty("egg-fried", "The kitchen is between services", "Nothing is available right now. Please check back shortly.") }}
 {% endif %}
 
-<section class="qj-hero qj-hero--card mt-5" aria-labelledby="reserve-title">
-  <img class="qj-hero__img" src="{{ scene_image('reserve') }}" alt="" loading="lazy" width="1600" height="900">
-  <div class="row w-100 align-items-end g-3">
-    <div class="col-lg-8">
-      <p class="qj-eyebrow mb-2">Evenings at {{ restaurant.name }}</p>
-      <h2 class="display-6 mb-2" id="reserve-title">Your table, held for two unhurried hours.</h2>
-      <p class="mb-0 opacity-75">Pick a date, a time and your party size &mdash; we&rsquo;ll show you exactly which tables are free.</p>
+<section class="row g-3 mt-4" aria-label="Ways to eat with us">
+  {% for icon, title, text in [
+    ("shop", "Dine in", "Sit down, order at your table, and let the kitchen take care of the rest."),
+    ("bag", "Takeaway", "Order ahead and collect your food hot from the pass."),
+    ("calendar-heart", "Reserve", "Book a table and we hold it for two unhurried hours."),
+  ] %}
+    <div class="col-md-4 qj-reveal qj-reveal-{{ loop.index + 1 }}">
+      <div class="qj-action h-100 align-items-start">
+        <span class="qj-action__icon" aria-hidden="true"><i class="bi bi-{{ icon }}"></i></span>
+        <span><h3 class="h6 mb-1">{{ title }}</h3><small>{{ text }}</small></span>
+      </div>
     </div>
-    <div class="col-lg-4 text-lg-end">
-      <a class="btn btn-light btn-lg" href="{{ url_for('reservations.new') if is_customer else url_for('auth.login') }}">
-        <i class="bi bi-calendar-event me-2" aria-hidden="true"></i>{{ "Book a table" if is_customer else "Sign in to book" }}
-      </a>
-    </div>
+  {% endfor %}
+</section>
+
+<div class="mt-5">
+  {% call hero("card", scene_image("reserve"), "Your table, held for two unhurried hours.", eyebrow="Evenings at " ~ restaurant.name,
+               lead="Pick a date, a time and your party size — we show you exactly which tables are free.",
+               heading="h2", id="reserve-title", lazy=true) %}
+    <a class="btn btn-primary btn-lg mt-4" href="{{ url_for('reservations.new') if is_customer else url_for('auth.login') }}">
+      <i class="bi bi-calendar-event me-2" aria-hidden="true"></i>{{ "Book a table" if is_customer else "Sign in to book" }}
+    </a>
+  {% endcall %}
+</div>
+
+<section class="qj-secondary mt-5 pt-4 border-top" aria-labelledby="for-you-title">
+  <h2 id="for-you-title" class="mb-3">Made for you</h2>
+  <div class="row g-4">
+    {% for title, text in [
+      ("Personal suggestions", "Suggestions come from your stated preferences and completed orders, and never recommend something your diet excludes."),
+      ("The facts behind them", "Every suggestion shows its cuisine, dietary type, spice level and the price from our menu."),
+      ("Kept in the restaurant", "Explanations are written on this server. Nothing about your orders or preferences leaves the restaurant."),
+    ] %}
+      <div class="col-md-4"><h3>{{ title }}</h3><p class="mb-0">{{ text }}</p></div>
+    {% endfor %}
   </div>
 </section>
 {% endblock %}

@@ -438,6 +438,67 @@ Training is offline and never runs in the web process —
 read-only. Dataset provenance is in `data/README.md`; measured timings,
 what was actually trained, and the honest limitations are in `docs/AI.md`.
 
+## Presentation: shells and the customer design system (M6.1)
+
+`app/templates/base.html` picks one of three shells per request. Display
+only; every route still checks the role itself.
+
+| Shell | Who | Stylesheets | Theme |
+| --- | --- | --- | --- |
+| `site` | guests and customers | `app.css` + `site.css`, `body.qj-site` | fixed dark (Obsidian + Champagne), no toggle |
+| `neutral` | `/login/staff`, `/login/admin`, `/account/setup` | `app.css` | operations light/dark (`theme.js` + toggle) |
+| operations | signed-in staff and admin (sidebar) | `app.css` | operations light/dark (`theme.js` + toggle) |
+
+**CSS architecture.** Plain CSS, no build step.
+
+- `app.css` holds the shared components (cards, forms, food cards, status
+  badges, empty states) and the operations styles. Components are written
+  against semantic `--qj-*` tokens; their defaults are the operations
+  palette.
+- `site.css` is customer-only and loaded only in the `site` branch, with
+  every rule scoped to `.qj-site`. It does four things:
+  1. declares the locked palette as primitives (`--qj-obsidian`,
+     `--qj-champagne`, `--qj-ivory`, `--qj-stone`, `--qj-terracotta` and so
+     on);
+  2. maps the semantic tokens onto them (`--qj-bg`, `--qj-surface`,
+     `--qj-ink`, `--qj-muted`, `--qj-brand`, `--qj-on-brand`,
+     `--qj-accent`, `--qj-line`, ...);
+  3. adds spacing, type, radius, motion and touch-target scales;
+  4. re-declares Bootstrap's `--bs-*` variables. Those are resolved on
+     `:root` in `app.css`, so they would otherwise keep the operations
+     values.
+
+  Shared components restyle through the tokens. `site.css` only names a
+  component where tokens are not enough: the customer nav, language
+  switcher, bottom bar, footer, hero, food card and dish page.
+- Both files are linked through the `asset()` template global
+  (`app/utils/imagery.py`), which appends the file's modification time as
+  `?v=`, so a changed stylesheet is never served stale from a browser cache.
+
+**Customer shell.**
+- The nav is mobile-first: brand, language switcher, cart and menu toggle
+  stay in the bar at every width; only the page links and the account
+  controls collapse below 992px.
+- Below 576px a fixed bottom bar (Menu / Cart / Book / Account) sits inside
+  the safe-area insets. The body reserves its height, so it never covers
+  content.
+- `partials/_site.html::hero()` is the single photo hero (`full`, `band`,
+  `card`), with escaped text arguments. Its overlay is the only gradient in
+  `site.css`; there is no backdrop blur.
+
+**Language.** `<html lang="en">` on every page, because the interface is
+English. `localized()` returns each string's language (`Text.lang`,
+`Text.description_lang`), and templates mark translated menu text
+`lang="ne"`. `site.css` turns off letter-spacing and uppercase for
+`:lang(ne)` and gives Nepali body text a line height of at least 1.6.
+
+**Accessibility.**
+- `tests/test_m6_design.py` checks the declared token pairs against
+  WCAG AA. Ivory on terracotta is 3.2:1, so accent fills use dark text.
+- Focus ring: 3px champagne outline.
+- Touch targets are at least 44px.
+- There are rules for `prefers-reduced-motion`, `forced-colors` and print.
+
 ## HTTP surface
 
 ```

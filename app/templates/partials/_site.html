@@ -1,0 +1,23 @@
+{# Customer building blocks (M6.1). Presentation only; every value is
+   autoescaped -- `title`, `em`, `eyebrow` and `lead` are plain text.
+
+   hero(): one photo hero for every customer page that has one.
+     kind     "full" (home), "band" (page header) or "card" (inline panel)
+     image    a scene_image() URL; decorative, so alt=""
+     title    the heading text; `em` an optional emphasised part after it,
+              `after` plain text after that (e.g. a full stop)
+     heading  "h1" for the page title, "h2" for an inline panel
+     id       the heading id the section is labelled by
+     lazy     true below the fold (no fetchpriority)
+   Anything passed with {% call %} renders after the lead (actions, facts). #}
+{% macro hero(kind, image, title, em=none, after=none, eyebrow=none, lead=none, heading="h1", id="hero-title", lazy=false) -%}
+<section class="qj-hero qj-hero--{{ kind }}" aria-labelledby="{{ id }}">
+  <img class="qj-hero__img" src="{{ image }}" alt="" width="1600" height="900"{% if lazy %} loading="lazy"{% else %} fetchpriority="high"{% endif %}>
+  <div class="{{ 'w-100' if kind == 'card' else 'container' }} qj-reveal">
+    {% if eyebrow %}<p class="qj-eyebrow mb-2">{{ eyebrow }}</p>{% endif %}
+    <{{ heading }} id="{{ id }}">{{ title }}{% if em %} <em>{{ em }}</em>{% endif %}{{ after or "" }}</{{ heading }}>
+    {% if lead %}<p class="lead mb-0">{{ lead }}</p>{% endif %}
+    {{ caller() if caller }}
+  </div>
+</section>
+{%- endmacro %}

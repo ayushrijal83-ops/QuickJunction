@@ -10,9 +10,10 @@ CSP keeps ``img-src 'self'``. Sources are listed in ``static/img/CREDITS.md``.
 
 from __future__ import annotations
 
+import os
 import re
 
-from flask import Flask, url_for
+from flask import Flask, current_app, url_for
 
 #: Page-level photographs, by purpose.
 SCENES = {
@@ -77,8 +78,15 @@ def scene_image(key: str) -> str:
     return url_for("static", filename="img/" + SCENES[key])
 
 
+def asset(filename: str) -> str:
+    """Static URL with the file's modification time as ``?v=``, so a changed
+    stylesheet is fetched again instead of served from a browser cache (M6.1)."""
+    mtime = int(os.path.getmtime(os.path.join(current_app.static_folder, filename)))
+    return url_for("static", filename=filename, v=mtime)
+
+
 def register_imagery(app: Flask) -> None:
-    app.jinja_env.globals.update(dish_image=dish_image, scene_image=scene_image)
+    app.jinja_env.globals.update(dish_image=dish_image, scene_image=scene_image, asset=asset)
 
 
 if __name__ == "__main__":  # self-check: python -m app.utils.imagery

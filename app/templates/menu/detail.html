@@ -1,12 +1,18 @@
 {% extends "base.html" %}
-{% block title %}{{ localized(item).name }} &mdash; {{ restaurant.name }}{% endblock %}
-
-{% block content %}
 {% set text = localized(item) %}
+{% set category_text = localized(item.category) %}
+{% set diet = item.dietary_type.value %}
+{% block title %}{{ text.name }} &mdash; {{ restaurant.name }}{% endblock %}
+
+{# Dish page (M6.1): photo, then name, price and availability, the facts,
+   and one order form -- the same POST /cart/add as before. Only available
+   dishes reach this page (get_public_menu_item); the price is the row's. #}
+{% block content %}
 <nav aria-label="breadcrumb">
   <ol class="breadcrumb">
     <li class="breadcrumb-item"><a href="{{ url_for('menu.index') }}">Menu</a></li>
-    <li class="breadcrumb-item active" aria-current="page">{{ text.name }}</li>
+    <li class="breadcrumb-item"><a href="{{ url_for('menu.index', category_id=item.category.id) }}" lang="{{ category_text.lang }}">{{ category_text.name }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page" lang="{{ text.lang }}">{{ text.name }}</li>
   </ol>
 </nav>
 
@@ -18,28 +24,33 @@
   </div>
 
   <div class="col-lg-5 qj-reveal qj-reveal-2">
-    <p class="qj-eyebrow mb-2">{{ localized(item.category).name }}</p>
-    <h1 class="display-6 mb-2">{{ text.name }}</h1>
-    <p class="qj-food__price qj-price h3 mb-3">{{ item.price | money }}</p>
-    {% if text.description %}<p class="lead fs-6 text-secondary mb-4">{{ text.description }}</p>{% endif %}
+    <p class="qj-eyebrow mb-2" lang="{{ category_text.lang }}">{{ category_text.name }}</p>
+    <h1 class="qj-dish__name" lang="{{ text.lang }}">{{ text.name }}</h1>
+    <p class="qj-dish__price qj-price">{{ item.price | money }}</p>
+    <p class="mb-4"><span class="qj-status qj-status--available"><i class="bi bi-check-circle" aria-hidden="true"></i>Available now</span></p>
+    {% if text.description %}<p class="qj-dish__desc mb-4" lang="{{ text.description_lang }}">{{ text.description }}</p>{% endif %}
 
     <dl class="qj-facts mb-4">
       <div><dt>Cuisine</dt><dd>{{ item.cuisine.value|replace("_", " ")|title }}</dd></div>
-      <div><dt>Dietary type</dt><dd>{{ item.dietary_type.value|replace("_", " ")|title }}</dd></div>
+      <div><dt>Dietary type</dt><dd><span class="qj-veg qj-veg--{{ {'vegetarian': 'veg', 'vegan': 'veg', 'eggetarian': 'egg'}.get(diet, 'non') }} me-1" aria-hidden="true"></span>{{ diet|replace("_", " ")|title }}</dd></div>
       <div><dt>Spice level</dt><dd>{{ item.spice_level.value|replace("_", " ")|title }}</dd></div>
-      {% if item.ingredients %}
-        <div class="w-100" style="grid-column: 1 / -1"><dt>Ingredients</dt><dd>{{ item.ingredients | map(attribute="name") | join(", ") }}</dd></div>
-      {% endif %}
     </dl>
 
-    <div class="qj-panel p-3 p-md-4">
+    {% if item.ingredients %}
+      <h2 class="qj-eyebrow mb-2">Ingredients</h2>
+      <ul class="qj-chips mb-4">
+        {% for ingredient in item.ingredients %}<li>{{ ingredient.name }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+
+    <div class="qj-panel qj-dish__order">
       <h2 class="h6 qj-eyebrow mb-3">Order this</h2>
       <form method="post" action="{{ url_for('cart.add') }}" class="d-flex flex-wrap align-items-end gap-2">
         {{ add_form.csrf_token }}
         <input type="hidden" name="menu_item_id" value="{{ item.id }}">
         <div>
           <label class="form-label" for="quantity">Quantity</label>
-          <input class="form-control" style="width:6rem" type="number" id="quantity" name="quantity" value="1" min="1" max="20">
+          <input class="form-control" type="number" id="quantity" name="quantity" value="1" min="1" max="20">
         </div>
         <button type="submit" class="btn btn-primary btn-lg flex-grow-1"><i class="bi bi-bag-plus me-2" aria-hidden="true"></i>Add to cart</button>
       </form>
