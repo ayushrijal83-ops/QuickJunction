@@ -11,9 +11,10 @@
 </nav>
 
 {% if top %}
-  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div class="qj-page-header">
     <div>
-      <h1 class="h3 mb-1">{{ top.menu_item.name }}</h1>
+      <div class="qj-eyebrow">Top pick</div>
+      <h1>{{ top.menu_item.name }}</h1>
       <span class="text-secondary">{{ top.menu_item.category.name }}</span>
     </div>
     <span class="qj-price h4 mb-0">{{ top.menu_item.price | money }}</span>

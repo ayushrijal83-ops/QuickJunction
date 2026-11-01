@@ -3,8 +3,11 @@
 {% block title %}Recommended for you &mdash; {{ restaurant.name }}{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-  <h1 class="h3 mb-0">Recommended for you</h1>
+<div class="qj-page-header">
+  <div>
+    <div class="qj-eyebrow">For you</div>
+    <h1>Recommended for you</h1>
+  </div>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('preferences.preferences') }}">Edit preferences</a>
     {% if recommendations %}
