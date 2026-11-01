@@ -8,7 +8,7 @@
 {% if cart.lines %}
   <div class="row g-4">
     <div class="col-lg-8">
-      <div class="card">
+      <div class="card d-none d-md-block">
         <div class="card-header"><h2 class="qj-section-title"><i class="bi bi-bag me-2 text-secondary" aria-hidden="true"></i>Your order</h2></div>
         <div class="table-responsive">
           <table class="table align-middle mb-0">
@@ -40,6 +40,33 @@
           </table>
         </div>
       </div>
+
+      <div class="d-md-none">
+        <h2 class="qj-section-title mb-2"><i class="bi bi-bag me-2 text-secondary" aria-hidden="true"></i>Your order</h2>
+        <div class="d-grid gap-2">
+          {% for line in cart.lines %}
+            <div class="qj-panel p-3">
+              <div class="d-flex justify-content-between align-items-start gap-2">
+                <span class="fw-semibold">
+                  {% if line.menu_item %}
+                    {{ line.menu_item.name }}
+                  {% else %}
+                    Item #{{ line.menu_item_id }}
+                  {% endif %}
+                </span>
+                <span class="qj-price">{{ line.line_total | money }}</span>
+              </div>
+              {% if not line.menu_item %}
+                <div class="mt-1"><span class="badge text-bg-secondary">No longer available</span></div>
+              {% endif %}
+              <div class="d-flex justify-content-between text-secondary small mt-1">
+                <span>{{ line.unit_price | money }} each</span>
+                <span>Qty {{ line.quantity }}</span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
       <p class="small text-secondary mt-2 mb-0">
         Every price is recalculated on the server from the current menu when you
         place the order.
@@ -50,14 +77,20 @@
       <div class="card">
         <div class="card-body">
           <h2 class="qj-eyebrow mb-3">Total</h2>
-          <dl class="row mb-3">
-            <dt class="col-7 fw-normal">Subtotal</dt>
-            <dd class="col-5 text-end qj-price mb-1">{{ cart.subtotal | money }}</dd>
+          <dl class="qj-summary mb-3">
+            <div>
+              <dt>Subtotal</dt>
+              <dd class="qj-price">{{ cart.subtotal | money }}</dd>
+            </div>
             {% set tax_rate, tax_amount, total = pricing_preview %}
-            <dt class="col-7 fw-normal">Tax ({{ tax_rate }}%)</dt>
-            <dd class="col-5 text-end qj-price mb-1">{{ tax_amount | money }}</dd>
-            <dt class="col-7">Total</dt>
-            <dd class="col-5 text-end qj-price h5 mb-0">{{ total | money }}</dd>
+            <div>
+              <dt>Tax ({{ tax_rate }}%)</dt>
+              <dd class="qj-price">{{ tax_amount | money }}</dd>
+            </div>
+            <div class="qj-summary__total">
+              <dt>Total</dt>
+              <dd class="qj-price">{{ total | money }}</dd>
+            </div>
           </dl>
 
           {% if cart.has_unavailable %}
@@ -81,7 +114,7 @@
                 {% endfor %}
               </fieldset>
               <p class="small text-secondary">Eating in? Our staff will seat you and take your order at the table.</p>
-              <div class="d-grid">{{ submit("Place order", "btn btn-success btn-lg") }}</div>
+              <div class="d-grid">{{ submit("Place order", "btn btn-primary btn-lg") }}</div>
             </form>
             <a class="btn btn-link w-100 mt-2" href="{{ url_for('cart.index') }}">Back to cart</a>
           {% endif %}

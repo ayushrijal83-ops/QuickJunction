@@ -12,7 +12,7 @@
 </div>
 
 {% if orders %}
-  <div class="card">
+  <div class="card d-none d-md-block">
     <div class="table-responsive">
       <table class="table table-hover align-middle mb-0">
         <thead class="table-light">
@@ -40,6 +40,22 @@
         </tbody>
       </table>
     </div>
+  </div>
+
+  <div class="d-md-none d-grid gap-3">
+    {% for order in orders %}
+      <a class="qj-panel qj-tile d-block p-3" href="{{ url_for('orders.detail', order_id=order.id) }}">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <span class="fw-semibold">Order #{{ order.id }}</span>
+          {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
+        </div>
+        <div class="text-secondary small mt-1">{{ order.created_at.strftime("%d %b %Y, %H:%M") }}</div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <span class="qj-price fw-semibold">{{ order.total | money }}</span>
+          <span class="small text-secondary">View <i class="bi bi-chevron-right" aria-hidden="true"></i></span>
+        </div>
+      </a>
+    {% endfor %}
   </div>
 {% else %}
   {{ empty("bag", "No orders yet", "When you place an order it will appear here with its status.", "Browse the menu", url_for('menu.index')) }}
