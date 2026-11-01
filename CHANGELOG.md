@@ -24,6 +24,14 @@ Each release uses only the sections that apply, in this order:
 
 ### Added
 
+- **Responsive customer order layouts (M6.2).** Cart, checkout and order
+  history each render a mobile-only `.qj-panel` card layout alongside the
+  existing desktop `<table>` (unchanged), sharing the same data, forms and
+  CSRF tokens; cart's per-line update/remove forms are reproduced in the
+  mobile view with a non-colliding input id. `tests/test_m6_2_responsive.py`
+  (11 tests). Details: `docs/PROJECT_PROGRESS.md` "M6.2 — Responsive
+  Customer Order Layouts".
+
 - **Customer design system (M6.1), Obsidian + Champagne.**
   - New `static/css/site.css`, loaded only for guests and customers:
     palette, semantic tokens, spacing/type/radius/motion scales, Bootstrap
@@ -97,6 +105,13 @@ Each release uses only the sections that apply, in this order:
 
 ### Changed
 
+- **M6.2:** checkout's "Place order" button uses the customer brand colour
+  (`btn-primary`) instead of the operations green (`btn-success`). The three
+  preference pages (`/preferences`, `/recommendations`,
+  `/recommendations/explain`) use the same `qj-page-header`/`qj-eyebrow`
+  heading pattern already standard elsewhere. Cart and checkout's totals
+  panels use the existing `.qj-summary` component instead of an ad hoc
+  `<dl class="row">`.
 - **Customer pages (M6.1):**
   - Customer pages are always dark and no longer have a light/dark theme
     toggle; staff and admin keep theirs.

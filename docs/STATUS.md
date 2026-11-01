@@ -111,6 +111,15 @@ a client. CI reports these advisories without failing.
 | MySQL concurrency after M5 | **12 of 12 executed and passed**, stable over 5 consecutive runs |
 | Dependencies after M5 | unchanged (the Devanagari font is a vendored static file, OFL-1.1) |
 | Dependency audit (M2 re-run) | runtime: no known vulnerabilities; AI stack: same 13 advisories, accepted for the disabled-by-default optional model (`docs/SECURITY.md` §18.9) |
+| Locale fix + M6.1 — customer design system | Fixed the unselected language-switcher button (dark on dark over hero photos) and a leak where a Nepali choice carried into the staff/admin console; then the Obsidian + Champagne customer design system: three-shell `base.html` (site/neutral/operations), mobile-first nav with a phone bottom bar, redesigned home/menu/dish pages. Presentation only: no route, model, migration, authorization, CSRF, availability, order or security-policy change. Details: `docs/PROJECT_PROGRESS.md` "M6.1 — Customer Design System Foundation" |
+| Migration head after locale fix + M6.1 | **`c2d5f8a1b3e6`** — unchanged (presentation-only, no schema change) |
+| SQLite after locale fix + M6.1 | **1071 passed, 12 skipped, 0 failed** (12 = MySQL-only concurrency tests) |
+| MySQL 8.0.46 after locale fix + M6.1 (`quickjunction_test`) | **1082 passed, 1 skipped, 0 failed** (skip = known issue #32); all 12 concurrency tests executed and passed |
+| M6.2 — responsive customer order layouts | Checkout's "Place order" button rebranded from the operations green to the customer brand colour; the three preference pages' headings standardized to the `qj-page-header`/`qj-eyebrow` pattern already used elsewhere; cart, checkout and order-history pages now render a second, mobile-only `.qj-panel` card layout (`d-md-none`) alongside the unchanged desktop `<table>` (`d-none d-md-block`), sharing the same forms, fields and CSRF tokens; the cart and checkout totals panels now use the existing `.qj-summary`/`.qj-summary__total` component instead of ad hoc markup. Presentation only: no route, model, migration, authorization, CSRF, pricing or order-logic change. Commits: `6357098`, `2e549022a0c43985f2719fb46d88a119b0e0c6a9` |
+| Migration head after M6.2 | **`c2d5f8a1b3e6`** — unchanged (presentation-only, no schema change) |
+| Tests collected after M6.2 | **1104** (11 new in `tests/test_m6_2_responsive.py`) |
+| SQLite after M6.2 | **1092 passed, 12 skipped, 0 failed** — verified 2026-11-01 |
+| MySQL after M6.2 | **not run.** The 12 MySQL-only concurrency tests have not been re-verified against a real MySQL instance since M6.2 landed; their last confirmed pass was at the locale fix + M6.1 state above |
 
 ---
 
@@ -135,7 +144,8 @@ kitchen board, tables, reservations (fixed slots), payments and admin refunds,
 staff/admin discounts, inventory (stock ledger, recipes, sale deduction), sales
 reports, admin payments and audit views, preferences, deterministic
 recommendations, role dashboards, security headers (CSP, anti-framing,
-no-store), audit log.
+no-store), audit log, responsive mobile card layouts for cart/checkout/order
+history alongside the unchanged desktop tables (M6.2).
 
 **Local AI:** default adapter is
 `models/qwen3-0.6b-quickjunction-lora-v4` (`config.py`), behind a deterministic
@@ -182,3 +192,21 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | — | Runtime DB account also holds DDL privileges; from the 2026-10-03 audit; scheduled for Phase 1. Customer dine-in and the reservation cap were closed in M2; public `/register/staff` was removed in M4 |
 | — | No "add items to an open order": a seated table takes one open order at a time (M3), so a party's follow-up order needs a new order once the table is freed |
 | — | AI-stack dependency advisories (above) |
+| — | No partial/split payment ledger or outstanding-balance workflow: `payments.order_id` is unique, so an order is paid in full in one transaction or not at all; refunds alone can be partial. From the 2026-11-01 project health audit; a product-scope decision, not yet made |
+| — | No automated backup/restore tooling exists (see "What does NOT exist" above); from the 2026-11-01 audit, which also re-confirmed the inventory check-then-deduct race (#35/36) and the in-process-only rate limiter (#5) are both still open |
+
+---
+
+## Next planned milestone
+
+**M7 — Production Reliability Foundation** (not started). Addresses the
+highest-severity gaps found in the 2026-11-01 project health audit, in this
+proposed order: (1) automated database backup and a tested restore
+procedure; (2) separate the database runtime account (DML only) from a
+migration-only account (DDL), so the application can no longer
+`ALTER`/`DROP` a table; (3) close the inventory stock-reservation race
+between the shortage check and `deduct_for_order()`; (4) replace the
+in-process rate limiter with a shared-store implementation, once a
+multi-worker deployment is planned. Deliberately not a new customer-facing
+feature — the audit's own instruction was not to add features before
+resolving foundational reliability issues. No task has started.

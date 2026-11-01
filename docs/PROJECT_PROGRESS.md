@@ -12,7 +12,8 @@
 
 Records work that was implemented and verified, milestone by milestone.
 
-Last updated: 2026-10-08 (M6.1 — customer design system foundation; see
+Last updated: 2026-11-01 (M6.2 — responsive customer order layouts; see
+[M6.2](#m62--responsive-customer-order-layouts-)). Before that: 2026-10-08 (M6.1 — customer design system foundation; see
 [M6.1](#m61--customer-design-system-foundation-)). Before that: M5 locale-switching fix, then M5 — menu & restaurant foundation; see
 [M5](#m5--menu--restaurant-foundation-)). Before that: M4 — account security & staff onboarding
 ([M4](#m4--account-security--staff-onboarding-)). Before that: 2026-10-03 (M0 — production foundation: documentation
@@ -1186,6 +1187,7 @@ No schema change was made in M08; no migration was added.
 | 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | **blocks production** — roadmap Phase 2 *[M0]* |
+| 40 | No partial/split payment ledger or outstanding-balance workflow: `payments.order_id` is unique, so an order is paid in full in one transaction or not at all; refunds alone can be partial. Found in the 2026-11-01 project health audit | a product decision, not a bug — relevant if split bills/installments are ever needed |
 
 Full ranked pre-production list: `docs/SECURITY.md` §17.
 
@@ -3603,3 +3605,86 @@ Modified: `app/templates/{base,home}.html`, `app/templates/menu/{index,detail}.h
 `app/templates/reservations/new.html`, `app/static/css/app.css`,
 `app/utils/{locale,imagery}.py`, `tests/test_m5_catalog.py`,
 `docs/{PROJECT_PROGRESS,ARCHITECTURE}.md`, `CHANGELOG.md`.
+
+# M6.2 — Responsive Customer Order Layouts ✅
+
+Date: 2026-11-01. Three tasks on `main`, directly: Task 1 (checkout button
+branding), Task 2 (preference page headings), Task 3 (responsive cart,
+checkout and order-history layouts). Presentation only: no route, model,
+migration, authorization, CSRF, pricing or order-logic change. Closes the
+"cart, checkout, orders... layouts are unchanged (M6.2)" limitation recorded
+in the M6.1 section above.
+
+## What this closes from M6.1
+
+- Checkout's "Place order" button is no longer the operations green
+  (`btn-success`); it is `btn-primary`, the same customer-brand class the
+  cart's "Go to checkout" button already used, resolved by the existing
+  `.qj-site .btn-primary` champagne mapping in `site.css` — no new CSS.
+- The three preference pages (`/preferences`, `/recommendations`,
+  `/recommendations/explain`) now use the `qj-page-header`/`qj-eyebrow`
+  pattern already standard on cart, checkout and order history, instead of
+  a plain `<h1 class="h3">`.
+- Cart, checkout and order-history tables no longer scroll sideways on a
+  phone with no visual cue. Each page now renders two layouts from the same
+  data: the existing `<table>`, wrapped `d-none d-md-block` and otherwise
+  byte-identical; and a new, mobile-only `d-md-none` block of `.qj-panel`
+  rows (the same component already used by `reservations/mine.html`'s
+  tiles), visible below the 768px breakpoint. Cart's per-line quantity
+  update and remove forms are reproduced in the mobile block with the same
+  action, fields and CSRF token as the desktop row; the mobile quantity
+  input uses a distinct id (`q-mobile-<item>`) to avoid a duplicate-id
+  collision with the desktop row, since both exist in the DOM at once and
+  only one is shown via CSS.
+- Cart and checkout's totals panels now use the existing `.qj-summary` /
+  `.qj-summary__total` component (defined in `app.css`, previously unused)
+  instead of an ad hoc `<dl class="row">`.
+
+## Verification
+
+`tests/test_m6_2_responsive.py` (new, 11 tests): both layouts render from
+the same data for a given fixture; the mobile cart forms carry the same
+action/fields/CSRF token as the desktop row, with a non-colliding input id;
+the clear-cart form and its `data-confirm` dialog still appear exactly once;
+checkout's order-type radios, CSRF and `btn btn-primary btn-lg` submit are
+unchanged; a real `checkout()` call still returns 302 to `/orders/<id>`; the
+`.qj-summary`/`.qj-panel` components and the `.qj-site .btn`/
+`.form-control-sm` 44px touch-target rule are still declared in CSS.
+
+Live verification: registered a throwaway customer through the normal
+`/register` flow, added an item, and walked cart → checkout → order history
+end to end in a real browser session; the placed order appeared correctly
+in both the desktop table and (once forced visible) the mobile block.
+
+Mobile-width overflow check: `resize_window` does not change the actual
+viewport in this environment (`window.innerWidth` stayed 1280 after every
+resize attempt — a tooling limitation, not a code issue), so a genuine
+360px-wide screenshot could not be taken. As a substitute, each page's
+`.d-md-none` block was cloned into an isolated, explicitly 360px-wide
+off-screen container and measured: `scrollWidth` was exactly 360 with zero
+overflowing descendant elements on all three pages. This is real layout
+measurement, not a visual screenshot, and should be spot-checked on an
+actual device if pixel-perfect confirmation is wanted.
+
+| Run | Result |
+| --- | --- |
+| `tests/test_m6_2_responsive.py` | **11 passed** |
+| SQLite, full suite | **1092 passed, 12 skipped, 0 failed** |
+| MySQL | not run for this work — see `docs/STATUS.md` |
+
+## Known limitations
+
+- The 12 MySQL-only concurrency tests were not re-run against a real MySQL
+  instance for this work; the suite above is SQLite only.
+- Mobile-width verification is a DOM/CSS measurement substitute, not a real
+  device or browser-viewport screenshot, for the reason noted above.
+
+## Files changed
+
+Modified: `app/templates/cart/index.html`, `app/templates/orders/checkout.html`,
+`app/templates/orders/history.html`, `app/templates/preferences/{explain,form,recommendations}.html`.
+
+New: `tests/test_m6_2_responsive.py`.
+
+Commits: `6357098` (preference page headings), `2e549022a0c43985f2719fb46d88a119b0e0c6a9`
+(checkout button branding, responsive layouts, new test file).
