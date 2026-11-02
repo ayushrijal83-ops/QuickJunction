@@ -1,0 +1,14 @@
+# Quick Junction -- operations tooling (Milestone 07.2).
+#
+#   pip install -r requirements-ops.txt
+#
+# Needed for: scripts/backup_database.py and scripts/restore_database.py
+# (backup encryption at rest). Not required to run the web application or
+# the test suite -- those have no dependency on this file.
+#
+# ---------------------------------------------------------------------
+
+# Fernet symmetric encryption (AES-128-CBC + HMAC-SHA256) for backups at
+# rest. A maintained, audited implementation -- scripts/_backup_crypto.py
+# never implements its own cryptography.
+cryptography==50.0.2

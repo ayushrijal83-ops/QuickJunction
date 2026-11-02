@@ -656,22 +656,318 @@ Full details: `docs/DATABASE.md` and `docs/MYSQL_SETUP_HANDOFF.md` (section 10).
 
 ## 19. Backup and restore
 
-Backups are **not** made automatically by the setup scripts. Before a reset, an
-upgrade or moving computers, make one. In PowerShell (it asks for the root password):
+Milestone 7.2 added a backup/restore tool (`scripts/backup_database.py` and
+`scripts/restore_database.py`). **Backups are still not made automatically**
+-- nothing runs them on a schedule unless an operator sets that up
+explicitly (see "Scheduling" below). Before a reset, an upgrade or moving
+computers, make one.
+
+### Architecture
+
+A backup is a `mysqldump --single-transaction --routines
+--default-character-set=utf8mb4` dump of the database named in
+`DATABASE_URL` (the same flags this section documented by hand before M7.2
+-- a full structural + data dump, consistent for InnoDB without locking the
+live application). The tool then:
+
+1. Verifies the dump is actually complete -- not just that `mysqldump`
+   returned 0 -- by checking for the header line every dump starts with and
+   the completion line MySQL only ever writes as the very last line of a
+   clean dump. A truncated dump (killed process, full disk) is rejected
+   here, before it is ever written under a name that looks like a real
+   backup.
+2. Encrypts it at rest by default with Fernet (AES-128-CBC +
+   HMAC-SHA256, from the maintained `cryptography` package -- nothing
+   hand-rolled; see "Encryption" below).
+3. Writes it **atomically**: to a temp file in the backup directory, then
+   `os.replace()`s it into its final name. A crash mid-write never leaves a
+   half-written file under the final name.
+4. Computes a SHA-256 checksum of the final (encrypted) file and records it,
+   alongside the database name, timestamp, file size, the `mysqldump`
+   version, and a per-table row count snapshot, in a `.json` metadata file
+   next to the backup -- `scripts/_backup_common.py:BackupMetadata`.
+5. Applies retention: deletes the oldest backups of that database beyond a
+   configurable count, but **never deletes the last remaining backup**, even
+   if retention is configured as 0.
+
+The restore tool (`scripts/restore_database.py`) verifies the backup's
+checksum against its metadata **before touching any database** -- a
+corrupted or tampered backup is refused at that point, with no connection
+attempted. It then connects to the target and, before running anything
+through `mysql`, refuses unconditionally if the target already has any
+tables at all (see "Restore procedure" below -- this is the actual
+protection against overwriting existing data; it does not trust the
+database name or the production-confirmation flags). Only then does it
+restore, and afterwards it re-checks every table's row count against what
+was recorded at backup time, reporting any mismatch.
+
+mysqldump invocations from M7.2's correction pass (2026-11-02 onward) also
+pass `--skip-add-drop-table`, so a freshly made backup's SQL contains no
+`DROP TABLE IF EXISTS` statements -- a second, independent layer: even if
+the empty-target check above were ever bypassed by a code change, restoring
+such a backup into a database with a same-named table now fails with a
+plain MySQL "table already exists" error instead of silently replacing it.
+Backups made before this change do still contain `DROP TABLE IF EXISTS`;
+the empty-target check is what actually protects them, not the dump's own
+content.
+
+Install the one extra dependency these two scripts need:
 
 ```powershell
-mysqldump -u root -p --single-transaction --routines --default-character-set=utf8mb4 quick_junction > D:\qj_backup.sql
+pip install -r requirements-ops.txt
 ```
 
-Restore into an **existing, empty** `quick_junction` database:
+(Not required to run the web app, the test suite, or any other script --
+only backup/restore encryption needs it.)
+
+### Configuration
+
+Everything is an optional environment variable; sensible defaults apply if
+none are set.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | (from `.env`) | What `backup_database.py` backs up. `restore_database.py` uses it only for host/port/credentials -- the database name always comes from `--target` |
+| `QJ_BACKUP_DIR` | `..\quickjunction_backups` (**outside** the repository, one level above the project folder -- see "Never store backups inside the Git repository" below) | Where backup files and their metadata are written |
+| `QJ_BACKUP_ENCRYPTION_KEY_FILE` | none | Path to a Fernet key file (see "Encryption-key management") |
+| `QJ_BACKUP_RETENTION_COUNT` | `7` | How many backups of one database to keep |
+| `QJ_MYSQLDUMP_PATH` / `QJ_MYSQL_PATH` | auto-detected (PATH, then the standard `Program Files\MySQL\MySQL Server *` install folder -- the same search `scripts\find_mysql.bat` already does) | Override the full path to `mysqldump.exe` / `mysql.exe` |
+
+**Never store backups inside the Git repository.** The default backup
+directory is a sibling of the project folder, not a subdirectory of it, so
+this holds even if `.gitignore` is ever misconfigured. `.gitignore` also
+excludes `/backups/`, `*.sql.enc`, and this tool's own plaintext-backup file
+name shape (`<database>_<timestamp>.sql`, matched narrowly so an unrelated
+`.sql` file such as a schema or fixture is not also hidden) as a second
+layer of protection, in case `QJ_BACKUP_DIR` is ever pointed inside the
+repository -- in any subdirectory -- anyway. This matters more now that
+`--no-encryption` is a documented flag: a plaintext backup made that way is
+just as sensitive as an encrypted one and needs the same protection.
+
+### Encryption-key management
 
 ```powershell
-cmd /c "mysql -u root -p --default-character-set=utf8mb4 quick_junction < D:\qj_backup.sql"
+python scripts\backup_database.py --generate-key C:\secure\qj_backup.key
 ```
 
-(`cmd /c` is used because PowerShell's `<` does not work for input redirection.)
-Keep backup files out of the project folder and out of Git — they contain accounts,
-orders and audit data.
+Creates a new Fernet key and refuses to overwrite an existing file. **Store
+this key somewhere other than the backup directory and other than this
+repository** -- a USB key, a password manager, a secrets vault. Losing it
+makes every backup encrypted with it permanently unrecoverable; there is no
+escrow or recovery path (a known limitation -- see below). The key itself is
+never written into a backup file or its metadata; only a SHA-256
+*fingerprint* of the key is recorded, so a restore can tell you "this is not
+the right key" without the key ever being readable from anything that gets
+backed up.
+
+For local development only, `--no-encryption` writes a plain `.sql` backup
+with no key required.
+
+### Running a backup
+
+```powershell
+python scripts\backup_database.py
+```
+
+Uses `DATABASE_URL` from `.env`, the default backup directory, and
+`QJ_BACKUP_ENCRYPTION_KEY_FILE` if set (otherwise pass `--key-file`
+explicitly, or `--no-encryption`). On success it prints the backup's file
+name, size and checksum; on any failure it prints what went wrong and exits
+non-zero, having left nothing under a completed-looking name.
+
+### Scheduling
+
+The tool does not register itself as a scheduled task -- that is a
+deliberate operator action, not something that happens silently. Set it up
+once, on the real installation:
+
+**Windows (Task Scheduler)**, daily at 02:00, running as the service account
+the application itself runs under:
+
+```powershell
+schtasks /create /tn "QuickJunction-Backup" /tr "D:\Projects\QuickJunction\.venv\Scripts\python.exe D:\Projects\QuickJunction\scripts\backup_database.py" /sc daily /st 02:00 /ru SYSTEM
+```
+
+**Linux (cron)**, same schedule:
+
+```
+0 2 * * * /opt/quickjunction/.venv/bin/python /opt/quickjunction/scripts/backup_database.py >> /var/log/quickjunction-backup.log 2>&1
+```
+
+Either way, set `QJ_BACKUP_ENCRYPTION_KEY_FILE` (and the other
+`QJ_BACKUP_*` variables, if not using the defaults) in the environment that
+scheduled task/cron job runs under -- not on the command line, so the path
+never appears in a process list or a scheduler's own log of what it ran.
+
+**What this does not include**: success/failure alerting. `docs/PRODUCTION_READINESS.md`
+item P1 tracks that as still open.
+
+### Retention policy
+
+`QJ_BACKUP_RETENTION_COUNT` (default 7) backups are kept per database;
+older ones are deleted automatically after each successful backup. This is
+**count-based, not calendar-based** -- "7" means the 7 most recent backups,
+regardless of how many days that spans. The tool is guaranteed to never
+delete the last remaining backup of a database, even if retention is
+configured as 0 -- there is always at least one to restore from. This is
+backup retention only; it has nothing to do with audit-log retention
+(tracked separately as known issue #8).
+
+### Restore procedure
+
+**Into a disposable database (safe, the default mode)** -- the target name
+must end in `_test`:
+
+```powershell
+python scripts\restore_database.py --backup <path-to-.sql-or-.sql.enc> --target quick_junction_test --key-file C:\secure\qj_backup.key
+```
+
+The target database must **already exist** (the tool never creates one --
+create it the same way section 10 creates the main database, just with a
+`_test`-suffixed name and the application account granted on it).
+
+**Into a real/production database** -- deliberately harder, on purpose:
+
+```powershell
+python scripts\restore_database.py --backup <path> --target quick_junction --allow-production-target --confirm "RESTORE quick_junction" --key-file C:\secure\qj_backup.key
+```
+
+Both `--allow-production-target` and a `--confirm` string that exactly
+matches `"RESTORE <target name>"` are required -- there is no shorter flag
+or environment variable that skips this, and it has to be typed out for the
+specific target database every time, the same pattern
+`scripts\reset_database.bat` already uses for its own destructive action.
+Restoring into any of MySQL's own system schemas (`mysql`, `sys`,
+`information_schema`, `performance_schema`) is refused unconditionally, with
+no override.
+
+**The target must be completely empty (no tables at all), for every target,
+with no override.** Immediately before running anything through `mysql`,
+the tool runs `SHOW TABLES` against the target and refuses if it returns
+even one table -- `_test`-suffixed or not, and regardless of
+`--allow-production-target`/`--confirm`. This check does not depend on the
+target's name and cannot be bypassed by any flag; if it fails, create a
+genuinely empty database for the restore (the same way section 10 creates
+the main one) or drop the existing tables yourself first, deliberately,
+outside this tool. **Known limitation**: this is a check, not a lock -- if
+something else creates a table in the target in the brief window between
+this check and the restore that follows, that race is not caught. The
+target this tool expects is one handed to it exclusively for the restore,
+not a database something else is concurrently writing to.
+
+Either way, the tool verifies the backup's checksum (and, if encrypted, that
+the given key actually matches) **before** attempting to connect to the
+target at all, confirms the target is empty, then restores, then reports a
+per-table row-count comparison against what was recorded at backup time. A
+`mysqldump`/`mysql` subprocess that does not finish within 3600 seconds is
+aborted and reported as a clear, operator-facing error rather than a raw
+traceback; for a restore, that error says plainly that the target may
+already be partially restored, since `mysql` applies statements
+sequentially and a killed process does not roll back ones already run. If
+the post-restore row-count check itself hits a MySQL error (for example a
+table that was renamed or dropped between backup time and restore time),
+that is also reported as a clear error that says the restore already
+completed before the check failed -- never silently treated as if nothing
+happened.
+
+### Recovery limitations
+
+- **No key escrow.** One lost key file is unrecoverable data for every
+  backup encrypted with it. Store it somewhere durable and separate from the
+  server.
+- **No off-machine copies yet.** The default backup location is a different
+  folder, not a different machine -- a single-disk failure that takes the
+  server down takes the backups with it unless an operator copies them
+  elsewhere. Tracked as `docs/PRODUCTION_READINESS.md` item P2.
+- **No automated/unattended restore drills.** The tool and its test
+  (`tests/test_backup_restore.py::test_live_backup_and_restore_drill`) make
+  an automated drill possible, but nothing runs it periodically yet -- see
+  item P4.
+- **Target database must pre-exist and be completely empty, for every
+  target.** This is enforced at restore time (a `SHOW TABLES` check, see
+  "Restore procedure" above) -- it is not just a convention, and not
+  something a corrected-at-rest backup file guarantees by itself.
+  Previously this guide claimed a non-empty target would simply fail with a
+  MySQL error on its own; that claim was wrong (`mysqldump` enables
+  `--add-drop-table` by default, so an old-format dump restoring over a
+  same-named table would have silently replaced it, not failed) and has
+  been corrected here -- the explicit check described above is the real
+  protection.
+- **The empty-target check is a check, not a lock (time-of-check/time-of-use).**
+  See the limitation noted under "Restore procedure" above.
+- **The live MySQL drill evidence below (2026-11-01) predates this
+  correction.** It demonstrates the checksum, encryption and row-count
+  machinery against a real server, but it restored into a target that
+  happened to be empty -- it never exercised the empty-target *check*
+  itself (that logic did not exist yet). The check is covered by mocked
+  tests (`test_restore_refuses_non_empty_target_and_never_invokes_mysql` and
+  related); it has not yet been re-run as part of a fresh live drill.
+- **No disaster-recovery runbook yet** (which scenario gets which response,
+  RPO/RTO targets) -- tracked as item P5.
+
+### Evidence: the 2026-11-01 disposable-MySQL drill
+
+Run against a real MySQL 8.0.46 server, entirely inside disposable
+`*_test` databases (`quick_junction_test` as the source,
+`quick_junction_restore_test` as a *separate* restore target -- neither the
+real `quick_junction` database nor its data were touched at any point):
+
+1. Applied the full migration chain to `quick_junction_test` (head
+   `c2d5f8a1b3e6`, 19 tables) and populated it with representative data:
+   `scripts/seed_demo.py`'s usual 3 categories, 18 menu items, 3 accounts,
+   6 tables, plus one real order placed through `app.services.orders.checkout`
+   (so `orders` and `order_items` were populated through the actual
+   application code, not hand-inserted).
+2. Recorded a baseline: 19 tables, their row counts, and the exact contents
+   of the `users`, `orders`, `order_items` and a `menu_items` sample.
+3. Ran `backup_database.py` against it: produced a 53,412-byte encrypted
+   backup from a 39,985-byte raw dump, checksum
+   `5b5fef1b9b879653...`, metadata recording all 19 tables' row counts
+   matching the baseline exactly.
+4. Independently recomputed the SHA-256 of the backup file outside the
+   tool -- matched the recorded checksum. Confirmed the file's bytes are
+   genuinely Fernet ciphertext, not readable SQL.
+5. **Corrupted-backup rejection, for real**: copied the backup, flipped a
+   few bytes in the middle, and ran a restore against it -- refused at the
+   checksum-verification step with a clear error, before any database
+   connection was attempted.
+6. **Restore-failure handling, for real**: attempted a restore into a
+   `_test`-suffixed database that does not exist -- refused with a clear
+   "cannot connect, this tool never creates one" error. Attempted a restore
+   into the real `quick_junction` name without `--allow-production-target`
+   -- refused immediately, before even checking the backup file, with the
+   exact confirmation phrase required printed back.
+7. Restored the verified backup into the **separate** `quick_junction_restore_test`
+   database. Result: all 19 tables present with names matching the source
+   exactly; every table's row count matched the metadata recorded at backup
+   time (reported per-table by the tool); independently re-queried the
+   restored `users`, `orders`, `order_items` and `menu_items` sample rows
+   and compared them directly against the baseline -- byte-for-byte
+   identical, including the order's snapshotted price (`Rs. 562.74` total,
+   `Rs. 249.00` unit price, `"Paneer Tikka"` name snapshot).
+8. Confirmed afterward that `quick_junction_test` (the source) still had
+   exactly its original data, and that the real `quick_junction` database's
+   row counts were unaffected by any of the above.
+
+`tests/test_backup_restore.py` has 40 tests: 39 run with no MySQL server at
+all (the `mysqldump`/`mysql` subprocess calls, and `pymysql.connect` for the
+empty-target and row-count checks, are mocked, so metadata, checksum,
+encryption, retention, the empty-target gate, timeout handling, and every
+other safety gate above are exercised in isolation), plus
+`test_live_backup_and_restore_drill`, which repeats steps 1-3 and 7 above
+automatically whenever `TEST_DATABASE_URL` points at a disposable `*_test`
+MySQL database -- the same convention `tests/test_mysql_concurrency.py`
+already uses. The 12 tests added in the 2026-11-02 correction pass cover:
+`--skip-add-drop-table` being present in the `mysqldump` command;
+`subprocess.TimeoutExpired` from either `mysqldump` or `mysql` becoming a
+clear `BackupError` instead of a raw traceback; a non-empty target being
+refused (proving the `mysql` restore subprocess is never invoked) for both
+a `_test`-suffixed and a fully-confirmed production-named target; an empty
+target being allowed to proceed; a post-restore row-count check that hits a
+MySQL error being wrapped in a clear `BackupError` with the original
+exception preserved as its cause; and the MySQL option-file password
+quoting correctly handling `#`, quotes and backslashes while rejecting a
+newline, carriage return or NUL byte outright.
 
 ---
 

@@ -53,6 +53,21 @@ instance/
 *.sqlite3
 
 # ---------------------------------------------------------------
+# Database backups (M7.2) -- defense in depth: the default backup
+# directory lives outside the repository already (see
+# scripts/_backup_common.py DEFAULT_BACKUP_DIR), this only guards
+# against QJ_BACKUP_DIR ever being pointed inside the repo by mistake,
+# in any subdirectory, including with --no-encryption's plaintext .sql
+# output. The pattern below matches only this tool's own backup file
+# names (<database>_<YYYYMMDDTHHMMSSZ>.sql, see backup_database.py's
+# `timestamp` / `stem`), not an unrelated hand-written .sql file such
+# as a schema or fixture.
+# ---------------------------------------------------------------
+/backups/
+*.sql.enc
+*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.sql
+
+# ---------------------------------------------------------------
 # Logs
 # ---------------------------------------------------------------
 logs/

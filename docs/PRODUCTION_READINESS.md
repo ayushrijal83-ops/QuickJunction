@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry), M4 (account security and staff onboarding) and M5 (menu & restaurant foundation), reviewed 2026-10-08.
+Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry), M4 (account security and staff onboarding) and M5 (menu & restaurant foundation), reviewed 2026-10-08. M7.2 (database backup/restore tooling) reviewed 2026-11-01.
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -60,12 +60,12 @@ Overall: **NOT READY FOR PRODUCTION.**
 
 | # | Item | Status | Current state (evidence) | Required for READY |
 | --- | --- | --- | --- | --- |
-| P1 | Automated backups | NOT STARTED | Manual `mysqldump` commands in `docs/DATABASE_SETUP_GUIDE.md` §19 | Scheduled consistent dumps with success/failure alerting |
-| P2 | Off-machine backups | NOT STARTED | — | Copied to separate storage with write-only credentials |
-| P3 | Encryption | NOT STARTED | — | Backups encrypted; key held off the server, with escrow |
-| P4 | Restore testing | NOT STARTED | — | Automated periodic restore into a scratch database with checks; one manual drill timed against the RTO |
+| P1 | Automated backups | IN PROGRESS | M7.2: `scripts/backup_database.py` -- `mysqldump --single-transaction`, atomic write (temp file + verified + renamed), SHA-256 checksum, metadata sidecar. Proven against a real MySQL 8.0.46 database (`docs/DATABASE_SETUP_GUIDE.md` §19). **Not yet scheduled to run unattended** -- `schtasks`/cron commands are documented but an operator must register them; there is no success/failure alerting | Wire up the documented scheduled task + alerting on a real installation |
+| P2 | Off-machine backups | NOT STARTED | The default backup directory is outside the repository (`DEFAULT_BACKUP_DIR` in `scripts/_backup_common.py`) but still on the same machine | Copied to separate storage with write-only credentials |
+| P3 | Encryption | IN PROGRESS | M7.2: Fernet (AES-128-CBC + HMAC-SHA256, via the maintained `cryptography` package) encrypts every backup by default; the key lives in its own file, never inside the repository or the backup itself -- only its SHA-256 fingerprint is recorded. Proven: an encrypted backup's bytes were confirmed non-plaintext and restored correctly in the live drill | **No key escrow** -- losing the one key file loses every backup encrypted with it; no second-party/split-key recovery path exists |
+| P4 | Restore testing | IN PROGRESS | M7.2: a real restore was run and independently verified -- see the 2026-11-01 drill evidence in `docs/DATABASE_SETUP_GUIDE.md` §19. `tests/test_backup_restore.py::test_live_backup_and_restore_drill` repeats this automatically whenever `TEST_DATABASE_URL` is set | Still a manual/opt-in drill, not a periodic automated one; no RTO has been agreed to time it against |
 | P5 | Disaster recovery procedure | NOT STARTED | — | Written per scenario (disk loss, bad migration, compromise, lost key); RPO/RTO agreed |
-| P6 | Retention | NOT STARTED | Audit log and backups kept indefinitely | Retention periods defined and enforced |
+| P6 | Retention | IN PROGRESS | M7.2: `scripts/backup_database.py` enforces a configurable **count-based** retention (`QJ_BACKUP_RETENTION_COUNT`, default 7) after every successful backup, and is guaranteed to never delete the last remaining backup (tested: `test_retention_keeps_newest_and_deletes_oldest`, `test_retention_never_deletes_down_to_zero`) | This is backup retention only -- audit-log retention (issue #8) is separate and still not enforced. Count-based, not calendar/time-based |
 
 ## 4. Release management
 
@@ -100,7 +100,7 @@ No capacity statement may be published until these are measured.
 | O2 | Admin bootstrap | BLOCKED (by D1) | Command exists (D10); no installation yet. M4: the owner can change the operator-chosen password at `/account/password` | Owner account created on the installation with `flask create-admin`; owner able to change the password (S2) |
 | O3 | Staff onboarding | NOT STARTED | M4: invitation workflow exists (S4); no installation yet | Staff invited and able to sign in |
 | O4 | Menu setup | IN PROGRESS | Admin menu/category/ingredient/recipe/table management exists and is tested. M5: display order, Nepali names/descriptions, staff sold-out control (`/staff/menu`) | Restaurant's real menu, tables and tax rate entered and reviewed |
-| O5 | Backup verification | BLOCKED (by P1–P4) | — | First backup restored successfully before go-live |
+| O5 | Backup verification | IN PROGRESS | M7.2: the backup → restore → verify cycle was run successfully in development (2026-11-01, `docs/DATABASE_SETUP_GUIDE.md` §19) -- real data, real checksum verification, restored into a separate disposable database, every table and sample record matched exactly. **This was a development drill, not a verification of a real installation** -- there is no installation yet (O2 is still blocked by D1) | Repeat this specific check -- first backup restored successfully -- against the actual production installation before it goes live |
 | O6 | Monitoring | BLOCKED (by D9) | — | Alerts route to the support contact |
 | O7 | Smoke test | NOT STARTED | Test-client end-to-end flows exist (`tests/test_demo_flow.py`) | Scripted smoke test against the live installation: order → kitchen → payment → report |
 | O8 | Support runbook | NOT STARTED | — | Common incidents with exact steps; remote-access policy |
