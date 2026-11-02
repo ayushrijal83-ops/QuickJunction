@@ -470,3 +470,68 @@ def test_concurrent_movements_and_sale_deductions_never_lose_an_update(app, db):
         assert _db.session.get(Ingredient, bun_id).current_quantity == expected
         ledger = sum(m.quantity_change for m in _db.session.query(StockMovement).filter_by(ingredient_id=bun_id))
         assert ledger == expected  # every change is on the ledger
+
+
+def test_two_orders_racing_to_complete_cannot_oversell_a_scarce_ingredient(app, db):
+    """M7.4: completion (deduct_for_order) is the authoritative stock gate,
+    not checkout. Two orders that together need more of an ingredient than
+    exists must never both complete -- the row lock it takes on the
+    ingredient serialises the two completions, and exactly one must be
+    refused outright (OrderStatusError), stock never going negative and
+    getting exactly one SALE row, not two."""
+    from decimal import Decimal
+
+    from app.models.ingredient import Ingredient
+    from app.models.stock_movement import MovementType, StockMovement
+    from app.services.inventory import add_to_recipe, record_movement, save_ingredient
+    from app.services.orders import checkout
+    from tests.conftest import make_category, make_menu_item
+    from tests.test_restaurant_ops import set_status
+
+    boss_id = make_user(username="scarceboss", email="scarceboss@example.com", role=Role.ADMIN).id
+    buyer = make_user(username="scarcebuyer", email="scarcebuyer@example.com")
+    boss = _db.session.get(User, boss_id)
+    item = make_menu_item(category=make_category(name="Race Scarce"), name="Race Special", price="50.00")
+    bean = save_ingredient(None, "race bean", "piece", "0", True)
+    add_to_recipe(item, bean, "1")
+    item_id, bean_id = item.id, bean.id
+
+    for round_no in range(ROUNDS):
+        # Exactly enough stock for one of the two orders about to race.
+        record_movement(_db.session.get(Ingredient, bean_id), "purchase", "1", f"race {round_no}", boss)
+        orders = [checkout(buyer.id, {str(item_id): 1}).id for _ in range(2)]
+        for oid in orders:
+            set_status(_db.session.get(Order, oid), OrderStatus.READY)
+
+        def complete(oid):
+            def act():
+                try:
+                    update_order_status(_db.session.get(Order, oid), OrderStatus.COMPLETED,
+                                        actor=_db.session.get(User, boss_id))
+                    return "done"
+                except OrderStatusError:
+                    return "refused"
+            return act
+
+        results = _race(app, complete(orders[0]), complete(orders[1]))
+        assert sorted(map(str, results)) == ["done", "refused"], results
+        _db.session.rollback()  # end this session's snapshot before verifying
+
+        assert _db.session.get(Ingredient, bean_id).current_quantity == Decimal("0"), (
+            "stock must never go negative -- the loser must be refused, not deducted"
+        )
+        # _race() appends to its results list in whichever order the two
+        # threads actually finish, not in the order their actions were
+        # passed in -- so results[0] cannot be assumed to be orders[0]'s
+        # outcome. The persisted status of each order is what actually
+        # happened and is read fresh here instead.
+        statuses = {oid: _db.session.get(Order, oid).status for oid in orders}
+        completed = [oid for oid, status in statuses.items() if status == OrderStatus.COMPLETED]
+        ready = [oid for oid, status in statuses.items() if status == OrderStatus.READY]
+        assert len(completed) == 1 and len(ready) == 1, statuses  # exactly one winner, one refused loser
+        winner_id, loser_id = completed[0], ready[0]
+        sales_this_round = _db.session.query(StockMovement).filter_by(
+            ingredient_id=bean_id, movement_type=MovementType.SALE, order_id=winner_id).count()
+        assert sales_this_round == 1
+        assert _db.session.query(StockMovement).filter_by(
+            ingredient_id=bean_id, movement_type=MovementType.SALE, order_id=loser_id).count() == 0

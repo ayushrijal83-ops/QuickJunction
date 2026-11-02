@@ -37,7 +37,7 @@ from app.models.user import Role, User
 from app.services.audit import commit_with
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, get_available_menu_item
 from app.services.errors import ValidationError
-from app.services.inventory import deduct_for_order, shortages
+from app.services.inventory import InventoryError, deduct_for_order, shortages
 from app.services.pricing import current_settings, price
 from app.services.tables import is_free_to_seat, release_table_if_idle
 
@@ -389,9 +389,16 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
             release_table_if_idle(order.table_id)
         if won and new_status == OrderStatus.COMPLETED:
             # The sale's stock deduction commits with the completion or not at
-            # all; idempotent (M13, app/services/inventory.py).
+            # all; idempotent (M13, app/services/inventory.py). M7.4: if stock
+            # is insufficient, deduct_for_order raises InventoryError instead
+            # of deducting anything, and the except clause below rolls back
+            # this status change along with it -- completion and its stock
+            # deduction succeed together or not at all.
             deduct_for_order(order.id, actor.id if actor else None)
         commit_with(audit if won else None)
+    except InventoryError as exc:
+        db.session.rollback()
+        raise OrderStatusError({"status": next(iter(exc.errors.values()))})
     except SQLAlchemyError:
         db.session.rollback()
         raise OrderStatusError({"status": ["Could not update the order. Please try again."]})

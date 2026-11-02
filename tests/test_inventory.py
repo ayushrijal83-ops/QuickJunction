@@ -231,16 +231,21 @@ def test_checkout_refuses_what_cannot_be_made(kitchen):
     assert _db.session.query(Order).count() == 0
 
 
-def test_served_order_completes_even_if_stock_went_short(kitchen):
-    """Stock is checked at checkout, not reserved: two orders can pass and
-    the second completion takes stock negative -- shown as short, never
-    blocking an order that has already been served."""
+def test_completion_refused_when_stock_is_insufficient(kitchen):
+    """M7.4: stock is checked at checkout (shortages()) but not reserved --
+    two orders can both pass that check for the same scarce stock. The
+    authoritative gate is completion (deduct_for_order): the second order's
+    completion must be refused outright, not silently take stock negative."""
     first, second = buy(kitchen, qty=6, username="a"), buy(kitchen, qty=6, username="b")
-    complete(first)
-    complete(second)
-    assert second.status == OrderStatus.COMPLETED
+    complete(first)  # 10 - 6 = 4 left; sufficient
+    with pytest.raises(OrderStatusError) as exc:
+        complete(second)  # needs 6, only 4 left
+    assert "Not enough stock" in exc.value.errors["status"][0]
+
+    assert second.status == OrderStatus.READY  # the COMPLETED step itself was refused; nothing earlier undone
     bun = _db.session.get(Ingredient, kitchen["bun"].id)
-    assert bun.current_quantity == D("-2") and bun.is_low
+    assert bun.current_quantity == D("4") and not bun.is_low  # unchanged -- nothing was deducted
+    assert not any(m.order_id == second.id for m in movements(kitchen["bun"].id))
 
 
 def test_low_stock_detection(kitchen):

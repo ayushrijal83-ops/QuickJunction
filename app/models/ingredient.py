@@ -7,9 +7,13 @@ traceable. ``minimum_quantity`` drives the low-stock flag. ``is_active``
 means "tracked in inventory": an inactive ingredient is still a menu
 attribute but is neither checked at checkout nor deducted on sale.
 
-Stock may go below zero -- deliberately no CHECK: a dish already served is
-never blocked from completing because of a count mismatch; the negative
-figure is shown as "short" so staff fix the count instead.
+No CHECK constraint on ``current_quantity``: order completion (M7.4,
+app/services/inventory.py::deduct_for_order) refuses in application code,
+under a row lock, before any order can drive it negative -- a database
+constraint would reject the whole transaction with a generic integrity
+error instead of the clear, order-specific message that check produces.
+Manual ADJUSTMENT movements (admin-only, signed) can still set it negative
+deliberately, e.g. to correct a prior miscount.
 """
 
 from __future__ import annotations

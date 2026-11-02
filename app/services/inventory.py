@@ -180,9 +180,12 @@ def recipe_requirements(lines: dict[int, int]) -> dict[int, Decimal]:
 def shortages(lines: dict[int, int]) -> list[str]:
     """Names of ingredients a cart would need more of than is in stock --
     checked at checkout so customers cannot order what cannot be made.
-    ponytail: not a reservation; two carts can both pass and the later
-    completion drives stock negative (shown as "short"), which is the
-    intended trade-off over blocking a served order."""
+    Not a reservation: two carts can both pass this check for the same
+    scarce stock. That is fine -- the authoritative, concurrency-safe gate
+    is at order completion (``deduct_for_order``), which is where a
+    shortage is actually refused (M7.4). This check exists only to give an
+    honest answer up front, before the customer commits to an order that
+    may turn out to be unservable."""
     need = recipe_requirements(lines)
     if not need:
         return []
@@ -195,7 +198,22 @@ def shortages(lines: dict[int, int]) -> list[str]:
 
 def deduct_for_order(order_id: int, actor_id: int | None) -> int:
     """SALE movements for a completed order, inside the caller's transaction.
-    Returns the number of ingredients deducted; 0 if already done."""
+    Returns the number of ingredients deducted; 0 if already done.
+
+    M7.4: this is the authoritative, concurrency-safe stock gate -- the
+    checkout-time ``shortages()`` check is advisory only (see its own
+    docstring) and two carts can both pass it for the same scarce stock.
+    Here, every ingredient the order needs is locked (``SELECT ... FOR
+    UPDATE``, in ascending id order so two orders needing overlapping
+    ingredients can never deadlock each other) before anything is read or
+    changed, so two orders completing for the same ingredient at the same
+    instant are serialised by MySQL's row lock, not by application code.
+    If locking reveals that any ingredient does not have enough stock left,
+    this raises InventoryError and deducts nothing at all for this order --
+    the caller (``_apply_transition``) rolls back the whole COMPLETED
+    transition on that, so the order's status does not change either. A
+    completed order is therefore a guarantee that the stock existed, not
+    just a record that someone clicked a button."""
     already = set(db.session.scalars(
         sa.select(StockMovement.ingredient_id).where(StockMovement.order_id == order_id)
     ))
@@ -203,10 +221,30 @@ def deduct_for_order(order_id: int, actor_id: int | None) -> int:
     order = db.session.get(Order, order_id)
     for line in order.items:
         portions[line.menu_item_id] += line.quantity
+    needed = {
+        ingredient_id: quantity
+        for ingredient_id, quantity in recipe_requirements(portions).items()
+        if ingredient_id not in already
+    }
+    if not needed:
+        return 0
+
+    locked_quantity = dict(db.session.execute(
+        sa.select(Ingredient.id, Ingredient.current_quantity)
+        .where(Ingredient.id.in_(needed))
+        .order_by(Ingredient.id)
+        .with_for_update()
+    ).all())
+    short = sorted(
+        ingredient_id for ingredient_id, required in needed.items()
+        if locked_quantity.get(ingredient_id, Decimal(0)) < required
+    )
+    if short:
+        names = sorted(db.session.scalars(sa.select(Ingredient.name).where(Ingredient.id.in_(short))))
+        _fail("stock", f"Not enough stock to complete this order: {', '.join(names)}.")
+
     count = 0
-    for ingredient_id, quantity in sorted(recipe_requirements(portions).items()):
-        if ingredient_id in already:
-            continue
+    for ingredient_id, quantity in sorted(needed.items()):
         _move(ingredient_id, -quantity, MovementType.SALE, actor_id=actor_id, order_id=order_id,
               note=f"Order #{order_id}")
         count += 1
