@@ -1,6 +1,8 @@
 import logging
+import os
 from logging.config import fileConfig
 
+import sqlalchemy as sa
 from flask import current_app
 
 from alembic import context
@@ -14,8 +16,19 @@ config = context.config
 fileConfig(config.config_file_name)
 logger = logging.getLogger('alembic.env')
 
+# M7.3 -- database privilege separation. When set, migrations connect with
+# this account instead of the running Flask app's own engine (the app's
+# DATABASE_URL account no longer has DDL privileges). Read once, here, so
+# the override cannot change mid-run. Absent -> fall back to the app's own
+# engine, unchanged from before M7.3 -- this is the documented
+# backward-compatibility path for an installation that has not split its
+# accounts yet (see docs/MYSQL_SETUP_HANDOFF.md section 5).
+MIGRATION_DATABASE_URL = os.environ.get("MIGRATION_DATABASE_URL") or None
+
 
 def get_engine():
+    if MIGRATION_DATABASE_URL:
+        return sa.create_engine(MIGRATION_DATABASE_URL)
     try:
         # this works with Flask-SQLAlchemy<3 and Alchemical
         return current_app.extensions['migrate'].db.get_engine()

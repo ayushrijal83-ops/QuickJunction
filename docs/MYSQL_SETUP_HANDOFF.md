@@ -616,44 +616,66 @@ The safe move is to create both, or to use the wildcard `'qj_user'@'%'` — but 
 means "from any host on the network", which is a wider grant than a development
 machine needs. Creating both explicit accounts is better.
 
-### 5.4 Create the user and grant privileges
+### 5.4 Create both accounts and grant privileges
+
+> **There is one application database account and one migration account, never a
+> single account with `GRANT ALL`.** This has been true of `scripts\db_setup.py` and
+> `setup.ps1` since M7.3 (database privilege separation) — the SQL below is exactly
+> what they run, for understanding or for doing it by hand.
 
 Connect as the administrator (§3.5), then run:
 
 ```sql
--- The account the DSN in .env will actually use.
-CREATE USER 'qj_user'@'127.0.0.1'
-  IDENTIFIED BY 'CHOOSE_A_STRONG_PASSWORD';
+-- Runtime account: what DATABASE_URL in .env uses. The running application
+-- never has schema privileges -- see 5.5 for why this is enough.
+CREATE USER 'qj_user'@'127.0.0.1' IDENTIFIED BY 'CHOOSE_A_STRONG_PASSWORD';
+CREATE USER 'qj_user'@'localhost' IDENTIFIED BY 'CHOOSE_A_STRONG_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON quick_junction.* TO 'qj_user'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON quick_junction.* TO 'qj_user'@'localhost';
 
--- Also create the localhost form, so a client that resolves to a socket works too.
-CREATE USER 'qj_user'@'localhost'
-  IDENTIFIED BY 'CHOOSE_A_STRONG_PASSWORD';
-
--- Privileges on the Quick Junction database only. Note `quick_junction.*` --
--- the `.*` means "every table in this one database", not "every database".
-GRANT ALL PRIVILEGES ON quick_junction.* TO 'qj_user'@'127.0.0.1';
-GRANT ALL PRIVILEGES ON quick_junction.* TO 'qj_user'@'localhost';
+-- Migration account: used only for `flask db upgrade`/`downgrade`, via
+-- MIGRATION_DATABASE_URL (section 11). Never used by the running application,
+-- and its password is not meant to be kept anywhere long-term -- see 5.5.
+CREATE USER 'qj_migrator'@'127.0.0.1' IDENTIFIED BY 'CHOOSE_ANOTHER_STRONG_PASSWORD';
+CREATE USER 'qj_migrator'@'localhost' IDENTIFIED BY 'CHOOSE_ANOTHER_STRONG_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+  ON quick_junction.* TO 'qj_migrator'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+  ON quick_junction.* TO 'qj_migrator'@'localhost';
 
 FLUSH PRIVILEGES;
 ```
 
-> **`CHOOSE_A_STRONG_PASSWORD` is a placeholder.** Replace it with a password you
-> generate. Use the same value in both `CREATE USER` statements and in `.env` (§6).
-> **Do not write the real value into any file that is tracked by Git.**
+> **The two passwords are placeholders.** Generate two different values. Only
+> `qj_user`'s goes into `.env` (§6) — **never write `qj_migrator`'s password into any
+> file**; see 5.5 for why, and for how to use it for just one command.
 
 Verify the grants landed:
 
 ```sql
 SHOW GRANTS FOR 'qj_user'@'127.0.0.1';
+SHOW GRANTS FOR 'qj_migrator'@'127.0.0.1';
 ```
 
-You should see a `USAGE` line (which means "can log in") and a line granting
-privileges `ON \`quick_junction\`.*`. If you see `ON *.*`, you granted server-wide
-privileges by mistake — revoke and redo.
+`qj_user` should show only `SELECT, INSERT, UPDATE, DELETE` `ON \`quick_junction\`.*`;
+`qj_migrator` should additionally show `CREATE, ALTER, DROP, INDEX, REFERENCES`. If
+either shows `ON *.*`, or if `qj_user` shows any schema privilege, you granted
+server-wide or combined privileges by mistake — revoke and redo.
+
+> **If you only need one account quickly** (a throwaway local experiment, not a real
+> installation) — `GRANT ALL PRIVILEGES ON quick_junction.* TO 'qj_user'@'127.0.0.1'`
+> still works, in the sense that MySQL will accept it. **Do not do this for anything
+> you intend to keep.** It is exactly the combined-account design M7.3 replaced, it is
+> not what `scripts\db_setup.py`/`setup.ps1` do, and `python scripts\db_setup.py
+> narrow-runtime` (§5.7) exists specifically to undo it later. If you do this, you
+> will need that command before this installation is anywhere near production-ready
+> (`docs/SECURITY.md` §17, item 6).
 
 ### 5.5 Why these privileges, and why not more
 
-**Why the application user needs privileges on the database:**
+**Why the runtime account (`qj_user`) needs exactly this much:**
 
 | Operation | Needed by |
 | --- | --- |
@@ -661,58 +683,63 @@ privileges by mistake — revoke and redo.
 | `INSERT` | Registration, checkout, adding menu items, every audit-log row. |
 | `UPDATE` | Saving preferences, changing an order's status, `session_version` on logout. |
 | `DELETE` | Removing an ingredient association when a menu item's ingredient list changes (`sync_menu_item_ingredients`). |
-| `CREATE`, `ALTER`, `DROP`, `INDEX`, `REFERENCES` | **Migrations.** `flask db upgrade` creates and alters tables. If you intend to run migrations as `qj_user`, it needs these. |
 
-`GRANT ALL PRIVILEGES ON quick_junction.*` covers all of the above, scoped to one
-database. That is the pragmatic setting for a development or demo machine.
+That is the complete list — verified against the actual code, not assumed: nothing
+under `app/` executes `CREATE`/`ALTER`/`DROP`/`LOCK TABLES` at runtime, and
+`SELECT ... FOR UPDATE` (used throughout the order/payment/reservation code for row
+locking) needs only `SELECT`, not a table lock or any extra grant.
 
-**Why it does not need global administrative privileges:**
+**Why the migration account (`qj_migrator`) needs more than just DDL:**
+
+| Operation | Needed by |
+| --- | --- |
+| `CREATE`, `ALTER`, `DROP`, `INDEX`, `REFERENCES` | `flask db upgrade`/`downgrade` creating, altering and dropping tables, indexes and foreign keys. |
+| `SELECT`, `INSERT`, `UPDATE`, `DELETE` | Several migrations back-fill or clean up *data* as part of a schema change — `7c4e1a9b52d3` grandfathers pre-existing staff with an `UPDATE`, several others `DELETE` rows that would violate a widened `CHECK` constraint, and a couple seed a settings row with `INSERT`. |
+
+**Why neither account needs global administrative privileges:**
 
 `CREATE DATABASE`, `CREATE USER`, `GRANT`, `SHUTDOWN`, `FILE`, `PROCESS` and
-`SUPER` are all server-level operations. The application performs none of them. It
-connects to a database that already exists and works inside it. Creating a database is
-an operator task you did once, by hand, as the admin — which is exactly why §4 is a
-separate section from §5.
+`SUPER` are all server-level operations. Neither account performs any of them — they
+each work inside a database that already exists. Creating the database and the two
+accounts is an operator task done once, by hand or by `scripts\db_setup.py`, as the
+admin — which is exactly why §4 is a separate section from §5.
 
-**A stricter variant, if you want it.** For a real deployment where migrations are run
-separately by an operator, the runtime account can be narrowed to just the data
-operations:
+**Why `qj_migrator`'s password is not meant to be kept anywhere.** It is needed only
+for the few seconds/minutes `flask db upgrade` runs. `scripts\db_setup.py` generates a
+fresh one every time it creates or re-points the account and never writes it to `.env`
+or any other file — holding a long-lived, DDL-capable secret at rest is exactly the
+standing risk the runtime/migration split is meant to remove. Section 5.6 below shows
+how to set it for just one command.
 
-```sql
-GRANT SELECT, INSERT, UPDATE, DELETE ON quick_junction.* TO 'qj_user'@'127.0.0.1';
-```
+`docs/SECURITY.md` §17's *"A dedicated MySQL user with least privilege — no
+`GRANT ALL` in production"* item is accordingly marked done for the runtime account as
+of M7.3 (see `docs/PRODUCTION_READINESS.md`).
 
-`docs/SECURITY.md` §17 lists *"A dedicated MySQL user with least privilege — no
-`GRANT ALL` in production"* as work still outstanding, so this is a known and already
-documented gap rather than something you have discovered.
+### 5.6 Running migrations yourself, manually
 
-**Separate migration account (recommended for anything beyond a demo).** Keep schema
-changes and day-to-day traffic on different accounts:
-
-```sql
--- Runtime: what the Flask app uses in DATABASE_URL.
-CREATE USER 'qj_user'@'127.0.0.1' IDENTIFIED BY 'CHOOSE_A_STRONG_PASSWORD';
-GRANT SELECT, INSERT, UPDATE, DELETE ON quick_junction.* TO 'qj_user'@'127.0.0.1';
-
--- Migrations only: used for `flask db upgrade`, then not used by the app.
-CREATE USER 'qj_migrator'@'127.0.0.1' IDENTIFIED BY 'CHOOSE_ANOTHER_STRONG_PASSWORD';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
-  ON quick_junction.* TO 'qj_migrator'@'127.0.0.1';
-```
-
-Run migrations with the migrator's URL set only for that command (PowerShell):
+`scripts\db_setup.py setup`/`reset` run `flask db upgrade` for you, as `qj_migrator`.
+To run it yourself, `migrations/env.py` reads a dedicated `MIGRATION_DATABASE_URL`
+environment variable and, when it is set, connects with it instead of the Flask app's
+own engine (`DATABASE_URL`) for the actual schema change. Set it only for the one
+command:
 
 ```powershell
-$env:DATABASE_URL = "mysql+pymysql://qj_migrator:CHOOSE_ANOTHER_STRONG_PASSWORD@127.0.0.1:3306/quick_junction"
+$env:MIGRATION_DATABASE_URL = "mysql+pymysql://qj_migrator:CHOOSE_ANOTHER_STRONG_PASSWORD@127.0.0.1:3306/quick_junction"
 flask --app run.py db upgrade
-Remove-Item Env:DATABASE_URL   # back to the qj_user URL in .env
+Remove-Item Env:MIGRATION_DATABASE_URL
 ```
 
-A process environment variable takes precedence over `.env`, so `.env` keeps the
-runtime `qj_user` URL throughout. (`qj_migrator` needs `INSERT`/`UPDATE`/`DELETE` too:
-some migrations back-fill or tidy data, e.g. `7c4e1a9b52d3` approves pre-existing staff.)
+`DATABASE_URL` in `.env` is untouched throughout — the application still needs it to
+boot, it is just no longer what Alembic connects with when the override is present.
 
-### 5.6 Moving an existing installation off `root`
+**Backward compatibility.** If `MIGRATION_DATABASE_URL` is never set, migrations run
+against `DATABASE_URL` exactly as they did before M7.3 — nothing breaks for an
+installation that has not split its accounts yet. `scripts\db_setup.py`'s `setup` and
+`reset` commands never change an *existing* installation's grants either: a pre-M7.3
+`qj_user` keeps whatever it already had (`GRANT` only ever adds privileges, never
+removes them) until section 5.8's upgrade path is run deliberately.
+
+### 5.7 Moving an existing installation off `root`
 
 If your `.env` currently connects as `root`, the application now tells you so: every
 start logs *"DATABASE_URL connects as MySQL 'root'"*, and `APP_ENV=production` refuses
@@ -730,6 +757,66 @@ to start at all. To switch without losing data:
 
 No data moves: it is the same database, reached through a narrower account. Nothing in
 the application needs the `root` password afterwards.
+
+### 5.8 Upgrading an installation set up before M7.3
+
+If this database was created before the privilege split, `qj_user` still holds the old
+combined privileges — `setup`/`reset` only ever *add* `qj_migrator` alongside it, never
+remove anything `qj_user` already had (see 5.6's backward-compatibility note). To
+narrow it deliberately, once you know `qj_migrator` can run migrations on its own:
+
+```powershell
+python scripts\db_setup.py narrow-runtime
+```
+
+This asks for the admin password and the typed confirmation phrase `NARROW QJ_USER`
+(the same pattern `reset` already uses for its own destructive action), then revokes
+every privilege `qj_user` currently holds on `quick_junction` and re-grants only
+`SELECT, INSERT, UPDATE, DELETE`. It touches no other account and no other database,
+and is never run automatically. Run `python scripts\db_setup.py verify` afterward to
+confirm the application still works with the narrowed account.
+
+### 5.9 Backup and restore tooling (M7.2) and the two accounts (M7.3)
+
+`scripts\backup_database.py` continues to use the runtime account and needs nothing
+beyond what it already has — `mysqldump` only ever reads (`SELECT`); there are no
+stored procedures, functions, views or triggers in this schema today, so `--routines`
+has nothing to dump either.
+
+**Restoring needs more than `qj_user` has, once narrowed.**
+`scripts\restore_database.py` restores by running a dump's `CREATE TABLE`/`INSERT`
+statements back through `mysql`, which needs `CREATE` on the target — a privilege the
+runtime account no longer has once narrowed. Because `qj_migrator`'s password is
+deliberately never persisted anywhere (5.5), there is no password to pass in from
+memory for a restore done weeks or months after setup.
+
+`restore_database.py --rotate-migration-credentials` solves this: it asks for the
+MySQL admin password (interactively, or via `QJ_MYSQL_ADMIN_USER`/
+`QJ_MYSQL_ADMIN_PASSWORD`), uses it to set `qj_migrator`'s password to a fresh
+**one-time** value, restores with that, and — in a `finally`, regardless of whether
+the restore succeeded — rotates the password away again to a second value nobody
+keeps. The account used for the restore is unusable again moments after the restore
+finishes; nothing is written to `.env` or any other file, and neither password is ever
+printed or logged. `qj_user`'s own grant is never touched by this.
+
+This is a real operational trade: a narrowed installation's disaster-recovery
+procedure now needs the MySQL *admin* password at restore time, not just the
+application's own `DATABASE_URL` — write that into your runbook. An installation that
+has **not** run `narrow-runtime` can keep restoring without this flag, exactly as M7.2
+documented.
+
+**Known limitation.** `--rotate-migration-credentials` and `scripts\db_setup.py
+setup`/`reset` both rotate `qj_migrator`'s password; running a restore and a
+setup/reset at the same moment can race. This is a rare, deliberate, operator-driven
+action, not a routine automated job, so the mitigation is procedural, not automated:
+don't do both at once.
+
+Every other M7.2 safety property is completely unchanged by this flag: the checksum
+is verified before anything connects, the target must still be empty, a production
+target still needs `--allow-production-target` and the exact typed confirmation, and
+system schemas are refused unconditionally. See
+`restore_backup_with_rotated_credentials()` in `scripts/restore_database.py` for the
+exact mechanism, and `docs/DATABASE_SETUP_GUIDE.md` section 19 for the command.
 
 ---
 
@@ -2105,9 +2192,13 @@ DATABASE
 [ ] CREATE DATABASE quick_junction (utf8mb4/unicode_ci)      (§4.3 or §4.4)
 [ ] Verify charset and collation                             (§4.3)
 [ ] CREATE USER 'qj_user'@'127.0.0.1' AND @'localhost'       (§5.4)
-[ ] GRANT ALL PRIVILEGES ON quick_junction.* to both         (§5.4)
+[ ] GRANT SELECT, INSERT, UPDATE, DELETE to both             (§5.4)
+[ ] CREATE USER 'qj_migrator'@'127.0.0.1' AND @'localhost'   (§5.4)
+[ ] GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER,
+    DROP, INDEX, REFERENCES to both                          (§5.4)
 [ ] FLUSH PRIVILEGES                                         (§5.4)
-[ ] Verify: SHOW GRANTS FOR 'qj_user'@'127.0.0.1';           (§5.4)
+[ ] Verify: SHOW GRANTS FOR 'qj_user'@'127.0.0.1';
+           SHOW GRANTS FOR 'qj_migrator'@'127.0.0.1';        (§5.4)
 
 PROJECT
 [ ] Clone or copy the repository

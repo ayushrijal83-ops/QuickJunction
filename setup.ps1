@@ -120,6 +120,13 @@ function Find-Mysql($exe) {
 }
 function Get-MysqlService { Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^MySQL\d*$' } | Select-Object -First 1 }
 
+# M7.3 -- database privilege separation. $DbUser (DATABASE_URL, written to
+# .env) gets DML only; a second, migration-only account is created
+# alongside it and used solely for the "flask db upgrade" step below, via a
+# transient MIGRATION_DATABASE_URL -- never written to .env, never logged.
+$MigratorUser = if ($env:QJ_DB_MIGRATOR_USER) { $env:QJ_DB_MIGRATOR_USER } else { 'qj_migrator' }
+$MigratorUrl = $null
+
 if ($LocalDb) {
     Step 'Checking MySQL server'
     $Mysql = Find-Mysql 'mysql'
@@ -146,17 +153,26 @@ if ($LocalDb) {
     }
     Write-Host "MySQL service '$($svc.Name)' running; client: $Mysql"
 
-    # Can the app account already log in? If so, nothing to do.
+    # Can the app account already log in? If so, nothing to do -- an existing
+    # installation's grants are never changed by this script (M7.3: to split
+    # an existing combined-privilege qj_user, run
+    # 'python scripts\db_setup.py narrow-runtime' deliberately).
     $env:MYSQL_PWD = $DbPass
     & $Mysql -h $DbHost -P $DbPort -u $DbUser -e 'SELECT 1' $DbName *> $null
     if ($LASTEXITCODE -ne 0) {
-        Step "Creating database '$DbName' and user '$DbUser' (needs MySQL root once)"
+        Step "Creating database '$DbName' and accounts '$DbUser' (runtime) + '$MigratorUser' (migrations only) -- needs MySQL root once"
         $esc = $DbPass.Replace("\", "\\").Replace("'", "\'")
+        # token_hex is hex-only (0-9a-f) -- safe to embed in SQL and a URL
+        # with no escaping, and never written to any file.
+        $migratorPass = (& $VPy -c 'import secrets;print(secrets.token_hex(16))').Trim()
         $sql = "CREATE DATABASE IF NOT EXISTS ``$DbName`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
         foreach ($h in '127.0.0.1', 'localhost') {
             $sql += "CREATE USER IF NOT EXISTS '$DbUser'@'$h' IDENTIFIED BY '$esc';" +
                     "ALTER USER '$DbUser'@'$h' IDENTIFIED BY '$esc';" +
-                    "GRANT ALL PRIVILEGES ON ``$DbName``.* TO '$DbUser'@'$h';"
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON ``$DbName``.* TO '$DbUser'@'$h';" +
+                    "CREATE USER IF NOT EXISTS '$MigratorUser'@'$h' IDENTIFIED BY '$migratorPass';" +
+                    "ALTER USER '$MigratorUser'@'$h' IDENTIFIED BY '$migratorPass';" +
+                    "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES ON ``$DbName``.* TO '$MigratorUser'@'$h';"
         }
         $sql += 'FLUSH PRIVILEGES;'
         $env:MYSQL_PWD = ''                           # fresh installs have an empty root password
@@ -171,7 +187,8 @@ if ($LocalDb) {
             $ok = $LASTEXITCODE -eq 0
         }
         if (-not $ok) { Die 'Could not log in as MySQL root. See docs/MYSQL_SETUP_HANDOFF.md sections 4-5.' }
-        Write-Host 'Database and user ready.'
+        Write-Host 'Database and accounts ready (runtime: DML only; migrations: DML + DDL).'
+        $MigratorUrl = "mysql+pymysql://${MigratorUser}:$([uri]::EscapeDataString($migratorPass))@${DbHost}:${DbPort}/${DbName}"
     } else {
         Write-Host "Database '$DbName' reachable as '$DbUser'."
     }
@@ -182,8 +199,15 @@ if ($LocalDb) {
 
 # ---------------------------------------------------------------- migrate + seed
 Step 'Applying database migrations'
+if ($MigratorUrl) {
+    # Only this one command sees the migration account; DATABASE_URL (the
+    # runtime account) stays as the app's own setting throughout.
+    $env:MIGRATION_DATABASE_URL = $MigratorUrl
+}
 & $VPy -m flask --app run.py db upgrade
-if ($LASTEXITCODE -ne 0) { Die 'Migration failed.' }
+$MigrationExit = $LASTEXITCODE
+if ($MigratorUrl) { Remove-Item Env:MIGRATION_DATABASE_URL -ErrorAction SilentlyContinue }
+if ($MigrationExit -ne 0) { Die 'Migration failed.' }
 
 Step 'Seeding demo data (idempotent)'
 & $VPy scripts\seed_demo.py

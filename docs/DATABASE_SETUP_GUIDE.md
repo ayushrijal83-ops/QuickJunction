@@ -291,17 +291,26 @@ project folder (or run it from PowerShell: `.\setup_quick_junction.bat`). It:
    Windows service; if it cannot find MySQL it asks for the path to `mysql.exe`);
 2. creates `.venv` and installs `requirements.txt`;
 3. asks for the **MySQL root username** (Enter = `root`) and **root password** (typing
-   is hidden) — used only to create the database and account, never saved;
+   is hidden) — used only to create the database and the two accounts below, never saved;
 4. creates the database `quick_junction` (utf8mb4) **if it does not exist** — an
    existing database is kept, nothing is dropped;
-5. creates `'qj_user'@'127.0.0.1'` and `'qj_user'@'localhost'` with privileges on
-   `quick_junction` only;
-6. writes `DATABASE_URL` and `SECRET_KEY` to `.env` (the password is never shown);
-7. runs every migration, verifies the result, starts the application once as a smoke
-   test, and offers to load demo data.
+5. creates **two** accounts, each as `'...'@'127.0.0.1'` and `'...'@'localhost'`, with
+   privileges on `quick_junction` only (M7.3 — database privilege separation):
+   - `qj_user` — the **runtime** account, data access only (`SELECT, INSERT, UPDATE,
+     DELETE`), no schema privileges;
+   - `qj_migrator` — the **migration** account, used only for `flask db upgrade`/
+     `downgrade`, with data access *and* schema privileges;
+6. writes `DATABASE_URL` (the **runtime** account only) and `SECRET_KEY` to `.env` — the
+   migration account's URL and password are never written to `.env` or any other file,
+   only held in memory for this one setup run and passed to the migration step as the
+   `MIGRATION_DATABASE_URL` environment variable;
+7. runs every migration **as `qj_migrator`**, verifies the result (as `qj_user`), starts
+   the application once as a smoke test, and offers to load demo data.
 
 It never starts the application for you, and it is **safe to run again**: the second
-time it finds everything in place, applies 0 migrations and leaves `.env` unchanged.
+time it finds everything in place, applies 0 migrations and leaves `.env` unchanged. It
+also never changes an existing installation's grants — see section 10.1 if you set this
+database up before M7.3 and want to narrow `qj_user` to drop its old schema privileges.
 
 If `.venv` already exists, **`scripts\setup_database.bat`** runs only the database part.
 
@@ -312,21 +321,54 @@ If `.venv` already exists, **`scripts\setup_database.bat`** runs only the databa
 CREATE DATABASE IF NOT EXISTS quick_junction
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- Runtime account: what the application itself uses, in DATABASE_URL.
 CREATE USER 'qj_user'@'127.0.0.1' IDENTIFIED BY 'YOUR_PASSWORD';
 CREATE USER 'qj_user'@'localhost' IDENTIFIED BY 'YOUR_PASSWORD';
-
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+GRANT SELECT, INSERT, UPDATE, DELETE
   ON quick_junction.* TO 'qj_user'@'127.0.0.1';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+GRANT SELECT, INSERT, UPDATE, DELETE
   ON quick_junction.* TO 'qj_user'@'localhost';
+
+-- Migration account: used only for `flask db upgrade`/`downgrade`, via
+-- MIGRATION_DATABASE_URL. Never used by the running application.
+CREATE USER 'qj_migrator'@'127.0.0.1' IDENTIFIED BY 'ANOTHER_PASSWORD';
+CREATE USER 'qj_migrator'@'localhost' IDENTIFIED BY 'ANOTHER_PASSWORD';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+  ON quick_junction.* TO 'qj_migrator'@'127.0.0.1';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES
+  ON quick_junction.* TO 'qj_migrator'@'localhost';
 ```
 
-Why these privileges: `SELECT/INSERT/UPDATE/DELETE` for the running application, and
-`CREATE/ALTER/DROP/INDEX/REFERENCES` because the same account runs the migrations
-(`flask db upgrade` creates tables, indexes, foreign keys and CHECK constraints).
-Nothing outside `quick_junction`, and no server-wide rights such as `CREATE USER`,
-`GRANT` or `FILE`. Both host forms exist because MySQL treats `127.0.0.1` and
-`localhost` as different accounts.
+Why these privileges: the running application only ever does `SELECT`/`INSERT`/
+`UPDATE`/`DELETE` — verified against the actual code, not assumed: nothing under `app/`
+executes `CREATE`/`ALTER`/`DROP`/`LOCK TABLES` at runtime, and `SELECT ... FOR UPDATE`
+(used throughout the order/payment/reservation code for row locking) needs only
+`SELECT`, not a table lock. `qj_migrator` needs `CREATE/ALTER/DROP/INDEX/REFERENCES`
+for `flask db upgrade`'s schema changes, *and* keeps `SELECT/INSERT/UPDATE/DELETE`
+because several migrations back-fill or clean up data as part of a schema change —
+e.g. `7c4e1a9b52d3` grandfathers pre-existing staff accounts with an `UPDATE`, and
+several others `DELETE` rows that would violate a widened `CHECK` constraint. Nothing
+outside `quick_junction` for either account, and no server-wide rights such as
+`CREATE USER`, `GRANT` or `FILE`. Both host forms exist because MySQL treats
+`127.0.0.1` and `localhost` as different accounts.
+
+### 10.1 Upgrading an installation set up before M7.3
+
+If this database was created before the privilege split, `qj_user` still holds the old
+combined privileges (`GRANT` is additive — re-running `setup`/`reset` adds `qj_migrator`
+but never removes anything `qj_user` already had). To narrow it deliberately:
+
+```powershell
+.\.venv\Scripts\python scripts\db_setup.py narrow-runtime
+```
+
+This asks for the admin password and a typed confirmation phrase (`NARROW QJ_USER`,
+the same pattern as `reset`'s own destructive-action confirmation), then revokes every
+privilege `qj_user` currently holds and re-grants only `SELECT, INSERT, UPDATE, DELETE`.
+It never touches `qj_migrator` or any other account or database, and it is never run
+automatically — an existing installation's grants only change when you ask for this
+explicitly. Run `python scripts\db_setup.py verify` afterward to confirm the application
+still works with the narrowed account.
 
 ---
 
@@ -342,7 +384,22 @@ migrations\versions\*.py   (11 files, oldest → newest)
 MySQL database quick_junction   (14 tables + alembic_version)
 ```
 
-The setup script runs this for you. To run it yourself (PowerShell, project folder):
+The setup script runs this for you, as the `qj_migrator` account. To run it yourself
+(PowerShell, project folder) with the migration account, set
+`MIGRATION_DATABASE_URL` for just this one command:
+
+```powershell
+$env:MIGRATION_DATABASE_URL = "mysql+pymysql://qj_migrator:YOUR_MIGRATOR_PASSWORD@127.0.0.1:3306/quick_junction"
+.\.venv\Scripts\python -m flask --app run.py db upgrade
+Remove-Item Env:MIGRATION_DATABASE_URL
+```
+
+`DATABASE_URL` in `.env` (the runtime account) is still required — the application
+itself needs it to start — but when `MIGRATION_DATABASE_URL` is set, `migrations\env.py`
+connects with it instead for the actual schema change. **Backward compatibility:** if
+you never set `MIGRATION_DATABASE_URL`, migrations run against `DATABASE_URL` exactly
+as they did before M7.3 — this is the fallback an installation that has not split its
+accounts yet keeps relying on:
 
 ```powershell
 .\.venv\Scripts\python -m flask --app run.py db upgrade
@@ -389,11 +446,14 @@ The quickest complete check (connection, head, tables, constraints, application 
 Expected: a list of `[OK]` lines ending in `SUCCESS: the Quick Junction database is
 verified.` It checks that:
 
-- `qj_user` can log in to `quick_junction`;
+- `qj_user` (the runtime account) can log in to `quick_junction`;
 - the database revision equals the repository head;
 - all 14 application tables exist, InnoDB, utf8mb4;
 - foreign keys and CHECK constraints exist, and the `pricing_settings` row is there;
 - the application starts and `/health` and `/menu` answer 200 using the database.
+
+`verify` only checks the runtime account — it does not run migrations, so it never
+touches `qj_migrator`.
 
 To look for yourself, inside `mysql -u root -p`:
 
@@ -403,7 +463,12 @@ USE quick_junction;
 SHOW TABLES;
 SELECT version_num FROM alembic_version;
 SHOW GRANTS FOR 'qj_user'@'127.0.0.1';
+SHOW GRANTS FOR 'qj_migrator'@'127.0.0.1';
 ```
+
+The first `SHOW GRANTS` should list only `SELECT, INSERT, UPDATE, DELETE`; the second
+should additionally list `CREATE, ALTER, DROP, INDEX, REFERENCES`. If `qj_user`'s grants
+also include schema privileges, this installation predates M7.3 — see section 10.1.
 
 Optional: the automated test suite (uses its own in-memory SQLite database, never your
 MySQL data):
@@ -732,6 +797,40 @@ none are set.
 | `QJ_BACKUP_ENCRYPTION_KEY_FILE` | none | Path to a Fernet key file (see "Encryption-key management") |
 | `QJ_BACKUP_RETENTION_COUNT` | `7` | How many backups of one database to keep |
 | `QJ_MYSQLDUMP_PATH` / `QJ_MYSQL_PATH` | auto-detected (PATH, then the standard `Program Files\MySQL\MySQL Server *` install folder -- the same search `scripts\find_mysql.bat` already does) | Override the full path to `mysqldump.exe` / `mysql.exe` |
+
+**M7.3 note (database privilege separation).** `backup_database.py` continues to use
+`DATABASE_URL` -- the **runtime** account (`qj_user`), not `qj_migrator` -- and needs
+nothing beyond what it already has: `mysqldump --single-transaction --routines` is
+`SELECT`-only (there are no stored procedures, functions, views or triggers in this
+schema today, so `--routines` has nothing to dump), and so is the row-count metadata
+query.
+
+**Restoring needs more than `qj_user` has, once narrowed.** `restore_database.py`
+replays a dump's `CREATE TABLE` statements through `mysql`, which needs `CREATE` on the
+(empty) target -- a privilege the runtime account no longer has after
+`narrow-runtime`. Because `qj_migrator`'s password is deliberately never persisted
+anywhere (see `docs/MYSQL_SETUP_HANDOFF.md` §5.5), there is no password to simply
+"pass in" from memory. Add `--rotate-migration-credentials`:
+
+```powershell
+python scripts\restore_database.py --backup <path> --target quick_junction_test --rotate-migration-credentials
+```
+
+This asks for the MySQL admin password (or reads `QJ_MYSQL_ADMIN_USER`/
+`QJ_MYSQL_ADMIN_PASSWORD`, the same convention `scripts\db_setup.py` already uses),
+uses it to set `qj_migrator`'s password to a **fresh, one-time value**, restores with
+that, then rotates the password away again to a second value nobody keeps --
+regardless of whether the restore succeeded. Every other M7.2 safety check is
+completely unchanged: the checksum is still verified before anything connects, the
+target must still be empty, a production target still needs
+`--allow-production-target` and the exact typed confirmation, system schemas are still
+refused unconditionally. The only thing this flag changes is *how the database URL used
+for the restore is obtained* -- it never touches `qj_user`'s grants, and the minted
+migrator password is never printed or logged. See
+`docs/MYSQL_SETUP_HANDOFF.md` §5.9 for the full account model and
+`restore_backup_with_rotated_credentials()` in `scripts/restore_database.py` for the
+exact mechanism. Restoring into an installation that has **not** been narrowed still
+works exactly as M7.2 documented, without this flag.
 
 **Never store backups inside the Git repository.** The default backup
 directory is a sibling of the project folder, not a subdirectory of it, so

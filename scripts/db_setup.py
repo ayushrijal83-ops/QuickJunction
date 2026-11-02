@@ -3,31 +3,53 @@
 Normally started by ``scripts/setup_database.bat``, ``scripts/reset_database.bat``
 or ``setup_quick_junction.bat`` rather than directly:
 
-    python scripts/db_setup.py setup    # non-destructive (default)
-    python scripts/db_setup.py verify   # check an existing installation
-    python scripts/db_setup.py reset    # DESTRUCTIVE: drop + recreate the QJ database
+    python scripts/db_setup.py setup            # non-destructive (default)
+    python scripts/db_setup.py verify           # check an existing installation
+    python scripts/db_setup.py reset            # DESTRUCTIVE: drop + recreate the QJ database
+    python scripts/db_setup.py narrow-runtime   # M7.3 upgrade: revoke DDL from an existing qj_user
 
 What ``setup`` does, in order, stopping at the first failure:
 
  1. connects to MySQL as an administrator (usually ``root``) -- used only here,
     never written to ``.env``;
  2. ``CREATE DATABASE IF NOT EXISTS`` (utf8mb4) -- an existing database is kept;
- 3. creates the application account ``'qj_user'@'127.0.0.1'`` and ``@'localhost'``
-    with privileges on this one database only (no ``ALL``, no global grants);
- 4. writes ``DATABASE_URL`` (and ``SECRET_KEY`` if missing) into ``.env``;
- 5. connects as the application account;
- 6. runs the full migration chain (``flask db upgrade``);
- 7. checks the database revision equals the repository head;
- 8. checks every model table exists, InnoDB/utf8mb4, and the seeded settings row;
- 9. starts the application against the database and requests ``/health`` and
-    ``/menu`` (a real read through the ORM).
+ 3. creates the **runtime** account ``'qj_user'@'127.0.0.1'`` and ``@'localhost'``
+    with DML-only privileges (``SELECT, INSERT, UPDATE, DELETE``) on this one
+    database only -- no ``ALL``, no global grants, no DDL (M7.3: database
+    privilege separation);
+ 4. creates the **migration** account ``'qj_migrator'@'127.0.0.1'`` and
+    ``@'localhost'`` with DML *and* DDL privileges on the same database --
+    several migrations back-fill or clean up data as part of a schema change
+    (e.g. ``7c4e1a9b52d3`` grandfathers pre-existing staff, several others
+    delete rows that would violate a widened CHECK constraint), so this
+    account needs more than just ``CREATE/ALTER/DROP``;
+ 5. writes ``DATABASE_URL`` (and ``SECRET_KEY`` if missing) into ``.env`` --
+    the **runtime** account only; the migration account's URL and password
+    are never written to any file, only held in this process's memory and
+    passed to the migration subprocess as ``MIGRATION_DATABASE_URL``;
+ 6. connects as the runtime account (a connectivity sanity check);
+ 7. runs the full migration chain (``flask db upgrade``) as the **migration**
+    account;
+ 8. checks the database revision equals the repository head;
+ 9. checks every model table exists, InnoDB/utf8mb4, and the seeded settings row;
+10. starts the application against the database and requests ``/health`` and
+    ``/menu`` (a real read through the ORM, using the runtime account).
 
-Passwords are read with ``getpass`` (not echoed) and are never printed. The
-application password is generated with ``secrets`` and only stored in ``.env``,
-which is git-ignored.
+``narrow-runtime`` is the explicit, opt-in upgrade path for an installation
+created before M7.3, where ``qj_user`` still holds DDL privileges from doing
+its own migrations. It is never run automatically by ``setup`` or ``reset``
+(an existing installation's grants are never touched without being asked
+for): it requires the admin password and a typed confirmation phrase, the
+same pattern ``reset`` already uses for its own destructive action. See
+``cmd_narrow_runtime`` below and docs/MYSQL_SETUP_HANDOFF.md section 5.7.
+
+Passwords are read with ``getpass`` (not echoed) and are never printed. Both
+account passwords are generated with ``secrets``; only the runtime one is
+ever written to ``.env`` (git-ignored).
 
 Advanced / automated use (all optional; defaults shown):
-    QJ_DB_HOST=127.0.0.1  QJ_DB_PORT=3306  QJ_DB_NAME=quick_junction  QJ_DB_USER=qj_user
+    QJ_DB_HOST=127.0.0.1  QJ_DB_PORT=3306  QJ_DB_NAME=quick_junction
+    QJ_DB_USER=qj_user  QJ_DB_MIGRATOR_USER=qj_migrator
     QJ_MYSQL_ADMIN_USER=root  QJ_MYSQL_ADMIN_PASSWORD=<not recommended on shared machines>
     QJ_ASSUME_YES=1  (accept the default answer to every question)
     QJ_LOAD_DEMO=1|0 (answer the "load demo data" question)
@@ -51,10 +73,14 @@ IDENT = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 SYSTEM_SCHEMAS = {"mysql", "sys", "information_schema", "performance_schema"}
 RESET_PHRASE = "RESET QUICK JUNCTION"
 
-# Privileges the application needs on its own database, and nothing else:
-# data access for the running app, plus schema changes for `flask db upgrade`
-# (and `downgrade`). SELECT ... FOR UPDATE needs SELECT + UPDATE.
-APP_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES"
+# M7.3 -- two accounts, not one. The running application never needs DDL
+# (verified: no CREATE/ALTER/DROP/LOCK TABLES anywhere in app/ at runtime --
+# `SELECT ... FOR UPDATE` needs only SELECT, not a table lock). Migrations
+# need more than DDL: several back-fill or clean up data as part of a schema
+# change (see the docstring above), so the migrator keeps DML too.
+RUNTIME_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE"
+MIGRATOR_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES"
+NARROW_RUNTIME_PHRASE = "NARROW QJ_USER"
 
 
 # --- console helpers ------------------------------------------------------------------
@@ -152,14 +178,18 @@ def settings():
         "port": int(os.environ.get("QJ_DB_PORT", "3306")),
         "db": os.environ.get("QJ_DB_NAME", "quick_junction"),
         "user": os.environ.get("QJ_DB_USER", "qj_user"),
+        "migrator_user": os.environ.get("QJ_DB_MIGRATOR_USER", "qj_migrator"),
     }
-    for key in ("db", "user"):
+    for key in ("db", "user", "migrator_user"):
         if not IDENT.match(s[key]):
             fail(f"'{s[key]}' is not a valid name.", "Use letters, digits and underscores only.")
     if s["db"].lower() in SYSTEM_SCHEMAS:
         fail(f"'{s['db']}' is a MySQL system database and cannot be used.")
-    if s["user"].lower() == "root":
-        fail("The application account must not be 'root'.", "Keep the default qj_user.")
+    if s["user"].lower() == "root" or s["migrator_user"].lower() == "root":
+        fail("Neither account may be 'root'.", "Keep the defaults qj_user / qj_migrator.")
+    if s["user"] == s["migrator_user"]:
+        fail("QJ_DB_USER and QJ_DB_MIGRATOR_USER must name two different accounts.",
+             "Keep the defaults qj_user / qj_migrator, or set both to distinct names.")
     return s
 
 
@@ -246,12 +276,12 @@ def existing_app_password(lines, s):
 
 
 def ensure_app_user(cur, s, password, password_from_env):
-    step(f"Creating the application account '{s['user']}' (only for database '{s['db']}')")
+    step(f"Creating the runtime account '{s['user']}' (DML only, for database '{s['db']}')")
     exists = [h for h in ("127.0.0.1", "localhost") if user_exists(cur, s["user"], h)]
     if exists and not password_from_env:
         say(f"    The MySQL account '{s['user']}' already exists, but .env does not contain its password.")
         if not confirm(f"Give '{s['user']}' a new password and store it in .env?", default_yes=True):
-            fail("Cannot continue without the application account's password.",
+            fail("Cannot continue without the runtime account's password.",
                  "Put the existing password into DATABASE_URL in .env, then re-run.")
     for host in ("127.0.0.1", "localhost"):
         if host in exists:
@@ -260,12 +290,33 @@ def ensure_app_user(cur, s, password, password_from_env):
         else:
             cur.execute(f"CREATE USER '{s['user']}'@'{host}' IDENTIFIED BY %s", (password,))
             ok(f"'{s['user']}'@'{host}' created")
-        cur.execute(f"GRANT {APP_PRIVILEGES} ON `{s['db']}`.* TO '{s['user']}'@'{host}'")
-    ok("Privileges granted on this database only: " + APP_PRIVILEGES)
+        # GRANT is additive only -- on an existing pre-M7.3 installation this
+        # does not remove any DDL the account already holds. See
+        # cmd_narrow_runtime() for the explicit, opt-in upgrade that does.
+        cur.execute(f"GRANT {RUNTIME_PRIVILEGES} ON `{s['db']}`.* TO '{s['user']}'@'{host}'")
+    ok("Privileges granted on this database only: " + RUNTIME_PRIVILEGES)
 
 
-def app_url(s, password):
-    return f"mysql+pymysql://{s['user']}:{quote_plus(password)}@{s['host']}:{s['port']}/{s['db']}"
+def ensure_migrator_user(cur, s, password):
+    """Creates (or re-points) the migration account. Its password is never
+    read back from anywhere -- a fresh one is generated every run and used
+    only for this process's migration step, in memory, never written to
+    .env or any other file. That makes resetting its password on every run
+    harmless: nothing outside this one run is expected to already know it."""
+    step(f"Creating the migration account '{s['migrator_user']}' (DML + DDL, used only for 'flask db upgrade')")
+    for host in ("127.0.0.1", "localhost"):
+        if user_exists(cur, s["migrator_user"], host):
+            cur.execute(f"ALTER USER '{s['migrator_user']}'@'{host}' IDENTIFIED BY %s", (password,))
+            ok(f"'{s['migrator_user']}'@'{host}' exists -- password reset for this run")
+        else:
+            cur.execute(f"CREATE USER '{s['migrator_user']}'@'{host}' IDENTIFIED BY %s", (password,))
+            ok(f"'{s['migrator_user']}'@'{host}' created")
+        cur.execute(f"GRANT {MIGRATOR_PRIVILEGES} ON `{s['db']}`.* TO '{s['migrator_user']}'@'{host}'")
+    ok("Privileges granted on this database only: " + MIGRATOR_PRIVILEGES)
+
+
+def app_url(s, password, user=None):
+    return f"mysql+pymysql://{user or s['user']}:{quote_plus(password)}@{s['host']}:{s['port']}/{s['db']}"
 
 
 def update_env(s, password):
@@ -298,25 +349,35 @@ def update_env(s, password):
 
 
 # --- migrations and verification ------------------------------------------------------------
-def child_env(url):
+def child_env(url, migration_url=None):
+    """DATABASE_URL always wins over .env for the child process (needed so it
+    boots with the right account even if .env is stale). MIGRATION_DATABASE_URL
+    is set only when a migration account URL is explicitly passed in -- a
+    stale value from the operator's own shell is removed otherwise, so an
+    unrelated subprocess (the smoke test, the demo seeder) never
+    accidentally picks one up."""
     env = dict(os.environ)
     env["DATABASE_URL"] = url          # a process variable wins over .env
+    if migration_url:
+        env["MIGRATION_DATABASE_URL"] = migration_url
+    else:
+        env.pop("MIGRATION_DATABASE_URL", None)
     env["LLM_WARMUP"] = "false"        # never load the language model for database work
     env.pop("QJ_MYSQL_ADMIN_PASSWORD", None)
     return env
 
 
-def app_connect_check(s, password):
+def app_connect_check(label, host, port, db, user, password):
     pymysql = import_pymysql()
-    step(f"Checking that '{s['user']}' can log in to '{s['db']}'")
+    step(f"Checking that '{user}' can log in to '{db}' ({label})")
     try:
-        conn = pymysql.connect(host=s["host"], port=s["port"], user=s["user"], password=password,
-                               database=s["db"], connect_timeout=10)
+        conn = pymysql.connect(host=host, port=port, user=user, password=password,
+                               database=db, connect_timeout=10)
         conn.close()
     except Exception as exc:
-        fail(f"The application account could not connect ({exc.__class__.__name__}).",
+        fail(f"The {label} account could not connect ({exc.__class__.__name__}).",
              "See docs/DATABASE_SETUP_GUIDE.md, Troubleshooting C and F.")
-    ok("Application account connected")
+    ok(f"{label[:1].upper()}{label[1:]} account connected")
 
 
 def repo_head():
@@ -330,11 +391,15 @@ def repo_head():
     return heads[0]
 
 
-def run_migrations(url):
-    step("Running the database migrations (flask db upgrade)")
+def run_migrations(runtime_url, migrator_url):
+    step("Running the database migrations (flask db upgrade) as the migration account")
     say("    This builds every Quick Junction table from the migration files. It can take a minute.")
+    # DATABASE_URL (runtime_url) is still required so the Flask app itself can
+    # boot and pass config validation; MIGRATION_DATABASE_URL is what
+    # migrations/env.py actually connects with (see that file) -- the
+    # running application never sees or uses the migrator account.
     result = subprocess.run([sys.executable, "-m", "flask", "--app", "run.py", "db", "upgrade"],
-                            cwd=ROOT, env=child_env(url), capture_output=True, text=True)
+                            cwd=ROOT, env=child_env(runtime_url, migrator_url), capture_output=True, text=True)
     applied = [ln.split("Running upgrade", 1)[1].strip() for ln in (result.stdout + result.stderr).splitlines()
                if "Running upgrade" in ln]
     if result.returncode != 0:
@@ -445,22 +510,27 @@ def env_credentials(s):
 def cmd_setup():
     s = settings()
     say("")
-    say(f"    Database: {s['db']}   Application account: {s['user']}   Server: {s['host']}:{s['port']}")
-    if not confirm("Create (or update) the Quick Junction database and application account?", default_yes=True):
+    say(f"    Database: {s['db']}   Runtime account: {s['user']}   "
+        f"Migration account: {s['migrator_user']}   Server: {s['host']}:{s['port']}")
+    if not confirm("Create (or update) the Quick Junction database and both accounts?", default_yes=True):
         say("    Nothing was changed.")
         return
     conn = admin_connect(s)
     lines = read_env_lines()
     known = existing_app_password(lines, s)
     password = known or secrets.token_urlsafe(24)
+    migrator_password = secrets.token_urlsafe(24)  # fresh every run; never persisted
     with conn.cursor() as cur:
         ensure_database(cur, s)
         ensure_app_user(cur, s, password, known is not None)
+        ensure_migrator_user(cur, s, migrator_password)
     conn.close()
     update_env(s, password)
     url = app_url(s, password)
-    app_connect_check(s, password)
-    run_migrations(url)
+    migrator_url = app_url(s, migrator_password, user=s["migrator_user"])
+    app_connect_check("runtime", s["host"], s["port"], s["db"], s["user"], password)
+    app_connect_check("migration", s["host"], s["port"], s["db"], s["migrator_user"], migrator_password)
+    run_migrations(url, migrator_url)
     verify(s, password, url)
     maybe_seed(url)
     say("")
@@ -471,7 +541,7 @@ def cmd_verify():
     s = settings()
     password = env_credentials(s)
     url = app_url(s, password)
-    app_connect_check(s, password)
+    app_connect_check("runtime", s["host"], s["port"], s["db"], s["user"], password)
     verify(s, password, url)
     say("")
     say("    SUCCESS: the Quick Junction database is verified.")
@@ -497,28 +567,76 @@ def cmd_reset():
     lines = read_env_lines()
     known = existing_app_password(lines, s)
     password = known or secrets.token_urlsafe(24)
+    migrator_password = secrets.token_urlsafe(24)  # fresh every run; never persisted
     with conn.cursor() as cur:
         step(f"Dropping and recreating '{s['db']}'")
         cur.execute(f"DROP DATABASE IF EXISTS `{s['db']}`")
         cur.execute(f"CREATE DATABASE `{s['db']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
         ok(f"'{s['db']}' is now empty")
         ensure_app_user(cur, s, password, known is not None)
+        ensure_migrator_user(cur, s, migrator_password)
     conn.close()
     update_env(s, password)
     url = app_url(s, password)
-    app_connect_check(s, password)
-    run_migrations(url)
+    migrator_url = app_url(s, migrator_password, user=s["migrator_user"])
+    app_connect_check("runtime", s["host"], s["port"], s["db"], s["user"], password)
+    app_connect_check("migration", s["host"], s["port"], s["db"], s["migrator_user"], migrator_password)
+    run_migrations(url, migrator_url)
     verify(s, password, url)
     maybe_seed(url)
     say("")
     say("    SUCCESS: the Quick Junction database was reset and rebuilt.")
 
 
+def cmd_narrow_runtime():
+    """M7.3 upgrade path for an installation created before the privilege
+    split: revokes every privilege ``qj_user`` currently holds and re-grants
+    only RUNTIME_PRIVILEGES. Never run by ``setup``/``reset`` automatically --
+    an existing installation's grants are only ever changed here, and only
+    with the admin password and this typed confirmation.
+
+    Safe to run even if ``qj_user`` already has exactly RUNTIME_PRIVILEGES
+    (REVOKE ALL then GRANT the narrow set again is idempotent). Does not
+    touch qj_migrator, any other account, or any other database."""
+    s = settings()
+    say("")
+    say("    This revokes ALL current privileges from the runtime account")
+    say(f"    '{s['user']}' on '{s['db']}' and re-grants only: {RUNTIME_PRIVILEGES}.")
+    say(f"    Use this after confirming '{s['migrator_user']}' exists and can run")
+    say("    migrations on its own (run 'setup' first if it does not).")
+    try:
+        typed = input(f"    Type {NARROW_RUNTIME_PHRASE} to continue: ")
+    except EOFError:
+        typed = ""
+    if typed.strip() != NARROW_RUNTIME_PHRASE:
+        say("    The phrase did not match. Nothing was changed.")
+        sys.exit(1)
+    conn = admin_connect(s)
+    with conn.cursor() as cur:
+        for host in ("127.0.0.1", "localhost"):
+            if not user_exists(cur, s["user"], host):
+                say(f"    '{s['user']}'@'{host}' does not exist -- nothing to narrow there.")
+                continue
+            step(f"Narrowing '{s['user']}'@'{host}' to {RUNTIME_PRIVILEGES}")
+            cur.execute(f"REVOKE ALL PRIVILEGES, GRANT OPTION FROM '{s['user']}'@'{host}'")
+            cur.execute(f"GRANT {RUNTIME_PRIVILEGES} ON `{s['db']}`.* TO '{s['user']}'@'{host}'")
+            ok(f"'{s['user']}'@'{host}' now holds only: {RUNTIME_PRIVILEGES}")
+    conn.close()
+    say("")
+    say(f"    SUCCESS: '{s['user']}' no longer has DDL. Run 'python scripts/db_setup.py verify' to confirm "
+        "the application still works.")
+
+
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "setup"
-    commands = {"setup": cmd_setup, "verify": cmd_verify, "reset": cmd_reset}
+    commands = {
+        "setup": cmd_setup,
+        "verify": cmd_verify,
+        "reset": cmd_reset,
+        "narrow-runtime": cmd_narrow_runtime,
+    }
     if command not in commands:
-        say("Usage: python scripts/db_setup.py [setup|verify|reset]")
+        say("Usage: python scripts/db_setup.py [setup|verify|reset|narrow-runtime]")
         sys.exit(2)
     os.chdir(ROOT)
     commands[command]()

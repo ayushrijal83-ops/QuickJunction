@@ -16,7 +16,7 @@ status, and the evidence required to mark an item READY.
 - Scope: one restaurant per installation. "1,000 customers" means 1,000
   registered customer accounts, **not** 1,000 concurrent users.
 
-Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry), M4 (account security and staff onboarding) and M5 (menu & restaurant foundation), reviewed 2026-10-08. M7.2 (database backup/restore tooling) reviewed 2026-11-01.
+Last reviewed: **2026-10-04**, release **v0.9.0** (audited prototype baseline) plus unreleased M1 (`flask create-admin`), M2 (Phase 1A security hardening), M3 (staff order entry), M4 (account security and staff onboarding) and M5 (menu & restaurant foundation), reviewed 2026-10-08. M7.2 (database backup/restore tooling) reviewed 2026-11-01. M7.3 (database privilege separation) reviewed 2026-11-02.
 Overall: **NOT READY FOR PRODUCTION.**
 
 ---
@@ -34,7 +34,7 @@ Overall: **NOT READY FOR PRODUCTION.**
 | S7 | Reservation abuse protection | READY (application) | M2: `RESERVATION_ACTIVE_LIMIT` (default 2 active future CONFIRMED) under a `users`-row lock; MySQL race test passes 15/15 rounds × 5 runs and fails without the lock (`docs/SECURITY.md` §18.3) | Per-account cap enforced under concurrency (MySQL test) |
 | S8 | Secret management | NOT STARTED | `.env` file; production location and rotation undocumented | Secrets in a root-owned 0600 file outside the code tree; rotation procedure documented; no real credentials in comments |
 | S9 | Audit integrity | IN PROGRESS | M2: business change and audit row commit in one transaction (`commit_with`), failure-injection tests; independent auth events commit separately (`docs/SECURITY.md` §18.4). Retention job not started | Same-transaction audit for business events; retention job |
-| S10 | Database privilege separation | NOT STARTED | One account holds DML **and** DDL (`scripts/db_setup.py`) | Runtime account DML-only; separate migration account |
+| S10 | Database privilege separation | IN PROGRESS | M7.3: `scripts/db_setup.py` (and `setup.ps1`) create a DML-only runtime account (`qj_user`: `SELECT, INSERT, UPDATE, DELETE`) and a separate migration account (`qj_migrator`: adds `CREATE, ALTER, DROP, INDEX, REFERENCES`), used via `MIGRATION_DATABASE_URL`. `migrations/env.py` connects with it when set, falling back to `DATABASE_URL` otherwise -- a pre-M7.3 installation is unaffected until `narrow-runtime` is run. Restoring a backup into a narrowed installation (needs `CREATE`, which `qj_user` no longer has) is handled by `restore_database.py --rotate-migration-credentials`: an admin-mediated one-time `qj_migrator` password, minted, used, and rotated away immediately after, every M7.2 safety check unchanged. Proven in mocked unit tests (`tests/test_privilege_separation.py`, `tests/test_backup_restore.py`); the opt-in live-MySQL drill in `test_privilege_separation.py` (create both accounts, run the real migration chain as `qj_migrator`, prove `qj_user` DML succeeds and DDL is denied) has not yet been executed against a real server -- see that file's `privsep_live` fixture | The live drill run at least once against a real server; `--rotate-migration-credentials` exercised against real MySQL (today proven only by mocked tests) |
 | S11 | Security headers | IN PROGRESS | CSP (no inline script), `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `no-store` — tested; HSTS only when cookies are Secure | Verified on the deployed HTTPS stack; `Server` version header hidden |
 | S12 | CSRF | READY (application) | `CSRFProtect` app-wide; all state changes are POST forms; tested | Re-verify behind the reverse proxy |
 | S13 | Password hashing | READY (application) | Argon2id library defaults (`app/utils/security.py`); rehash on successful login (M2) | Re-verify on the production stack |
@@ -73,7 +73,7 @@ Overall: **NOT READY FOR PRODUCTION.**
 | --- | --- | --- | --- | --- |
 | R1 | Semantic version | IN PROGRESS | `v0.9.0` tag (M0) | Version in code, shown to admins and in a restricted version endpoint; CI checks tag = code version |
 | R2 | CHANGELOG | IN PROGRESS | `CHANGELOG.md` with Migration / Operator-action sections (M0) | Enforced on every release tag |
-| R3 | Migrations | IN PROGRESS | 11 linear revisions, head `f3a6d9b2e8c5`; upgrade tested on SQLite and MySQL in CI; full downgrade fails on MySQL (#32) | Every new migration has a MySQL upgrade/downgrade test or is marked irreversible; separate migration account |
+| R3 | Migrations | IN PROGRESS | 11 linear revisions, head `f3a6d9b2e8c5`; upgrade tested on SQLite and MySQL in CI; full downgrade fails on MySQL (#32). M7.3: migrations now run under a separate `qj_migrator` account (see S10) | Every new migration has a MySQL upgrade/downgrade test or is marked irreversible |
 | R4 | Upgrade procedure | NOT STARTED | — | One-command upgrade with mandatory pre-upgrade backup, rehearsed on staging |
 | R5 | Rollback procedure | BLOCKED (by P1, R4) | — | Scripted rollback (code-only and with-migration paths), rehearsed |
 | R6 | Release artifact | NOT STARTED | Source checkout; transitive dependencies unpinned | Tagged artifact with hash-locked requirements; model files distributed with checksums |

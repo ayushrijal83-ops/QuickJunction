@@ -1,14 +1,33 @@
-"""Quick Junction -- MySQL restore (M7.2).
+"""Quick Junction -- MySQL restore (M7.2, M7.3).
 
     python scripts/restore_database.py --backup <path> --target quick_junction_test
     python scripts/restore_database.py --backup <path> --target quick_junction \\
         --allow-production-target --confirm "RESTORE quick_junction"
+
+    # Once the runtime account's DDL has been revoked (M7.3's
+    # narrow-runtime), --database-url's own account cannot create tables --
+    # add this to mint a one-time qj_migrator password, use it for just
+    # this restore, and rotate it away immediately after:
+    python scripts/restore_database.py --backup <path> --target quick_junction_test \\
+        --rotate-migration-credentials
 
 Restores a backup made by scripts/backup_database.py into an explicitly
 named, already-existing target database. Verifies the backup's SHA-256
 checksum against its metadata sidecar before touching anything, decrypts it
 if needed, runs it through `mysql`, then checks the restored database's
 tables and row counts against what backup time recorded.
+
+--rotate-migration-credentials (M7.3): a restore replays a dump's CREATE
+TABLE statements, which needs more than the DML-only runtime account has
+once narrowed. The migration account's password is deliberately never
+persisted anywhere (see docs/MYSQL_SETUP_HANDOFF.md section 5.5), so there
+is nothing to pass in from memory -- this flag obtains the MySQL admin
+password (interactively, or via QJ_MYSQL_ADMIN_USER/QJ_MYSQL_ADMIN_PASSWORD),
+uses it to set qj_migrator's password to a fresh one-time value, restores
+with that, and rotates the password away again immediately afterward --
+whether the restore succeeded or not. Every safety check below is
+unchanged; this only changes how the database URL used for the restore
+itself is obtained. See restore_backup_with_rotated_credentials().
 
 Safety (non-negotiable, not configurable away by an ordinary flag):
   - The target may never be a MySQL system schema (mysql, sys,
@@ -40,10 +59,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from sqlalchemy.engine import make_url
@@ -289,6 +310,74 @@ def restore_backup(
     return results
 
 
+def restore_backup_with_rotated_credentials(
+    backup_path: Path,
+    database_url: str,
+    target: str,
+    key_file: Path | None,
+    allow_production_target: bool = False,
+    confirm: str | None = None,
+) -> dict[str, tuple[int, int]]:
+    """M7.3 -- restoring into a narrowed installation (runtime account is
+    DML-only) needs the migration account, because a restore replays a
+    dump's CREATE TABLE statements. The migration account's password is
+    deliberately never persisted anywhere (see docs/MYSQL_SETUP_HANDOFF.md
+    section 5.5), so there is nothing to "just pass in" -- this mints one,
+    one time, via the MySQL admin account, uses it for exactly this
+    restore, and rotates it away again immediately afterward regardless of
+    whether the restore succeeded.
+
+    Every other safety check is restore_backup()'s own, completely
+    unchanged -- checksum verification, encryption key handling, the
+    empty-target check, the production-target confirmation phrase, and
+    system-schema rejection all still happen exactly as before. This
+    function only changes how the database URL passed to restore_backup()
+    is obtained; it calls that function once, with no logic duplicated.
+
+    --database-url's host/port are used to reach the server; its own
+    account is not used for the restore itself. The migration account
+    (QJ_DB_MIGRATOR_USER, default qj_migrator) is scoped to `target` --
+    the actual restore destination, not whatever database --database-url
+    happened to name."""
+    from scripts.db_setup import admin_connect, ensure_migrator_user
+
+    url = make_url(database_url)
+    migrator_user = os.environ.get("QJ_DB_MIGRATOR_USER", "qj_migrator")
+    admin_settings = {"host": url.host, "port": url.port or 3306}
+    migrator_settings = {"host": url.host, "port": url.port or 3306, "db": target, "migrator_user": migrator_user}
+
+    step(f"Obtaining a one-time password for the migration account {migrator_user!r}")
+    admin = admin_connect(admin_settings)
+    try:
+        one_time_password = secrets.token_urlsafe(24)
+        with admin.cursor() as cur:
+            ensure_migrator_user(cur, migrator_settings, one_time_password)
+        ok(f"{migrator_user!r} is ready for this restore only")
+
+        migrator_url = (
+            f"mysql+pymysql://{migrator_user}:{quote_plus(one_time_password)}@{url.host}:{url.port or 3306}/{target}"
+        )
+        return restore_backup(
+            backup_path=backup_path,
+            database_url=migrator_url,
+            target=target,
+            key_file=key_file,
+            allow_production_target=allow_production_target,
+            confirm=confirm,
+        )
+    finally:
+        step(f"Rotating {migrator_user!r} to a password nobody will keep")
+        try:
+            with admin.cursor() as cur:
+                ensure_migrator_user(cur, migrator_settings, secrets.token_urlsafe(24))
+            ok("Done -- the password used for this restore no longer works")
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            warn(f"Could not rotate the migration account's password away ({exc.__class__.__name__}). "
+                 "The one-time password above may still work; rotate it by hand (e.g. "
+                 "'python scripts/db_setup.py setup') if that matters to you.")
+        admin.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--backup", required=True, type=Path)
@@ -297,14 +386,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--key-file", default=os.environ.get("QJ_BACKUP_ENCRYPTION_KEY_FILE"))
     parser.add_argument("--allow-production-target", action="store_true")
     parser.add_argument("--confirm", default=None, metavar='"RESTORE <target>"')
+    parser.add_argument("--rotate-migration-credentials", action="store_true",
+                         help="obtain a one-time qj_migrator password via the MySQL admin account "
+                              "(interactive, or QJ_MYSQL_ADMIN_USER/QJ_MYSQL_ADMIN_PASSWORD), use it only "
+                              "for this restore, and rotate it away immediately after. Needed once the "
+                              "runtime account's DDL has been revoked with "
+                              "'python scripts/db_setup.py narrow-runtime' -- see "
+                              "docs/MYSQL_SETUP_HANDOFF.md section 5.9")
     args = parser.parse_args(argv)
 
     if not args.database_url:
         say("No DATABASE_URL and no --database-url given.")
         return 2
 
+    restore_fn = restore_backup_with_rotated_credentials if args.rotate_migration_credentials else restore_backup
     try:
-        restore_backup(
+        restore_fn(
             backup_path=args.backup,
             database_url=args.database_url,
             target=args.target,

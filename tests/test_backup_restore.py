@@ -604,6 +604,148 @@ def test_verify_restored_data_wraps_mysql_errors_with_context(monkeypatch):
 
 
 # =============================================================================
+# M7.3 -- restoring with a one-time rotated migration-account credential
+# =============================================================================
+
+
+class _NullCursor:
+    """A cursor that answers nothing and records nothing -- used only to let
+    admin_connect()/ensure_migrator_user() run without touching a real
+    database; the tests below replace ensure_migrator_user() itself to
+    observe what it was called with."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def execute(self, *args, **kwargs):
+        pass
+
+    def fetchone(self):
+        return ("8.0.46",)
+
+
+class _FakeAdminConnection:
+    def cursor(self):
+        return _NullCursor()
+
+    def close(self):
+        pass
+
+
+def _patch_admin_connect(monkeypatch):
+    import scripts.db_setup as ds
+
+    monkeypatch.setattr(ds, "admin_connect", lambda settings: _FakeAdminConnection())
+    return ds
+
+
+def test_rotated_restore_mints_one_password_uses_it_then_rotates_to_a_different_one(monkeypatch, tmp_path):
+    ds = _patch_admin_connect(monkeypatch)
+    passwords_used = []
+    monkeypatch.setattr(ds, "ensure_migrator_user", lambda cur, s, password: passwords_used.append(password))
+
+    captured = {}
+    monkeypatch.setattr(rd, "restore_backup", lambda **kwargs: captured.update(kwargs) or {})
+
+    rd.restore_backup_with_rotated_credentials(
+        backup_path=tmp_path / "whatever.sql",
+        database_url="mysql+pymysql://u:p@127.0.0.1:3306/fake_test",
+        target="fake_test", key_file=None,
+    )
+
+    assert len(passwords_used) == 2, "must mint one password, then rotate to a second, different one"
+    minted, rotated_away = passwords_used
+    assert minted != rotated_away
+    assert "qj_migrator" in captured["database_url"]
+    assert minted in captured["database_url"], "the restore must actually use the minted password"
+    assert rotated_away not in captured["database_url"]
+
+
+def test_rotated_restore_still_rotates_away_the_password_when_restore_fails(monkeypatch, tmp_path):
+    ds = _patch_admin_connect(monkeypatch)
+    passwords_used = []
+    monkeypatch.setattr(ds, "ensure_migrator_user", lambda cur, s, password: passwords_used.append(password))
+    monkeypatch.setattr(rd, "restore_backup", lambda **kwargs: (_ for _ in ()).throw(BackupError("boom")))
+
+    with pytest.raises(BackupError, match="boom"):
+        rd.restore_backup_with_rotated_credentials(
+            backup_path=tmp_path / "whatever.sql",
+            database_url="mysql+pymysql://u:p@127.0.0.1:3306/fake_test",
+            target="fake_test", key_file=None,
+        )
+
+    assert len(passwords_used) == 2, "the password must still be rotated away even though the restore failed"
+
+
+def test_rotated_restore_scopes_the_migrator_to_the_restore_target_not_database_url(monkeypatch, tmp_path):
+    """--database-url's own database name is irrelevant to a restore (the
+    real destination is --target); the migration account's grant must be
+    scoped to the actual target, not whatever database --database-url
+    happened to name."""
+    ds = _patch_admin_connect(monkeypatch)
+    seen_settings = []
+    monkeypatch.setattr(ds, "ensure_migrator_user", lambda cur, s, password: seen_settings.append(dict(s)))
+    monkeypatch.setattr(rd, "restore_backup", lambda **kwargs: {})
+
+    rd.restore_backup_with_rotated_credentials(
+        backup_path=tmp_path / "whatever.sql",
+        database_url="mysql+pymysql://u:p@127.0.0.1:3306/some_other_database",
+        target="fake_target_test", key_file=None,
+    )
+
+    assert seen_settings, "ensure_migrator_user was never called"
+    assert all(s["db"] == "fake_target_test" for s in seen_settings)
+
+
+def test_rotated_restore_never_prints_either_password(monkeypatch, tmp_path, capsys):
+    ds = _patch_admin_connect(monkeypatch)
+    passwords_used = []
+    monkeypatch.setattr(ds, "ensure_migrator_user", lambda cur, s, password: passwords_used.append(password))
+    monkeypatch.setattr(rd, "restore_backup", lambda **kwargs: {})
+
+    rd.restore_backup_with_rotated_credentials(
+        backup_path=tmp_path / "whatever.sql",
+        database_url="mysql+pymysql://u:p@127.0.0.1:3306/fake_test",
+        target="fake_test", key_file=None,
+    )
+
+    out = capsys.readouterr().out
+    assert passwords_used, "ensure_migrator_user was never called"
+    for password in passwords_used:
+        assert password not in out
+
+
+def test_main_uses_the_rotated_credentials_path_only_when_the_flag_is_given(monkeypatch, tmp_path):
+    called = {}
+    monkeypatch.setattr(rd, "restore_backup_with_rotated_credentials",
+                        lambda **kw: called.setdefault("rotated", kw) or {})
+    monkeypatch.setattr(rd, "restore_backup", lambda **kw: called.setdefault("plain", kw) or {})
+
+    rc = rd.main(["--backup", str(tmp_path / "x.sql"), "--target", "fake_test",
+                  "--database-url", "mysql+pymysql://u:p@127.0.0.1:3306/fake_test",
+                  "--rotate-migration-credentials"])
+
+    assert rc == 0
+    assert "rotated" in called and "plain" not in called
+
+
+def test_main_uses_the_plain_restore_path_by_default(monkeypatch, tmp_path):
+    called = {}
+    monkeypatch.setattr(rd, "restore_backup", lambda **kw: called.setdefault("plain", kw) or {})
+    monkeypatch.setattr(rd, "restore_backup_with_rotated_credentials",
+                        lambda **kw: called.setdefault("rotated", kw) or {})
+
+    rc = rd.main(["--backup", str(tmp_path / "x.sql"), "--target", "fake_test",
+                  "--database-url", "mysql+pymysql://u:p@127.0.0.1:3306/fake_test"])
+
+    assert rc == 0
+    assert "plain" in called and "rotated" not in called
+
+
+# =============================================================================
 # the live drill -- real MySQL, disposable *_test database only
 # =============================================================================
 

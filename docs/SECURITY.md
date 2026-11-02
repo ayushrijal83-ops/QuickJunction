@@ -898,7 +898,7 @@ order-status management in M05) are removed from this list.
 | 3 | ~~Security headers~~ — **done (M16)** in `app/utils/headers.py`: CSP without inline script, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `no-store` on signed-in pages, HSTS when cookies are Secure. Still to verify on the deployed HTTPS stack | — |
 | 4 | Strip the `Server` header — the dev server advertises `Werkzeug/... Python/...` | deployment |
 | 5 | TLS termination + HTTP→HTTPS redirect | deployment |
-| 6 | Least-privilege MySQL — **partly done**: `scripts/db_setup.py` creates a dedicated account with no `GRANT ALL`, but it also holds DDL (`CREATE, ALTER, DROP, INDEX, REFERENCES`) because it runs migrations. Still needed: a DML-only runtime account plus a separate migration account. (The older `setup.ps1` still uses `GRANT ALL`.) | deployment |
+| 6 | ~~Least-privilege MySQL~~ — **done (M7.3)**: `scripts/db_setup.py` (and `setup.ps1`, no more `GRANT ALL` anywhere) create two accounts -- `qj_user` (DML only: `SELECT, INSERT, UPDATE, DELETE`), used by the running application via `DATABASE_URL`, and `qj_migrator` (adds `CREATE, ALTER, DROP, INDEX, REFERENCES`), used only for `flask db upgrade`/`downgrade` via `MIGRATION_DATABASE_URL`. A pre-M7.3 installation keeps working unchanged (`MIGRATION_DATABASE_URL` absent falls back to `DATABASE_URL`, as before) until `python scripts/db_setup.py narrow-runtime` is run deliberately. See `docs/MYSQL_SETUP_HANDOFF.md` §5.5. | — |
 | 7 | Password reset flow (with its own rate limiting and token expiry) | first locked-out real user |
 | 8 | Email verification at registration | before email is trusted for anything (e.g. password reset) |
 | 9 | ~~Login-time rehash~~ — **done (M2)**, §18.6 | — |
