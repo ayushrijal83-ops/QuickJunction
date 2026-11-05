@@ -254,9 +254,16 @@ def test_correction_can_rescue_an_otherwise_negative_effective_amount(db):
 
 
 def test_order_id_foreign_key_requires_existing_order(db):
+    """recorded_by_id must be a real user (ck_payment_ledger_entries_recorded_by_presence,
+    M7.5.1) so this row violates exactly one constraint -- the order_id FK --
+    not two at once: on MySQL, a row that simultaneously violates a CHECK
+    and a FK reports the CHECK (error 3819) before the FK, which is a
+    different exception than this test was written to expect."""
+    actor = member()
     with pytest.raises(sa.exc.IntegrityError):
         _db.session.add(PaymentLedgerEntry(
             order_id=999999, entry_type=LedgerEntryType.ADJUSTMENT, amount=D("1.00"),
+            recorded_by_id=actor.id,
         ))
         _db.session.flush()
     _db.session.rollback()
