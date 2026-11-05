@@ -337,3 +337,35 @@ def test_money_is_decimal_not_float(db):
     order, cashier = place(customer(), price="0.10", qty=3), member()
     entry = record_ledger_payment(order, order.total, "cash", cashier)
     assert isinstance(entry.amount, Decimal) and entry.amount == order.total
+
+
+# --- M7.5.3.7: _clear_ledger_self_references must not force-activate the
+# shared app/db fixture for a test that never asked for it -------------------
+
+
+def test_clear_ledger_self_references_does_not_activate_app_for_a_test_without_it():
+    """A test that requests neither `app` nor `db` (the shape every
+    tests/test_payment_ledger_migration.py test takes, building its own
+    independent application instead) must never have the shared app/db
+    fixture silently activated by the autouse
+    _clear_ledger_self_references fixture. If it were, this test would be
+    running inside a pushed Flask application context -- it is not."""
+    from flask import has_app_context
+    assert not has_app_context()
+
+
+def test_clear_ledger_self_references_still_cleans_up_when_db_is_used(db):
+    """Positive case, for contrast with the test above: a test that *does*
+    use the standard db fixture still gets its refund self-references
+    cleared before drop_all() -- unchanged behavior, just no longer
+    unconditionally activated. (The real proof is that this test, and
+    every other ledger-refund test in the suite, tears down cleanly
+    without the SQLite 'FOREIGN KEY constraint failed' DROP TABLE error
+    documented on the fixture itself; this just makes the data-level
+    precondition for that explicit.)"""
+    order, cashier = place(customer(), price="20.00", qty=1), member()
+    payment = record_ledger_payment(order, order.total, "cash", cashier)
+    refund_ledger_payment(payment, "1.00", "test", cashier)
+    assert _db.session.query(PaymentLedgerEntry).filter_by(
+        order_id=order.id, entry_type=LedgerEntryType.REFUND
+    ).count() == 1

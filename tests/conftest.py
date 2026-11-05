@@ -112,7 +112,7 @@ def app() -> Flask:
 
 
 @pytest.fixture(autouse=True)
-def _clear_ledger_self_references(app):
+def _clear_ledger_self_references(request):
     """SQLite enforces ON DELETE RESTRICT even while dropping the whole
     self-referencing payment_ledger_entries table (a real sqlite3
     limitation -- 'FOREIGN KEY constraint failed' straight out of DROP
@@ -121,8 +121,37 @@ def _clear_ledger_self_references(app):
     before the ``app`` fixture's drop_all() runs; this changes nothing
     about the RESTRICT the schema itself enforces at runtime. Global
     (M7.5.3): any test that records a ledger refund needs this, not only
-    the payment-ledger model/service test files."""
+    the payment-ledger model/service test files.
+
+    M7.5.3.7 correction: this used to depend on ``app`` directly, which
+    forced pytest to activate the shared app/db fixture -- and so the
+    shared TEST_DATABASE_URL database under CI -- for *every* test in the
+    suite, including ones that build their own, independent application
+    (tests/test_payment_ledger_migration.py's ``_app()`` helper, now
+    correctly isolated to its own SQLite engine). Those tests never
+    request ``app``/``db`` as pytest fixtures at all, so under MySQL CI
+    this surfaced as a teardown error ('payment_ledger_entries doesn't
+    exist') against the shared database they were never touching on
+    purpose. ``request.fixturenames`` lists ``app`` whenever a test
+    requests it directly or via ``db`` (which depends on it); checking
+    that first and fetching ``app`` lazily only when it is already needed
+    preserves the exact same cleanup, in the exact same order relative to
+    ``app``'s own ``drop_all()`` (``getfixturevalue()`` registers that
+    dependency too), without ever activating ``app`` for a test that
+    never asked for it.
+
+    The fetch happens *before* ``yield``, not after: ``getfixturevalue()``
+    only registers a correct teardown-ordering dependency when called
+    during setup. Called after ``yield`` instead, ``app`` -- having no
+    declared relationship to this fixture -- can and did finalize first,
+    making this fixture's own teardown run against an already-torn-down
+    fixture ('fixture value for "app" is not available')."""
+    needs_cleanup = "app" in request.fixturenames
+    if needs_cleanup:
+        request.getfixturevalue("app")
     yield
+    if not needs_cleanup:
+        return
     _db.session.execute(sa.text("DELETE FROM payment_ledger_entries WHERE reversed_entry_id IS NOT NULL"))
     _db.session.execute(sa.text("DELETE FROM payment_ledger_entries"))
     _db.session.commit()
