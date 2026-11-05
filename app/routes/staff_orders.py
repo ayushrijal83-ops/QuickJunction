@@ -29,7 +29,12 @@ from app.routes.forms import DiscountForm, OrderStatusForm, PaymentForm, RefundF
 from app.services.audit import record_event
 from app.services.cart import MAX_QUANTITY_PER_ITEM, MIN_QUANTITY, build_cart_view
 from app.services.menu import list_public_menu_items
-from app.services.payments import PaymentError, record_payment, refund_payment
+from app.services.payment_ledger import (
+    LedgerPaymentError,
+    get_payment_entry_for_order,
+    record_ledger_payment,
+    refund_ledger_payment,
+)
 from app.services.pricing import PricingError, apply_discount, current_settings, preview
 from app.services.orders import (
     STAFF_ORDER_SOURCES,
@@ -272,7 +277,7 @@ def order_status_update(order_id: int):
     return back
 
 
-def _flash_payment_errors(exc: PaymentError) -> None:
+def _flash_payment_errors(exc: LedgerPaymentError) -> None:
     for messages in exc.errors.values():
         for message in messages:
             flash(message, "error")
@@ -281,6 +286,10 @@ def _flash_payment_errors(exc: PaymentError) -> None:
 @staff_orders_bp.post("/orders/<int:order_id>/payment")
 @require_role(Role.STAFF, Role.ADMIN)
 def record_order_payment(order_id: int):
+    """M7.5.3: ledger-backed -- app/services/payment_ledger.py writes its own
+    PAYMENT_RECORDED audit event; this route builds none itself. Multiple
+    partial payments are now possible, so this may be called more than
+    once against the same order."""
     order = get_order_for_staff(order_id)
     if order is None:
         abort(404)
@@ -289,53 +298,37 @@ def record_order_payment(order_id: int):
         flash("Could not record the payment.", "error")
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
     actor = get_current_user()
-
-    def audit(payment):
-        return record_event(
-            AuditEvent.PAYMENT_RECORDED,
-            success=True,
-            user_id=actor.id,
-            ip_address=client_ip(),
-            user_agent=user_agent(),
-            metadata={"order_id": order.id, "payment_id": payment.id, "method": payment.method.value,
-                      "amount": str(payment.amount)},
-        )
-
     try:
-        payment = record_payment(order, form.method.data, actor, audit=audit)
-    except PaymentError as exc:
+        entry = record_ledger_payment(order, form.amount.data, form.method.data, actor)
+    except LedgerPaymentError as exc:
         _flash_payment_errors(exc)
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
-    flash(f"Payment of {payment.amount} recorded for order #{order.id}.", "success")
+    flash(f"Payment of {entry.amount} recorded for order #{order.id}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))
 
 
-@staff_orders_bp.post("/orders/<int:order_id>/refund")
+@staff_orders_bp.post("/orders/<int:order_id>/payments/<int:entry_id>/refund")
 @require_role(Role.ADMIN)
-def refund_order_payment(order_id: int):
-    """ADMIN only: money leaving the business is a manager's decision."""
+def refund_order_payment(order_id: int, entry_id: int):
+    """ADMIN only: money leaving the business is a manager's decision.
+    ``entry_id`` names the specific payment ledger entry being refunded --
+    an order can now have more than one. 404s rather than guessing which
+    payment was meant if the id does not belong to this order."""
     order = get_order_for_staff(order_id)
-    if order is None or order.payment is None:
+    if order is None:
+        abort(404)
+    payment_entry = get_payment_entry_for_order(order_id, entry_id)
+    if payment_entry is None:
         abort(404)
     form = RefundForm()
     if not form.validate_on_submit():
-        flash("Enter a refund amount.", "error")
+        flash("Enter a refund amount and reason.", "error")
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
-    def audit(amount):
-        return record_event(
-            AuditEvent.PAYMENT_REFUNDED,
-            success=True,
-            user_id=get_current_user().id,
-            ip_address=client_ip(),
-            user_agent=user_agent(),
-            metadata={"order_id": order.id, "payment_id": order.payment.id, "amount": str(amount),
-                      "refunded_total": str(order.payment.refunded_amount)},
-        )
-
+    actor = get_current_user()
     try:
-        amount = refund_payment(order.payment, form.amount.data, form.reason.data, audit=audit)
-    except PaymentError as exc:
+        refund_ledger_payment(payment_entry, form.amount.data, form.reason.data, actor)
+    except LedgerPaymentError as exc:
         _flash_payment_errors(exc)
         return redirect(url_for("staff_orders.order_detail", order_id=order.id))
-    flash(f"Refunded {amount} on order #{order.id}.", "success")
+    flash(f"Refund recorded on order #{order.id}.", "success")
     return redirect(url_for("staff_orders.order_detail", order_id=order.id))

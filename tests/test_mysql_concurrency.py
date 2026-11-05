@@ -325,8 +325,13 @@ def test_two_cashiers_cannot_both_take_payment(app, db):
 
 
 def test_payment_vs_cancel_never_leaves_a_cancelled_order_holding_money(app, db):
-    from app.models.payment import Payment
-    from app.services.payments import PaymentError, record_payment
+    """M7.5.3: the cancellation guard (app/services/orders.py) now checks
+    orders.amount_settled exclusively, so this race is against the
+    ledger-backed record_ledger_payment -- the live path -- not the legacy
+    record_payment, which this guard no longer sees at all (a known,
+    documented limitation of leaving that function uncalled by any route;
+    see app/services/payment_ledger.py's cross-path note)."""
+    from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment
 
     customer, (a, b), place = _paid_order_fixture()
     for _ in range(ROUNDS):
@@ -334,9 +339,10 @@ def test_payment_vs_cancel_never_leaves_a_cancelled_order_holding_money(app, db)
 
         def pay():
             try:
-                record_payment(_db.session.get(Order, order_id), "card", _db.session.get(User, a))
+                order = _db.session.get(Order, order_id)
+                record_ledger_payment(order, order.total, "card", _db.session.get(User, a))
                 return "paid"
-            except PaymentError:
+            except LedgerPaymentError:
                 return "refused"
 
         def cancel():
@@ -351,8 +357,7 @@ def test_payment_vs_cancel_never_leaves_a_cancelled_order_holding_money(app, db)
         assert sorted(map(str, results)) in (["paid", "refused"], ["cancelled", "refused"]), results
         _db.session.rollback()
         row = _db.session.get(Order, order_id)
-        paid = _db.session.query(Payment).filter_by(order_id=order_id).count()
-        assert (row.status == OrderStatus.CANCELLED) != (paid == 1), (row.status, paid)
+        assert (row.status == OrderStatus.CANCELLED) != (row.amount_settled > 0), (row.status, row.amount_settled)
 
 
 def test_two_full_refunds_cannot_overdraw(app, db):
@@ -448,24 +453,54 @@ def test_two_full_ledger_refunds_cannot_overdraw(app, db):
 # --- Milestone 12: pricing ---------------------------------------------------------
 
 
-def test_discount_vs_payment_payment_always_matches_final_total(app, db):
-    """Both may succeed (discount first, then payment at the new total), or the
-    payment wins and the discount is refused -- but a payment must never be
-    taken at a total that then changes underneath it."""
-    from app.models.payment import Payment
-    from app.services.payments import PaymentError, record_payment
+def test_discount_vs_payment_payment_never_overcharges_a_stale_total(app, db):
+    """Models the real staff workflow precisely: staff reads the order
+    total (e.g. the balance due rendered on the order page), and only
+    *afterwards* does a concurrent discount race against their submission
+    of that already-read amount.
+
+    M7.5.3 correction (M7.5.3.2 Part 1): a first version of this test read
+    order.total *inside* pay(), immediately before calling
+    record_ledger_payment -- which does not model a stale read at all,
+    since nothing can have changed yet between that read and the lock
+    attempt a few microseconds later (unlike the legacy record_payment,
+    which always charged the freshly re-locked order.total itself and so
+    truly could never be blocked by a discount). That version's
+    `assert "paid" in results` was therefore still wrong in principle, even
+    though it was unlikely to be caught by 15 rounds of a near-simultaneous
+    race.
+
+    Here, read_total is captured once, *before* the race starts (the
+    "page load" moment), making a stale read structurally guaranteed, not
+    probabilistic. Discounts only ever reduce total, so the two outcomes
+    are deterministic by which operation wins the order-row lock:
+      - pay() wins: amount_settled(0) + read_total <= total (unchanged,
+        since discount() has not run yet) -> succeeds; discount() then
+        sees amount_settled > 0 -> refused.
+      - discount() wins: total drops below read_total -> pay()'s
+        conditional UPDATE WHERE amount_settled + read_total <= total
+        correctly fails -> refused, safely, with no ledger row written --
+        never a payment recorded for more than the final total, and never
+        a silently wrong one either.
+    ("discounted", "paid") is not a reachable outcome under a true stale
+    read, so it is deliberately not in the accepted outcome set below."""
+    from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
+    from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment
     from app.services.pricing import PricingError, apply_discount
 
     customer, (a, b), place = _paid_order_fixture()
     outcomes = set()
     for _ in range(ROUNDS):
-        order_id = place(customer).id
+        order = place(customer)
+        order_id = order.id
+        read_total = order.total  # the stale amount "staff" read before either race leg starts
 
         def pay():
             try:
-                record_payment(_db.session.get(Order, order_id), "cash", _db.session.get(User, a))
+                record_ledger_payment(_db.session.get(Order, order_id), read_total, "cash",
+                                      _db.session.get(User, a))
                 return "paid"
-            except PaymentError:
+            except LedgerPaymentError:
                 return "pay-refused"
 
         def discount():
@@ -476,14 +511,27 @@ def test_discount_vs_payment_payment_always_matches_final_total(app, db):
                 return "discount-refused"
 
         results = [str(r) for r in _race(app, pay, discount)]
-        assert "paid" in results, results  # the payment itself is never blocked by a discount
         outcomes.add(tuple(sorted(results)))
         _db.session.rollback()
         order = _db.session.get(Order, order_id)
-        payment = _db.session.query(Payment).filter_by(order_id=order_id).one()
-        assert payment.amount == order.total, (payment.amount, order.total, results)
+        entries = _db.session.query(PaymentLedgerEntry).filter_by(
+            order_id=order_id, entry_type=LedgerEntryType.PAYMENT
+        ).all()
+        if "paid" in results:
+            # Won the race before any discount applied: entry.amount is the
+            # stale read_total, but nothing had changed yet, so it still
+            # equals the (unchanged) final total -- never an overcharge.
+            assert len(entries) == 1 and entries[0].amount == read_total == order.total, (results, order.total)
+        else:
+            # Lost the race to a discount: the stale amount now exceeds the
+            # new total and must be safely refused, not silently accepted
+            # or partially recorded.
+            assert "pay-refused" in results, results
+            assert entries == [], (results, entries)
+            assert read_total > order.total, (read_total, order.total, results)
+        assert order.amount_settled <= order.total  # never an overcharge, race or no race
         assert (order.discount_amount > 0) == ("discounted" in results)
-    assert outcomes <= {("discount-refused", "paid"), ("discounted", "paid")}
+    assert outcomes <= {("discount-refused", "paid"), ("discounted", "pay-refused")}
 
 
 # --- Milestone 13: inventory -------------------------------------------------------

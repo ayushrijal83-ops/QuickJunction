@@ -1,16 +1,22 @@
-"""Ledger-backed payment recording and refunds (M7.5.2).
+"""Ledger-backed payment recording and refunds (M7.5.2, wired into the live
+staff routes by M7.5.3).
 
-``payment_ledger_entries`` is the source of truth for every *new* financial
-write this module makes -- see ``app/models/payment_ledger.py``. The legacy
+``payment_ledger_entries`` is the source of truth for every payment/refund
+``app/routes/staff_orders.py`` records now -- see
+``app/models/payment_ledger.py``. ``record_order_payment``/
+``refund_order_payment`` call ``record_ledger_payment``/
+``refund_ledger_payment`` directly; ``PaymentForm`` carries a real amount
+field and ``RefundForm.reason`` is mandatory, and the refund route takes
+the target payment entry's id in its URL (``/orders/<id>/payments/<entry_id>/
+refund``) rather than assuming one payment per order. The legacy
 ``app/services/payments.py`` (``Payment``/``payments``, one row per order,
-always for the order's full total) is untouched here and stays wired to the
-existing staff routes/forms: ``PaymentForm`` has no amount field ("the
-amount is always the order's server-side total") and ``RefundForm.reason``
-is optional, neither of which fits a multi-payment, mandatory-reason ledger.
-Wiring those routes to this module needs a UI change (an amount field, a
-payment-entry selector for refunds, a multi-payment list on the order
-detail page) -- out of scope for this milestone. See the M7.5.2 report for
-the full boundary.
+always for the order's full total) is no longer called by any route --
+it remains only for pre-cutover historical data and the tests that still
+exercise it directly. See the M7.5.3 report for the cutover's full scope,
+including the still-open reconciliation gap for orders paid through the
+legacy route between the M7.5.1 migration and this cutover actually
+deploying (``app/templates/partials/_payment_badge.html`` and
+``app/templates/staff/order_detail.html`` carry the UI-side mitigation).
 
 Locking, same rule as ``app/services/payments.py`` and ``app/services/
 orders.py``: every operation here locks the order row first (``SELECT ...
@@ -36,14 +42,19 @@ unconditional" -- so each function writes its own fixed
 ledger write and the ``amount_settled``/``refunded_amount`` projection
 update. There is nothing for a caller to bypass.
 
-Cross-path note: ``app/services/orders.py``'s cancellation guard
-(``holds_payment`` / ``_apply_transition``) still checks the legacy
-``payments`` table only, not ``orders.amount_settled``. Nothing in this
-milestone calls these functions from a route, so that guard is not yet
-exposed to ledger-recorded money; wiring it in without staling it for
-legacy-path orders (whose ``amount_settled`` is a one-time M7.5.1 backfill,
-never updated by the still-live legacy route) is part of the same
-route-wiring work this module's docstring defers. See the M7.5.2 report.
+Cross-path note (resolved by M7.5.3, with one residual gap): ``app/
+services/orders.py``'s cancellation guard (``holds_payment`` /
+``_apply_transition``) and ``app/services/pricing.py``'s discount guard
+now check ``orders.amount_settled`` exclusively, not the legacy
+``payments`` table -- safe because this module's route cutover means
+nothing live writes to ``payments`` for those guards to miss. The one
+remaining gap is historical: an order paid through the legacy route
+*after* the M7.5.1 migration ran but *before* this cutover actually
+deployed has a ``payments`` row with no corresponding ledger entry, and
+``amount_settled`` stuck at 0 for it. See the M7.5.3 report for the
+required reconciliation procedure (not yet executed against any real
+database) and ``_payment_badge.html``/``order_detail.html`` for the
+interim UI guard against double-collecting such an order.
 """
 
 from __future__ import annotations
@@ -87,6 +98,18 @@ def _lock_order(order_id: int) -> Order:
     return db.session.execute(
         sa.select(Order).where(Order.id == order_id).with_for_update().execution_options(populate_existing=True)
     ).scalar_one()
+
+
+def get_payment_entry_for_order(order_id: int, entry_id: int) -> PaymentLedgerEntry | None:
+    """The 'payment' entry a refund route targets, scoped to its order so
+    an entry id from a different order -- or a non-payment entry, such as
+    a refund's own id -- can never be looked up as a refund target by
+    guessing it. (``refund_ledger_payment`` re-checks ``entry_type`` itself
+    regardless; this filter makes the contract the name promises true one
+    layer earlier.)"""
+    return db.session.query(PaymentLedgerEntry).filter_by(
+        id=entry_id, order_id=order_id, entry_type=LedgerEntryType.PAYMENT
+    ).first()
 
 
 def record_ledger_payment(order: Order, raw_amount, raw_method, actor: User) -> PaymentLedgerEntry:

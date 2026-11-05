@@ -76,7 +76,7 @@
             <span class="small text-secondary">{{ order.created_at.strftime("%d %b, %H:%M") }}</span>
             <span class="qj-price">{{ order.total | money }}</span>
             <span>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
-              {% if order.status in cancellable and not order.payment %}<span class="small text-secondary ms-1">can cancel</span>{% endif %}</span>
+              {% if order.status in cancellable and order.amount_settled == 0 %}<span class="small text-secondary ms-1">can cancel</span>{% endif %}</span>
           </li>
         {% else %}
           <li class="list-group-item">{{ empty("bag", "No orders yet", "Your first plate is a few taps away.", "Browse the menu", url_for('menu.index'), compact=true) }}</li>

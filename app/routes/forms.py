@@ -195,8 +195,11 @@ class TableForm(FlaskForm):
 
 
 class PaymentForm(FlaskForm):
-    """Method only -- the amount is always the order's server-side total."""
+    """M7.5.3: amount + method. The ledger (app/services/payment_ledger.py)
+    re-validates the amount server-side against the order's real balance
+    due regardless of what is posted -- this only carries it and CSRF."""
 
+    amount = StringField("Amount", validators=[DataRequired(), Length(max=12)])
     method = StringField(validators=[DataRequired(), Length(max=16)])
     submit = SubmitField("Record payment")
 
@@ -256,8 +259,13 @@ class RecipeForm(FlaskForm):
 
 
 class RefundForm(FlaskForm):
+    """M7.5.3: reason is mandatory (app/services/payment_ledger.py requires
+    one); which payment entry is being refunded is the route's URL path,
+    not a form field -- a refund is always against one specific ledger
+    payment entry, never the order at large."""
+
     amount = StringField("Refund amount", validators=[DataRequired(), Length(max=12)])
-    reason = StringField("Reason", validators=[Optional(), Length(max=255)])
+    reason = StringField("Reason", validators=[DataRequired(), Length(max=255)])
     submit = SubmitField("Refund")
 
 

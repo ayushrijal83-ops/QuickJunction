@@ -13,11 +13,13 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.extensions import db as _db
 from app.models.audit_log import AuditEvent, AuditLog
-from app.models.order import OrderSource, OrderStatus
+from app.models.order import Order, OrderSource, OrderStatus
 from app.models.payment import Payment, PaymentMethod
+from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
 from app.models.restaurant_table import TableStatus
 from app.models.user import Role
 from app.services.orders import OrderStatusError, cancel_order_as_customer, update_order_status
+from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment, refund_ledger_payment
 from app.services.payments import PaymentError, record_payment, refund_payment
 from app.services.sales import build_report
 from app.services.tables import create_table
@@ -45,17 +47,33 @@ def audit(event):
 # --- recording --------------------------------------------------------------------
 
 
-def test_payment_amount_is_the_server_side_total(client, db):
+def test_payment_amount_is_server_validated_against_balance_due(client, db):
+    """M7.5.3: unlike the retired one-full-payment-per-order route, the
+    posted amount is now real (partial/multiple payments) -- but it is
+    still re-validated server-side against the order's actual balance due,
+    not trusted outright."""
     order = place(customer(), price="385.00", qty=3)
     cook = member()
     login(client, "cook")
-    r = client.post(f"/staff/orders/{order.id}/payment", data={"method": "card", "amount": "1.00", "total": "1.00"})
+    r = client.post(f"/staff/orders/{order.id}/payment", data={"method": "card", "amount": "1305.15"})
     assert r.status_code == 302
-    p = _db.session.query(Payment).one()
-    assert (p.order_id, p.method, p.amount, p.refunded_amount) == (order.id, PaymentMethod.CARD, D("1305.15"), D("0.00"))  # 1155.00 + 13 % tax
-    assert p.recorded_by_id == cook.id and p.captured_at is not None
+    entry = _db.session.query(PaymentLedgerEntry).filter_by(
+        order_id=order.id, entry_type=LedgerEntryType.PAYMENT
+    ).one()
+    assert (entry.order_id, entry.method, entry.amount) == (order.id, PaymentMethod.CARD, D("1305.15"))  # 1155.00 + 13 % tax
+    assert entry.recorded_by_id == cook.id and entry.created_at is not None
+    assert _db.session.get(Order, order.id).amount_settled == D("1305.15")
     assert audit(AuditEvent.PAYMENT_RECORDED) == [
-        {"order_id": order.id, "payment_id": p.id, "method": "card", "amount": "1305.15"}]
+        {"order_id": order.id, "payment_ledger_entry_id": entry.id, "method": "card", "amount": "1305.15"}]
+
+
+def test_payment_amount_overstating_the_balance_due_is_rejected(client, db):
+    order = place(customer(), price="385.00", qty=3)
+    member()
+    login(client, "cook")
+    client.post(f"/staff/orders/{order.id}/payment", data={"method": "card", "amount": "99999.00"})
+    assert _db.session.query(PaymentLedgerEntry).count() == 0
+    assert _db.session.get(Order, order.id).amount_settled == D("0.00")
 
 
 def test_invalid_method_and_double_payment_rejected(db):
@@ -92,18 +110,19 @@ def test_cancelled_order_cannot_be_paid(db):
 
 def test_payment_rbac_and_csrf(app, client, db):
     order = place(customer())
-    assert client.post(f"/staff/orders/{order.id}/payment", data={"method": "cash"}).status_code == 401
+    data = {"method": "cash", "amount": str(order.total)}
+    assert client.post(f"/staff/orders/{order.id}/payment", data=data).status_code == 401
     login(client, "diner")
-    assert client.post(f"/staff/orders/{order.id}/payment", data={"method": "cash"}).status_code == 403
+    assert client.post(f"/staff/orders/{order.id}/payment", data=data).status_code == 403
     staff = app.test_client()
     member()
     login(staff, "cook")
     app.config["WTF_CSRF_ENABLED"] = True
-    staff.post(f"/staff/orders/{order.id}/payment", data={"method": "cash"})
-    assert _db.session.query(Payment).count() == 0
+    staff.post(f"/staff/orders/{order.id}/payment", data=data)
+    assert _db.session.query(PaymentLedgerEntry).count() == 0
     token = csrf_token(staff, f"/staff/orders/{order.id}")
-    staff.post(f"/staff/orders/{order.id}/payment", data={"method": "cash", "csrf_token": token})
-    assert _db.session.query(Payment).count() == 1
+    staff.post(f"/staff/orders/{order.id}/payment", data={**data, "csrf_token": token})
+    assert _db.session.query(PaymentLedgerEntry).count() == 1
 
 
 # --- refunds ------------------------------------------------------------------------
@@ -143,25 +162,29 @@ def test_stale_concurrent_refund_cannot_overdraw(db):
 
 def test_refund_is_admin_only(app, client, db):
     order = place(customer())
-    p = record_payment(order, "cash", member())
+    p = record_ledger_payment(order, order.total, "cash", member())
     login(client, "cook")
-    assert client.post(f"/staff/orders/{order.id}/refund", data={"amount": "10"}).status_code == 403
+    assert client.post(f"/staff/orders/{order.id}/payments/{p.id}/refund",
+                       data={"amount": "10", "reason": "late"}).status_code == 403
     boss = app.test_client()
     member("boss", Role.ADMIN)
     login(boss, "boss")
-    boss.post(f"/staff/orders/{order.id}/refund", data={"amount": "10", "reason": "late"})
+    boss.post(f"/staff/orders/{order.id}/payments/{p.id}/refund", data={"amount": "10", "reason": "late"})
     _db.session.refresh(p)
     assert p.refunded_amount == D("10.00")
-    assert audit(AuditEvent.PAYMENT_REFUNDED)[-1]["refunded_total"] == "10.00"
+    assert audit(AuditEvent.PAYMENT_REFUNDED)[-1]["amount"] == "10.00"
 
 
 # --- paid orders and cancellation ---------------------------------------------------
 
 
 def test_paid_order_cannot_be_cancelled_until_fully_refunded(client, db):
-    user = customer()
+    """M7.5.3: the cancellation guard (app/services/orders.py) now checks
+    orders.amount_settled exclusively -- set up with the ledger-backed
+    service, not the legacy record_payment/refund_payment."""
+    user, cook = customer(), member()
     order = place(user)
-    p = record_payment(order, "cash", member())
+    p = record_ledger_payment(order, order.total, "cash", cook)
 
     with pytest.raises(OrderStatusError):
         cancel_order_as_customer(order, user)
@@ -172,21 +195,22 @@ def test_paid_order_cannot_be_cancelled_until_fully_refunded(client, db):
     with pytest.raises(OrderStatusError) as exc:
         update_order_status(order, OrderStatus.CANCELLED, actor=member("boss", Role.ADMIN))
     assert "Refund the payment" in exc.value.errors["status"][0]
-    refund_payment(p, "100.00", None)  # partial: still holds money
+    refund_ledger_payment(p, "100.00", "partial refund", cook)  # partial: still holds money
     with pytest.raises(OrderStatusError):
         update_order_status(order, OrderStatus.CANCELLED)
-    refund_payment(p, p.net_amount, None)
+    refund_ledger_payment(p, p.amount - p.refunded_amount, "the rest", cook)
     update_order_status(order, OrderStatus.CANCELLED)
     assert order.status == OrderStatus.CANCELLED
 
 
 def test_payment_after_stale_cancel_view_is_refused(db):
     """Payment committed first; a cancel request that loaded the order earlier
-    must still be refused -- the check is inside the UPDATE."""
+    must still be refused -- the check is inside the UPDATE, against the
+    live orders.amount_settled, not a stale in-memory copy of it."""
     user = customer()
     order = place(user)
-    record_payment(order, "cash", member())
-    set_committed_value(order, "payment", None)  # the cancelling request never saw it
+    record_ledger_payment(order, order.total, "cash", member())
+    set_committed_value(order, "amount_settled", D("0.00"))  # the cancelling request never saw the payment
     with pytest.raises(OrderStatusError):
         update_order_status(order, OrderStatus.CANCELLED)
     _db.session.expire_all()
@@ -197,16 +221,19 @@ def test_payment_after_stale_cancel_view_is_refused(db):
 
 
 def test_report_figures_come_from_payments(db):
+    """M7.5.3: build_report now reads the ledger, not the legacy payments
+    table -- set up with the ledger-backed service."""
     today = db_today()
     user, cook = customer(), member()
     completed_paid = place(user, price="500.00", qty=1)
     completed_unpaid = place(user, price="300.00", qty=1)
     prepaid = place(user, price="200.00", qty=1)
     refunded_then_cancelled = place(user, price="999.00", qty=1)
-    for o in (completed_paid, prepaid, refunded_then_cancelled):
-        record_payment(o, "wallet", cook)
-    refund_payment(completed_paid.payment, "50.00", "missing side")
-    refund_payment(refunded_then_cancelled.payment, str(refunded_then_cancelled.payment.amount), None)
+    entries = {o.id: record_ledger_payment(o, o.total, "wallet", cook)
+               for o in (completed_paid, prepaid, refunded_then_cancelled)}
+    refund_ledger_payment(entries[completed_paid.id], "50.00", "missing side", cook)
+    full = entries[refunded_then_cancelled.id]
+    refund_ledger_payment(full, full.amount, "full refund", cook)
     update_order_status(refunded_then_cancelled, OrderStatus.CANCELLED)
     for o in (completed_paid, completed_unpaid):
         set_status(o, OrderStatus.COMPLETED)

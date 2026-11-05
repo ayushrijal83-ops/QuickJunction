@@ -13,8 +13,12 @@ STAFF up to ``staff_max_discount`` % of the subtotal (a fixed amount is
 measured as a percentage of the subtotal too); ADMIN up to 100 %. Every
 non-zero discount needs a reason. A discount can only be applied while the
 order is unpaid and not cancelled/completed -- the order row is locked
-(``SELECT â€¦ FOR UPDATE``), the same lock ``record_payment`` takes, so a
-payment can never be taken against a total that is about to change.
+(``SELECT â€¦ FOR UPDATE``), the same lock ``record_ledger_payment`` takes, so
+a payment can never be taken against a total that is about to change.
+"Unpaid" is ``amount_settled == 0`` on the payment ledger (M7.5.3) --
+exclusively, not the legacy ``payments`` table; see the cancellation-guard
+note in app/services/orders.py for why these two can never both be live
+checks at once.
 """
 
 from __future__ import annotations
@@ -25,7 +29,6 @@ import sqlalchemy as sa
 
 from app.extensions import db
 from app.models.order import DiscountType, Order, OrderStatus
-from app.models.payment import Payment
 from app.models.pricing_settings import (
     DEFAULT_STAFF_MAX_DISCOUNT,
     DEFAULT_TAX_RATE,
@@ -143,14 +146,12 @@ def apply_discount(order: Order, raw_type, raw_value, reason: str | None, actor:
     try:
         if locked.status not in _DISCOUNTABLE:
             _fail("discount", f"A {locked.status.value} order cannot be discounted.")
-        # A *locking* read, not ``locked.payment``: under MySQL's REPEATABLE
-        # READ a lazy load is a snapshot read and can miss a payment committed
-        # after this transaction's first read -- found by the MySQL
-        # discount-vs-payment race test. FOR UPDATE reads the latest commit.
-        paid = db.session.execute(
-            sa.select(Payment.id).where(Payment.order_id == locked.id).with_for_update()
-        ).first()
-        if paid is not None:
+        # amount_settled lives on this same Order row, already locked above
+        # (unlike the pre-M7.5.3 check, which needed its own locking read
+        # against the separate payments table): the FOR UPDATE + populate_existing
+        # re-read already makes this the current committed value, not a
+        # stale snapshot -- found by the MySQL discount-vs-payment race test.
+        if locked.amount_settled > 0:
             _fail("discount", "This order is already paid; refund instead of discounting.")
 
         subtotal = locked.subtotal

@@ -10,6 +10,7 @@ import os
 import re
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError, OperationalError
 from flask import Flask
@@ -108,6 +109,23 @@ def app() -> Flask:
         yield application
         _db.session.remove()
         _db.drop_all()
+
+
+@pytest.fixture(autouse=True)
+def _clear_ledger_self_references(app):
+    """SQLite enforces ON DELETE RESTRICT even while dropping the whole
+    self-referencing payment_ledger_entries table (a real sqlite3
+    limitation -- 'FOREIGN KEY constraint failed' straight out of DROP
+    TABLE; InnoDB has no such issue dropping a table regardless of its own
+    FK content). Break the self-reference (a refund's reversed_entry_id)
+    before the ``app`` fixture's drop_all() runs; this changes nothing
+    about the RESTRICT the schema itself enforces at runtime. Global
+    (M7.5.3): any test that records a ledger refund needs this, not only
+    the payment-ledger model/service test files."""
+    yield
+    _db.session.execute(sa.text("DELETE FROM payment_ledger_entries WHERE reversed_entry_id IS NOT NULL"))
+    _db.session.execute(sa.text("DELETE FROM payment_ledger_entries"))
+    _db.session.commit()
 
 
 @pytest.fixture

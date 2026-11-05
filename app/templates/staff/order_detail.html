@@ -17,7 +17,7 @@
     <h1>Order #{{ order.id }}</h1>
   </div>
   <div class="d-flex flex-wrap gap-2 align-items-center">
-    {% if order.payment or order.status.value != "cancelled" %}{% with payment = order.payment %}{% include "partials/_payment_badge.html" %}{% endwith %}{% endif %}
+    {% if order.amount_settled > 0 or order.payment or order.status.value != "cancelled" %}{% include "partials/_payment_badge.html" %}{% endif %}
     {% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}
   </div>
 </div>
@@ -79,7 +79,7 @@
 
     {# Only unpaid, unfinished orders can be discounted; app/services/pricing.py
        re-checks everything, including the role's cap, on every POST. #}
-    {% if not order.payment and order.status.value not in ("completed", "cancelled") %}
+    {% if order.amount_settled == 0 and order.status.value not in ("completed", "cancelled") %}
       <div class="card">
         <div class="card-header"><strong>Discount</strong></div>
         <div class="card-body">
@@ -147,47 +147,85 @@
     <div class="card mb-4">
       <div class="card-header"><strong>Payment</strong></div>
       <div class="card-body">
-        {% set p = order.payment %}
-        {% if p %}
-          <dl class="row mb-0 small">
-            <dt class="col-5 fw-normal text-secondary">Paid</dt>
-            <dd class="col-7"><span class="qj-price">{{ p.amount | money }}</span> &middot; {{ p.method.value }}</dd>
-            <dt class="col-5 fw-normal text-secondary">At</dt>
-            <dd class="col-7">{{ p.captured_at.strftime("%d %b %Y, %H:%M") }}</dd>
-            {% if p.refunded_amount > 0 %}
-              <dt class="col-5 fw-normal text-secondary">Refunded</dt>
-              <dd class="col-7"><span class="qj-price">{{ p.refunded_amount | money }}</span>{% if p.refund_reason %}<br><span class="text-secondary">&ldquo;{{ p.refund_reason }}&rdquo;</span>{% endif %}</dd>
-            {% endif %}
-          </dl>
-          {% if current_user.role.value == "admin" and not p.fully_refunded %}
-            <div class="qj-danger-zone">
-            <div class="qj-danger-zone__title mb-2"><i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Refund (admin)</div>
-            <form method="post" action="{{ url_for('staff_orders.refund_order_payment', order_id=order.id) }}" novalidate
-                  data-confirm="Refund this payment?" data-confirm-body="The refund is recorded against order #{{ order.id }} and appears in sales reports. This cannot be undone."
-                  data-confirm-ok="Issue refund" data-confirm-cancel="Go back">
-              {{ refund_form.csrf_token }}
-              <div class="input-group input-group-sm mb-1">
-                <span class="input-group-text">Refund</span>
-                <input class="form-control" name="amount" inputmode="decimal" value="{{ p.net_amount }}" aria-label="Refund amount">
+        {# M7.5.3: the payment ledger (app/services/payment_ledger.py) is the
+           source of truth for new payments/refunds -- an order may now have
+           more than one payment entry, each independently refundable. #}
+        {% set payment_entries = order.ledger_entries | selectattr('entry_type.value', 'equalto', 'payment') | list %}
+        {% set balance_due = order.total - order.amount_settled %}
+        {# M7.5.3 correction (C1): a legacy Payment with no matching ledger
+           entry means this order was paid before the M7.5.1-to-M7.5.3
+           reconciliation ran for it. amount_settled is genuinely 0 for it
+           in the database, not stale, so it must not be offered a fresh
+           "Collect" payment -- that would be a real second charge, not a
+           display bug. The actual fix is the deployment reconciliation
+           procedure (see the M7.5.3 report); this is only the guard
+           against the dangerous action until that has run. #}
+        {% set unreconciled_legacy_payment = order.payment is not none and not payment_entries %}
+        {% if unreconciled_legacy_payment %}
+          <div class="alert alert-warning small mb-0">
+            <strong>Legacy payment on file, not yet reconciled.</strong>
+            This order has a payment recorded in the old system
+            ({{ order.payment.amount | money }} via {{ order.payment.method.value }}{% if order.payment.refunded_amount > 0 %}, {{ order.payment.refunded_amount | money }} already refunded{% endif %})
+            with no matching ledger entry, so a new payment cannot be safely collected here.
+            Reconcile this order before taking any further payment or refund action on it.
+          </div>
+        {% elif payment_entries %}
+          {% for e in payment_entries %}
+            <dl class="row mb-1 small">
+              <dt class="col-5 fw-normal text-secondary">{{ e.created_at.strftime("%d %b %Y, %H:%M") }}</dt>
+              <dd class="col-7"><span class="qj-price">{{ e.amount | money }}</span> &middot; {{ e.method.value }}
+                {% if e.refunded_amount > 0 %}<br><span class="text-secondary">Refunded {{ e.refunded_amount | money }}</span>{% endif %}
+              </dd>
+            </dl>
+            {% if current_user.role.value == "admin" and e.refunded_amount < e.amount %}
+              <div class="qj-danger-zone mb-3">
+              <div class="qj-danger-zone__title mb-2"><i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Refund this payment (admin)</div>
+              <form method="post" action="{{ url_for('staff_orders.refund_order_payment', order_id=order.id, entry_id=e.id) }}" novalidate
+                    data-confirm="Refund this payment?" data-confirm-body="The refund is recorded against order #{{ order.id }} and appears in sales reports. This cannot be undone."
+                    data-confirm-ok="Issue refund" data-confirm-cancel="Go back">
+                {{ refund_form.csrf_token }}
+                <div class="input-group input-group-sm mb-1">
+                  <span class="input-group-text">Refund</span>
+                  <input class="form-control" name="amount" inputmode="decimal" value="{{ e.amount - e.refunded_amount }}" aria-label="Refund amount">
+                </div>
+                <input class="form-control form-control-sm mb-1" name="reason" maxlength="255" placeholder="Reason (required)" aria-label="Refund reason" required>
+                <button class="btn btn-sm btn-outline-danger w-100" type="submit">Refund</button>
+              </form>
               </div>
-              <input class="form-control form-control-sm mb-1" name="reason" maxlength="255" placeholder="Reason (optional)" aria-label="Refund reason">
-              <button class="btn btn-sm btn-outline-danger w-100" type="submit">Refund</button>
-            </form>
-            </div>
-          {% endif %}
+            {% endif %}
+          {% endfor %}
+          <dl class="row mb-0 small border-top pt-2">
+            <dt class="col-7 fw-normal text-secondary">Settled</dt>
+            <dd class="col-5 text-end qj-price">{{ order.amount_settled | money }}</dd>
+            <dt class="col-7 fw-normal text-secondary">Balance due</dt>
+            <dd class="col-5 text-end qj-price fw-semibold">{{ balance_due | money }}</dd>
+          </dl>
         {% elif order.status.value == "cancelled" %}
           <p class="mb-0 text-secondary">Cancelled &mdash; nothing to collect.</p>
-        {% else %}
-          <p class="small text-secondary">Collect <strong class="qj-price">{{ order.total | money }}</strong>:</p>
-          <div class="d-flex gap-1">
-            {% for m in payment_methods %}
-              <form method="post" action="{{ url_for('staff_orders.record_order_payment', order_id=order.id) }}">
-                {{ payment_form.csrf_token }}
-                <input type="hidden" name="method" value="{{ m.value }}">
-                <button class="btn btn-sm btn-success" type="submit">{{ m.value | capitalize }}</button>
-              </form>
-            {% endfor %}
-          </div>
+        {% endif %}
+
+        {% if balance_due > 0 and order.status.value not in ("completed", "cancelled") and not unreconciled_legacy_payment %}
+          <p class="small text-secondary {{ 'mt-3' if payment_entries }}">
+            Collect <strong class="qj-price">{{ balance_due | money }}</strong> (full or partial):
+          </p>
+          <form method="post" action="{{ url_for('staff_orders.record_order_payment', order_id=order.id) }}"
+                class="row g-2 align-items-end" novalidate>
+            {{ payment_form.csrf_token }}
+            <div class="col-6">
+              <label class="form-label small" for="payment_amount">Amount</label>
+              <input class="form-control form-control-sm" id="payment_amount" name="amount" inputmode="decimal"
+                     value="{{ balance_due }}">
+            </div>
+            <div class="col-4">
+              <label class="form-label small" for="payment_method">Method</label>
+              <select class="form-select form-select-sm" id="payment_method" name="method">
+                {% for m in payment_methods %}<option value="{{ m.value }}">{{ m.value | capitalize }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-2 d-grid">
+              <button class="btn btn-sm btn-success" type="submit">Pay</button>
+            </div>
+          </form>
         {% endif %}
       </div>
     </div>

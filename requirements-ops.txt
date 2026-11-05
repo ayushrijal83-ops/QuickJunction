@@ -3,8 +3,12 @@
 #   pip install -r requirements-ops.txt
 #
 # Needed for: scripts/backup_database.py and scripts/restore_database.py
-# (backup encryption at rest). Not required to run the web application or
-# the test suite -- those have no dependency on this file.
+# (backup encryption at rest). Not required to *run* the web application,
+# but tests/test_backup_restore.py imports those scripts, so a default
+# `pytest` run (CI included) does need cryptography importable -- it is
+# duplicated into requirements.txt (same pin, see the comment there) for
+# that reason. This file itself is still not installed as part of the web
+# app or by CI; it is this one package's pin that is shared.
 #
 # ---------------------------------------------------------------------
 

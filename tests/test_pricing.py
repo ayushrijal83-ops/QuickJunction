@@ -18,6 +18,7 @@ from app.models.order import DiscountType, Order, OrderStatus
 from app.models.pricing_settings import PricingSettings
 from app.models.user import Role
 from app.services.orders import OrderStatusError, update_order_status
+from app.services.payment_ledger import record_ledger_payment, refund_ledger_payment
 from app.services.payments import PaymentError, record_payment, refund_payment
 from app.services.pricing import PricingError, apply_discount, current_settings, price, update_settings
 from app.services.sales import build_report
@@ -247,10 +248,12 @@ def test_discount_requires_csrf(app, client, db):
 
 
 def test_payment_takes_the_discounted_taxed_total_and_locks_pricing(db):
+    """M7.5.3: apply_discount's paid-order guard now checks
+    orders.amount_settled -- set up with the ledger-backed service."""
     cook = member()
     order = apply_discount(thousand(), "percent", "10", "promo", cook)
-    payment = record_payment(order, "card", cook)
-    assert payment.amount == D("1017.00")
+    entry = record_ledger_payment(order, order.total, "card", cook)
+    assert entry.amount == D("1017.00")
     with pytest.raises(PricingError):
         apply_discount(order, "percent", "15", "after payment", member("boss", Role.ADMIN))
 
@@ -259,8 +262,8 @@ def test_stale_discount_after_payment_is_refused(db):
     """The discounting request loaded the order before the payment committed."""
     cook = member()
     order = thousand()
-    record_payment(order, "cash", cook)
-    set_committed_value(order, "payment", None)
+    record_ledger_payment(order, order.total, "cash", cook)
+    set_committed_value(order, "amount_settled", D("0.00"))  # the discounting request never saw it
     with pytest.raises(PricingError):
         apply_discount(order, "fixed", "100", "stale", cook)
     _db.session.expire_all()
@@ -292,13 +295,16 @@ def test_refunds_still_bounded_by_the_actual_payment(db):
 
 
 def test_report_uses_snapshots_not_current_settings(db):
+    """M7.5.3: build_report now reads the ledger -- set up with the
+    ledger-backed service, not the legacy record_payment/refund_payment."""
     boss = member("boss", Role.ADMIN)
     a = apply_discount(thousand(), "percent", "10", "promo", boss)        # 1000 - 100, tax 117
     b = place(customer("diner2"), price="200.00", qty=1)                  # 200, tax 26
+    entries = {}
     for o in (a, b):
-        record_payment(o, "cash", boss)
+        entries[o.id] = record_ledger_payment(o, o.total, "cash", boss)
         set_status(o, OrderStatus.COMPLETED)
-    refund_payment(a.payment, "17.00", "cold")
+    refund_ledger_payment(entries[a.id], "17.00", "cold", boss)
     update_settings("0", "0", boss)  # must not change any reported figure
 
     today = db_today()

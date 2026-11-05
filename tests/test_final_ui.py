@@ -11,7 +11,7 @@ from flask import g
 
 from app.models.payment import PaymentMethod
 from app.models.user import Role
-from app.services.payments import record_payment
+from app.services.payment_ledger import record_ledger_payment
 from app.utils.headers import CONTENT_SECURITY_POLICY
 from app.utils.imagery import SCENES, _BY_CUISINE, _FALLBACK, _KEYWORDS
 from tests.conftest import make_user
@@ -63,7 +63,7 @@ def test_destructive_forms_ask_for_confirmation(client, db):
     assert 'data-confirm="Cancel order #%d?"' % order.id in page(client, f"/orders/{order.id}")
 
     boss = make_user(username="boss", email="boss@example.com", password="correct-horse-1", role=Role.ADMIN)
-    record_payment(order, PaymentMethod.CASH.value, boss)
+    record_ledger_payment(order, order.total, PaymentMethod.CASH.value, boss)
     client.post("/logout")
     login(client, "boss2", Role.ADMIN)
     assert 'data-confirm="Refund this payment?"' in page(client, f"/staff/orders/{order.id}")

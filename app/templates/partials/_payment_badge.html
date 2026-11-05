@@ -1,11 +1,26 @@
-{# Payment state of an order. Expects `payment` (a Payment row or none).
-   Derived only from the stored amounts; the text is the authoritative value. #}
-{%- if not payment -%}
-  <span class="qj-status qj-status--unpaid badge"><i class="bi bi-hourglass" aria-hidden="true"></i>Unpaid</span>
-{%- elif payment.fully_refunded -%}
-  <span class="qj-status qj-status--refunded badge"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Fully refunded</span>
-{%- elif payment.refunded_amount > 0 -%}
-  <span class="qj-status qj-status--partial badge"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Partially refunded</span>
-{%- else -%}
+{# Payment state of an order (M7.5.3). Authoritative on orders.amount_settled
+   vs orders.total -- the payment ledger's running balance, see
+   app/services/payment_ledger.py -- not the legacy Payment row, with one
+   exception: when amount_settled is 0 and a legacy `order.payment` exists,
+   its own refunded_amount (independently accurate -- it is the row the
+   ledger was backfilled from, so it cannot disagree with itself) is what
+   tells "fully refunded" apart from "paid through the legacy route but
+   never reconciled into the ledger" -- the M7.5.1-to-M7.5.3 reconciliation
+   gap. The latter must never read as "Fully refunded": that previously
+   active bug (C1 in the M7.5.3 independent review) is what this branch
+   exists to prevent; see app/templates/staff/order_detail.html for the
+   matching guard against collecting a second payment on such an order.
+   A ledger-only order (no legacy `order.payment` at all) that is paid
+   then fully refunded still reads "Unpaid" here -- a known minor wording
+   gap, not a financial-correctness one, left as-is. Expects `order`. #}
+{%- if order.amount_settled >= order.total and order.total > 0 -%}
   <span class="qj-status qj-status--paid badge"><i class="bi bi-check-circle" aria-hidden="true"></i>Paid</span>
+{%- elif order.amount_settled > 0 -%}
+  <span class="qj-status qj-status--partial badge"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Partially paid</span>
+{%- elif order.payment is not none and order.payment.fully_refunded -%}
+  <span class="qj-status qj-status--refunded badge"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Fully refunded</span>
+{%- elif order.payment is not none -%}
+  <span class="qj-status qj-status--short badge"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i>Needs reconciliation</span>
+{%- else -%}
+  <span class="qj-status qj-status--unpaid badge"><i class="bi bi-hourglass" aria-hidden="true"></i>Unpaid</span>
 {%- endif -%}

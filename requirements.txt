@@ -44,3 +44,11 @@ numpy==1.24.3
 
 # --- development / test ------------------------------------------------
 pytest==9.1.1
+
+# tests/test_backup_restore.py imports scripts/backup_database.py ->
+# scripts/_backup_crypto.py, which needs cryptography's Fernet -- so the
+# default test *collection* depends on it even though the backup/restore
+# feature itself is ops-only (requirements-ops.txt, same pin: cryptography
+# must mean the one, reviewed version everywhere it appears). Without this,
+# a default `pytest` run (CI included) fails at collection, not at a test.
+cryptography==50.0.2

@@ -46,7 +46,7 @@
               <td>{% with status = order.status %}{% include "partials/_status_badge.html" %}{% endwith %}</td>
               <td class="text-center">{{ order.items | length }}</td>
               <td class="text-end qj-price">{{ order.total | money }}</td>
-              <td>{% with payment = order.payment %}{% include "partials/_payment_badge.html" %}{% endwith %}{% if order.payment %} <span class="small text-secondary">{{ order.payment.method.value }}</span>{% endif %}</td>
+              <td>{% include "partials/_payment_badge.html" %}{% if order.payment %} <span class="small text-secondary">{{ order.payment.method.value }}</span>{% endif %}</td>
               <td class="text-end">
                 <a class="btn btn-sm btn-outline-secondary"
                    href="{{ url_for('staff_orders.order_detail', order_id=order.id) }}">Open <i class="bi bi-chevron-right" aria-hidden="true"></i></a>

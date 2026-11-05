@@ -31,7 +31,6 @@ from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models.order import CancellationActor, Order, OrderItem, OrderSource, OrderStatus
-from app.models.payment import Payment
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.user import Role, User
 from app.services.audit import commit_with
@@ -355,8 +354,15 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
     rows. Returns whether this caller won; ``order`` is refreshed either way.
 
     Cancelling also requires that no unrefunded payment exists -- checked in
-    the same UPDATE, against the same order row ``record_payment`` locks, so
-    a paid order can never be cancelled while still holding the money.
+    the same UPDATE, against the same order row ``record_ledger_payment``/
+    ``refund_ledger_payment`` lock, so a paid order can never be cancelled
+    while still holding the money. This checks ``orders.amount_settled``
+    (the payment ledger's own running balance -- see app/services/
+    payment_ledger.py) exclusively, not the legacy ``payments`` table:
+    those two must never both be live sources for this guard at once (one
+    would go stale the moment the other's writer runs), so this only holds
+    once every payment/refund route writes through the ledger and
+    ``amount_settled`` is always current -- see the M7.5.3 report.
     Finishing a dine-in order (completed/cancelled) releases its table to
     CLEANING in the same transaction when nothing else is active there.
     ``audit()`` runs only for the winner, inside that same transaction.
@@ -382,7 +388,7 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
     if owner_id is not None:
         stmt = stmt.where(Order.user_id == owner_id)
     if new_status == OrderStatus.CANCELLED:
-        stmt = stmt.where(~sa.exists().where(Payment.order_id == Order.id, Payment.refunded_amount < Payment.amount))
+        stmt = stmt.where(Order.amount_settled == 0)
     try:
         won = db.session.execute(stmt).rowcount == 1
         if won and order.table_id is not None and new_status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
@@ -407,8 +413,13 @@ def _apply_transition(order: Order, from_statuses: frozenset[OrderStatus], new_s
 
 
 def holds_payment(order: Order) -> bool:
-    """True while money received for ``order`` has not been fully refunded."""
-    return order.payment is not None and not order.payment.fully_refunded
+    """True while ``order`` has settled, unrefunded money on the payment
+    ledger (``orders.amount_settled`` -- see app/services/payment_ledger.py).
+    Exclusively ledger-based: see the M7.5.3 cancellation-guard note on
+    ``_apply_transition`` for why this cannot also check the legacy
+    ``payments`` table once that table may be stale for ledger-paid orders.
+    """
+    return order.amount_settled > 0
 
 
 def update_order_status(order: Order, new_status: OrderStatus, *, actor: User | None = None,

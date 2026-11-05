@@ -77,15 +77,20 @@
           <div><dt>Tax ({{ order.tax_rate }}%)</dt><dd class="qj-price">{{ order.tax_amount | money }}</dd></div>
           <div class="qj-summary__total"><dt>Total</dt><dd class="qj-price">{{ order.total | money }}</dd></div>
         </dl>
+        {% set payment_entries = order.ledger_entries | selectattr('entry_type.value', 'equalto', 'payment') | list %}
         <div class="d-flex flex-wrap align-items-center gap-2 mt-3 small">
-          {% if order.payment or order.status.value != "cancelled" %}{% with payment = order.payment %}{% include "partials/_payment_badge.html" %}{% endwith %}{% endif %}
-          {% if order.payment %}
+          {% if order.amount_settled > 0 or order.payment or order.status.value != "cancelled" %}{% include "partials/_payment_badge.html" %}{% endif %}
+          {% if not payment_entries and order.payment %}
             <span class="text-secondary">{{ order.payment.method.value }}, {{ order.payment.captured_at.strftime("%d %b %Y %H:%M") }}</span>
           {% endif %}
         </div>
-        {% if order.payment and order.payment.refunded_amount > 0 %}
-          <p class="small text-secondary mb-0 mt-2">Refunded {{ order.payment.refunded_amount | money }}</p>
-        {% endif %}
+        {% for e in payment_entries %}
+          <p class="small text-secondary mb-0 mt-2">{{ e.amount | money }} &middot; {{ e.method.value }}, {{ e.created_at.strftime("%d %b %Y %H:%M") }}{% if e.refunded_amount > 0 %} &middot; refunded {{ e.refunded_amount | money }}{% endif %}</p>
+        {% else %}
+          {% if order.payment and order.payment.refunded_amount > 0 %}
+            <p class="small text-secondary mb-0 mt-2">Refunded {{ order.payment.refunded_amount | money }}</p>
+          {% endif %}
+        {% endfor %}
       </div>
     </div>
 

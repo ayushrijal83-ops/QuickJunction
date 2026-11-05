@@ -2,10 +2,13 @@
 #
 # Jobs:
 #   test-sqlite      full suite on the default in-memory SQLite (725 collected).
-#   test-mysql       full suite on a disposable MySQL 8.0 service, so the thirteen
+#   test-mysql       full suite on a disposable MySQL 8.0 service, so the fifteen
 #                    real-concurrency tests in tests/test_mysql_concurrency.py
 #                    execute instead of skipping, then a guard that fails the job
-#                    if any of those thirteen is skipped.
+#                    if any of those fifteen is skipped. Update this count (here
+#                    and in the guard step below) whenever a test is added to or
+#                    removed from that file -- M7.5.2/M7.5.3 added two without
+#                    updating it, which this fix corrects.
 #   dependency-audit pip-audit. Blocking for the runtime environment
 #                    (requirements.txt, resolved and installed); report-only for
 #                    the optional AI stack (requirements-ai.txt) -- see
@@ -98,7 +101,7 @@ jobs:
             echo "::error::MySQL concurrency tests were skipped; TEST_DATABASE_URL is not reaching MySQL." >&2
             exit 1
           fi
-          grep -Eq "^13 passed" concurrency.txt || { echo "::error::expected 13 passed concurrency tests" >&2; exit 1; }
+          grep -Eq "^15 passed" concurrency.txt || { echo "::error::expected 15 passed concurrency tests" >&2; exit 1; }
 
   dependency-audit:
     name: Dependency audit (pip-audit)

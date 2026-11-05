@@ -1,6 +1,7 @@
 """Milestone 7.5.1: the payment_ledger_entries model and its constraints,
-and orders.amount_settled. Schema only -- nothing in the service layer
-writes here yet (see tests/test_payment_ledger_migration.py for the
+and orders.amount_settled -- schema-level tests only (see
+tests/test_payment_ledger_service.py for the M7.5.2/7.5.3 service layer
+that writes here, and tests/test_payment_ledger_migration.py for the
 migration's backfill and downgrade safeguards)."""
 
 from __future__ import annotations
@@ -20,20 +21,6 @@ from tests.test_restaurant_ops import customer, place
 from tests.test_payments import member
 
 D = Decimal
-
-
-@pytest.fixture(autouse=True)
-def _clear_ledger_self_references(app):
-    """SQLite enforces ON DELETE RESTRICT even while dropping the whole
-    self-referencing table (a real sqlite3 limitation -- 'FOREIGN KEY
-    constraint failed' straight out of DROP TABLE; InnoDB has no such issue
-    dropping a table regardless of its own FK content). Break the
-    self-reference before the `app` fixture's drop_all() runs; this changes
-    nothing about the RESTRICT the schema itself enforces at runtime."""
-    yield
-    _db.session.execute(sa.text("DELETE FROM payment_ledger_entries WHERE reversed_entry_id IS NOT NULL"))
-    _db.session.execute(sa.text("DELETE FROM payment_ledger_entries"))
-    _db.session.commit()
 
 
 def _payment_entry(order: Order, actor, *, amount="100.00", method=PaymentMethod.CASH,

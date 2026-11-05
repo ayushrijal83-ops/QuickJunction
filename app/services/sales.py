@@ -1,9 +1,14 @@
-"""Sales reporting, derived from the transactional ``orders`` + ``payments`` rows.
+"""Sales reporting, derived from the transactional ``orders`` + payment
+ledger rows.
 
 There is no sales table: every figure is recomputed from ``Order`` and its
-``Payment`` on each request, so a report can never disagree with the records
-it describes. Money comes only from the order's own ``subtotal`` (the
-checkout-time snapshot, never current menu prices) and the payment row.
+``payment_ledger_entries`` on each request, so a report can never disagree
+with the records it describes. Money comes only from the order's own
+``subtotal`` (the checkout-time snapshot, never current menu prices) and
+the ledger (M7.5.3 -- this module no longer reads the legacy ``payments``
+table, which stops receiving new rows once a route is cut over to the
+ledger; a payment/refund recorded only there would otherwise be invisible
+here).
 
 Financial definitions (these are SALES/REVENUE, not profit -- Quick Junction
 records no costs, so profit cannot be computed):
@@ -17,12 +22,14 @@ records no costs, so profit cannot be computed):
 - **Tax** -- sum of the order's ``tax_amount`` snapshot (M12), at the rate
   each order was charged -- never recomputed from the current setting. Tax is
   collected on behalf of the tax authority, so it is not part of net sales.
-- **Refunds** -- sum of ``payments.refunded_amount`` over recognised sales.
+- **Refunds** -- sum of the order's linked 'refund' ledger entries (gross,
+  not netted against what was collected) over recognised sales.
 - **Net sales** -- gross - discounts - refunds (excludes tax).
-- **Paid orders** -- recognised sales that have a payment row.
-- **Collected** -- sum of ``amount - refunded_amount`` of the payments on
-  recognised sales. ``Report.prepaid`` separately shows money already taken
-  for orders that are not completed yet (e.g. takeaway paid at the counter).
+- **Paid orders** -- recognised sales with at least one 'payment' ledger entry.
+- **Collected** -- sum of ``orders.amount_settled`` (payments minus refunds,
+  maintained by app/services/payment_ledger.py) over recognised sales.
+  ``Report.prepaid`` separately shows money already taken for orders that
+  are not completed yet (e.g. takeaway paid at the counter).
 - **Unpaid completed** -- recognised sales with no payment: money owed.
 - **Average order value** -- net sales / recognised order count.
 
@@ -43,7 +50,7 @@ import sqlalchemy as sa
 
 from app.extensions import db
 from app.models.order import Order, OrderSource, OrderStatus
-from app.models.payment import Payment
+from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
 from app.models.restaurant_table import RestaurantTable
 from app.services.errors import ValidationError
 from app.services.tables import ACTIVE_ORDER_STATUSES
@@ -81,10 +88,10 @@ class Totals:
         self.gross += row.subtotal
         self.discounts += row.discount_amount
         self.tax += row.tax_amount
-        if row.amount is not None:
+        if row.paid_total is not None:
             self.paid += 1
-            self.refunds += row.refunded_amount
-            self.collected += row.amount - row.refunded_amount
+            self.refunds += row.refunded_total or ZERO
+            self.collected += row.amount_settled
 
 
 @dataclass
@@ -144,12 +151,27 @@ def resolve_range(preset: str | None, start: str | None = None, end: str | None 
 def _rows(start: date, end: date):
     lo = datetime.combine(start, datetime.min.time())
     hi = datetime.combine(end + timedelta(days=1), datetime.min.time())
+    # An order may now have more than one 'payment' ledger entry (M7.5.3),
+    # so these are aggregates, not a single outer-joined row as when the
+    # legacy payments table (one row per order) was the source. paid_total
+    # is NULL (not 0) for an order with no payment entry at all, the same
+    # "unpaid" signal row.amount is None used to give.
+    paid_total = (
+        sa.select(sa.func.sum(PaymentLedgerEntry.amount))
+        .where(PaymentLedgerEntry.order_id == Order.id, PaymentLedgerEntry.entry_type == LedgerEntryType.PAYMENT)
+        .correlate(Order).scalar_subquery()
+    )
+    refunded_total = (
+        sa.select(sa.func.sum(-PaymentLedgerEntry.amount))
+        .where(PaymentLedgerEntry.order_id == Order.id, PaymentLedgerEntry.entry_type == LedgerEntryType.REFUND)
+        .correlate(Order).scalar_subquery()
+    )
     # ponytail: aggregates in Python over one column-only query; move to SQL
     # GROUP BY if a single report ever spans 100k+ orders.
     return db.session.execute(
         sa.select(Order.status, Order.created_at, Order.subtotal, Order.discount_amount, Order.tax_amount,
-                  Order.source, Order.table_id, Payment.amount, Payment.refunded_amount)
-        .outerjoin(Payment, Payment.order_id == Order.id)
+                  Order.source, Order.table_id, Order.amount_settled,
+                  paid_total.label("paid_total"), refunded_total.label("refunded_total"))
         .where(Order.created_at >= lo, Order.created_at < hi)
     ).all()
 
@@ -178,10 +200,10 @@ def build_report(start: date, end: date, label: str) -> Report:
         elif row.status in ACTIVE_ORDER_STATUSES:
             report.active += 1
         if row.status != OrderStatus.COMPLETED:
-            if row.amount is not None:
-                report.prepaid += row.amount - row.refunded_amount
+            if row.paid_total is not None:
+                report.prepaid += row.amount_settled
             continue
-        if row.amount is None:
+        if row.paid_total is None:
             report.unpaid_completed += 1
         for bucket in (report.totals, daily[row.created_at.date()], sources[row.source], hours[row.created_at.hour]):
             bucket.add(row)

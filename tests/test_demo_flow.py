@@ -14,8 +14,9 @@ from flask import g
 
 from app.extensions import db as _db
 from app.models import (
-    AuditEvent, AuditLog, Ingredient, MenuItem, Order, OrderSource, OrderStatus, Payment,
-    Reservation, ReservationStatus, RestaurantTable, Role, StockMovement, TableStatus, User,
+    AuditEvent, AuditLog, Ingredient, LedgerEntryType, MenuItem, Order, OrderSource, OrderStatus,
+    PaymentLedgerEntry, Reservation, ReservationStatus, RestaurantTable, Role, StockMovement,
+    TableStatus, User,
 )
 from app.services.orders import checkout
 from app.services.sales import build_report
@@ -29,9 +30,18 @@ INTEGRITY_CHECKS = {
     "order total formula": "SELECT COUNT(*) FROM orders WHERE ABS(total - (subtotal - discount_amount + tax_amount)) >= 0.005",
     "subtotal = sum of lines": "SELECT COUNT(*) FROM orders o WHERE o.subtotal <> "
                                "(SELECT COALESCE(SUM(line_total),0) FROM order_items i WHERE i.order_id=o.id)",
+    # Legacy payments table: stops receiving new rows once a route is cut
+    # over to the ledger (M7.5.3), so these stay trivially true for any
+    # orders paid after that -- kept for pre-cutover historical data.
     "payment = order total": "SELECT COUNT(*) FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.amount <> o.total",
     "no cancelled order holds money": "SELECT COUNT(*) FROM payments p JOIN orders o ON o.id=p.order_id "
                                       "WHERE o.status='cancelled' AND p.refunded_amount < p.amount",
+    # The ledger's own invariants (M7.5.2/M7.5.3's architecture rules):
+    # orders.amount_settled == SUM(payment_ledger_entries.amount), and a
+    # cancelled order never holds settled, unrefunded ledger money.
+    "ledger settlement matches orders": "SELECT COUNT(*) FROM orders o WHERE o.amount_settled <> "
+                                        "(SELECT COALESCE(SUM(l.amount),0) FROM payment_ledger_entries l WHERE l.order_id=o.id)",
+    "no cancelled order holds ledger money": "SELECT COUNT(*) FROM orders WHERE status='cancelled' AND amount_settled <> 0",
     "stock = ledger": "SELECT COUNT(*) FROM ingredients i WHERE i.current_quantity <> "
                       "(SELECT COALESCE(SUM(quantity_change),0) FROM stock_movements m WHERE m.ingredient_id=i.id)",
     "sales only on completed orders": "SELECT COUNT(*) FROM stock_movements m JOIN orders o ON o.id=m.order_id "
@@ -136,19 +146,24 @@ def test_full_demo_flow(app, db):
     assert fresh(Order, order.id).ready_at is not None
     go(cust, "post", f"/orders/{order.id}/cancel")
     assert fresh(Order, order.id).status == OrderStatus.READY  # too late for the customer
-    go(staff, "post", f"/staff/orders/{order.id}/payment", method="card", amount="1.00")
+    go(staff, "post", f"/staff/orders/{order.id}/payment", method="card", amount=str(order.total))
     go(staff, "post", f"/staff/orders/{order.id}/status", status="completed")
     order = fresh(Order, order.id)
-    assert order.status == OrderStatus.COMPLETED and order.payment.amount == D("1067.85")
+    entry = _db.session.query(PaymentLedgerEntry).filter_by(
+        order_id=order.id, entry_type=LedgerEntryType.PAYMENT
+    ).one()
+    assert order.status == OrderStatus.COMPLETED and entry.amount == D("1067.85")
+    assert order.amount_settled == D("1067.85")
     assert fresh(Ingredient, bun.id).current_quantity == D("17")  # 20 - 3 burgers
     assert "Everything is stocked." in text(staff, "/account/")  # 17 buns, low at 5
     assert "stock" in text(staff, "/staff/inventory").lower()
     assert "19:00" in text(staff, "/staff/reservations")
-    assert go(staff, "post", f"/staff/orders/{order.id}/refund", amount="10").status_code == 403
+    assert go(staff, "post", f"/staff/orders/{order.id}/payments/{entry.id}/refund",
+             amount="10", reason="x").status_code == 403
 
     # --- ADMIN: refund, reports, payments, audit ----------------------------------------
-    go(admin, "post", f"/staff/orders/{order.id}/refund", amount="67.85", reason="late order")
-    assert fresh(Payment, order.payment.id).refunded_amount == D("67.85")
+    go(admin, "post", f"/staff/orders/{order.id}/payments/{entry.id}/refund", amount="67.85", reason="late order")
+    assert fresh(PaymentLedgerEntry, entry.id).refunded_amount == D("67.85")
     report = build_report(db_today(), db_today(), "Today")
     t = report.totals
     assert (t.orders, t.gross, t.discounts, t.tax, t.refunds) == (1, D("1050.00"), D("105.00"), D("122.85"), D("67.85"))

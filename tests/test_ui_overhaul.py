@@ -15,7 +15,7 @@ from app.models.order import OrderStatus
 from app.models.user import Role, User
 from app.services.audit import record_event
 from app.services.inventory import record_movement, save_ingredient
-from app.services.payments import record_payment, refund_payment
+from app.services.payment_ledger import record_ledger_payment, refund_ledger_payment
 from app.services.reservations import create_reservation
 from app.services.tables import create_table
 from app.utils.clock import db_today
@@ -119,7 +119,7 @@ def test_customer_dashboard_is_own_data_only(client, db):
 def test_staff_dashboard_is_operational_and_shows_no_money(client, db):
     boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
     order = place(customer())
-    record_payment(order, "cash", boss)
+    record_ledger_payment(order, order.total, "cash", boss)
     set_status(order, OrderStatus.PREPARING)
     salt = save_ingredient(None, "salt", "g", "100", True)
     record_movement(salt, "purchase", "10", "x", boss)
@@ -135,7 +135,7 @@ def test_admin_dashboard_shows_the_business_view(client, db):
     login(client, "boss", Role.ADMIN)
     boss = _db.session.query(User).filter_by(username="boss").one()
     order = place(customer(), price="100.00", qty=1)
-    record_payment(order, "card", boss)
+    record_ledger_payment(order, order.total, "card", boss)
     set_status(order, OrderStatus.COMPLETED)
     body = page(client)
     assert "Today&#39;s net sales" in body or "Today's net sales" in body
@@ -144,14 +144,87 @@ def test_admin_dashboard_shows_the_business_view(client, db):
     assert "Kitchen now" in body and "0 pending" in body
 
 
+# --- M7.5.3 correction (C1): reconciliation-gap orders -----------------------------------
+#
+# A legacy Payment with no matching payment_ledger_entries row means this
+# order was paid through the old route after the M7.5.1 migration ran but
+# before M7.5.3's cutover actually deployed -- orders.amount_settled is
+# genuinely (not staleness-wise) 0 for it. Before this correction, the
+# payment badge wrongly read "Fully refunded" for such an order, and the
+# order-detail page offered a fresh "Collect" payment form that a real
+# submission would accept -- a real second charge, not a display bug.
+
+
+def test_reconciliation_gap_order_shows_needs_reconciliation_not_refunded(client, db):
+    from app.services.payments import record_payment
+
+    boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
+    order = place(customer(), price="40.00", qty=1)
+    record_payment(order, "cash", boss)
+    login(client, "boss2", Role.ADMIN)
+    body = page(client, f"/staff/orders/{order.id}")
+    assert "Needs reconciliation" in body
+    assert "Fully refunded" not in body
+
+
+def test_reconciliation_gap_order_cannot_be_paid_again(client, db):
+    """The dangerous action itself: no fresh 'Collect' form is offered for
+    an unreconciled legacy-paid order, and nothing in the ledger backs it
+    -- confirming this is a real data gap, not just a hidden button."""
+    from app.models.payment_ledger import PaymentLedgerEntry
+    from app.services.payments import record_payment
+
+    boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
+    order = place(customer(), price="40.00", qty=1)
+    record_payment(order, "cash", boss)
+    login(client, "boss2", Role.ADMIN)
+    body = page(client, f"/staff/orders/{order.id}")
+    assert "not yet reconciled" in body.lower()
+    assert "Collect" not in body
+    assert 'id="payment_amount"' not in body
+    assert _db.session.query(PaymentLedgerEntry).filter_by(order_id=order.id).count() == 0
+
+
+def test_ordinary_ledger_paid_order_is_unaffected_by_the_reconciliation_guard(client, db):
+    """Preserve correct behavior for ordinary ledger-backed orders: an
+    order with a real ledger entry is never mistaken for an unreconciled
+    one, and its normal payment summary / balance due still render."""
+    boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
+    order = place(customer(), price="40.00", qty=1)
+    record_ledger_payment(order, order.total, "cash", boss)
+    login(client, "boss2", Role.ADMIN)
+    body = page(client, f"/staff/orders/{order.id}")
+    assert "Needs reconciliation" not in body
+    assert "not yet reconciled" not in body.lower()
+    assert "Paid" in body and "Settled" in body
+
+
+def test_fully_refunded_legacy_order_is_labelled_correctly_and_still_flagged(client, db):
+    """A legacy order paid and then fully refunded, with no ledger entries
+    at all, is unambiguously 'Fully refunded' (the legacy row's own
+    refunded_amount says so independently of reconciliation) -- but it is
+    still unreconciled, so the page still flags it rather than silently
+    treating it as fully settled and safe to act on."""
+    from app.services.payments import record_payment, refund_payment
+
+    boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
+    order = place(customer(), price="30.00", qty=1)
+    payment = record_payment(order, "cash", boss)
+    refund_payment(payment, str(payment.amount), "test")
+    login(client, "boss2", Role.ADMIN)
+    body = page(client, f"/staff/orders/{order.id}")
+    assert "Fully refunded" in body
+    assert "not yet reconciled" in body.lower()
+
+
 # --- admin payments & audit -------------------------------------------------------------------
 
 
 def test_payments_page_admin_only_and_lists_refunds(app, client, db):
     boss = make_user(username="boss2", email="b2@example.com", password=PASSWORD, role=Role.ADMIN)
     order = place(customer(), price="100.00", qty=1)
-    p = record_payment(order, "wallet", boss)
-    refund_payment(p, "13.00", "cold soup")
+    p = record_ledger_payment(order, order.total, "wallet", boss)
+    refund_ledger_payment(p, "13.00", "cold soup", boss)
     assert client.get("/admin/payments").status_code == 401
     login(client, "cust")
     assert client.get("/admin/payments").status_code == 403

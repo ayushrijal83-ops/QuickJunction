@@ -1,10 +1,9 @@
-"""Milestone 7.5.2: ledger-backed payment recording and refunds
+"""Milestone 7.5.2/7.5.3: ledger-backed payment recording and refunds
 (app/services/payment_ledger.py) -- multiple/partial payments and refunds
-against payment_ledger_entries, as the source of truth for *new* financial
-writes. app/services/payments.py (one payment per order, always the full
-total) is untouched and still what app/routes/staff_orders.py calls; see
-the M7.5.2 report for why wiring the routes to this module is out of scope
-here."""
+against payment_ledger_entries, the source of truth for all new financial
+writes. M7.5.3 cut app/routes/staff_orders.py over to this module; the
+legacy app/services/payments.py remains only for pre-cutover historical
+data and is no longer called by any route."""
 
 from __future__ import annotations
 
@@ -12,7 +11,6 @@ import json
 from decimal import Decimal
 
 import pytest
-import sqlalchemy as sa
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.extensions import db as _db
@@ -20,21 +18,16 @@ from app.models.audit_log import AuditEvent, AuditLog
 from app.models.order import Order, OrderStatus
 from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
 from app.services.orders import cancel_order_as_customer
-from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment, refund_ledger_payment
+from app.services.payment_ledger import (
+    LedgerPaymentError,
+    get_payment_entry_for_order,
+    record_ledger_payment,
+    refund_ledger_payment,
+)
 from tests.test_payments import member
 from tests.test_restaurant_ops import customer, place
 
 D = Decimal
-
-
-@pytest.fixture(autouse=True)
-def _clear_ledger_self_references(app):
-    """Same SQLite limitation documented in tests/test_payment_ledger.py:
-    break the self-reference (refund -> payment) before drop_all() runs."""
-    yield
-    _db.session.execute(sa.text("DELETE FROM payment_ledger_entries WHERE reversed_entry_id IS NOT NULL"))
-    _db.session.execute(sa.text("DELETE FROM payment_ledger_entries"))
-    _db.session.commit()
 
 
 # --- recording: multiple/partial payments -------------------------------------------
@@ -227,6 +220,19 @@ def test_only_a_payment_entry_can_be_refunded(db):
     with pytest.raises(LedgerPaymentError) as exc:
         refund_ledger_payment(refund, "1.00", "double refund", cashier)
     assert "Only a payment entry" in exc.value.errors["payment"][0]
+
+
+def test_get_payment_entry_for_order_does_not_return_a_refund_entry(db):
+    """H2 correction: the refund route's lookup must not hand back a
+    non-payment entry (e.g. a refund's own id) just because it belongs to
+    the right order -- refund_ledger_payment's own entry_type check is a
+    second line of defense, not the only one."""
+    order, cashier = place(customer()), member()
+    payment = record_ledger_payment(order, order.total, "cash", cashier)
+    refund = refund_ledger_payment(payment, "1.00", "test", cashier)
+
+    assert get_payment_entry_for_order(order.id, payment.id) is payment
+    assert get_payment_entry_for_order(order.id, refund.id) is None
 
 
 def test_refund_records_acting_user_and_reason(db):

@@ -34,13 +34,13 @@
             <tr>
               <th scope="row"><a href="{{ url_for('staff_orders.order_detail', order_id=p.order_id) }}">#{{ p.order_id }}</a>
                 {% if p.order.table %}<span class="small text-secondary">&middot; {{ p.order.table.name }}</span>{% endif %}</th>
-              <td class="small text-secondary text-nowrap">{{ p.captured_at.strftime("%d %b %Y, %H:%M") }}</td>
-              <td>{{ p.method.value | capitalize }}<div>{% with payment = p %}{% include "partials/_payment_badge.html" %}{% endwith %}</div></td>
+              <td class="small text-secondary text-nowrap">{{ p.created_at.strftime("%d %b %Y, %H:%M") }}</td>
+              <td>{{ p.method.value | capitalize }}<div>{% with order = p.order %}{% include "partials/_payment_badge.html" %}{% endwith %}</div></td>
               <td class="text-end qj-price">{{ p.amount | money }}</td>
               <td class="text-end qj-price">
                 {% if p.refunded_amount > 0 %}
-                  <span class="{{ 'text-danger' if p.fully_refunded else 'text-warning-emphasis' }}">{{ p.refunded_amount | money }}</span>
-                  {% if p.refund_reason %}<div class="small text-secondary">&ldquo;{{ p.refund_reason }}&rdquo;</div>{% endif %}
+                  <span class="{{ 'text-danger' if p.refunded_amount >= p.amount else 'text-warning-emphasis' }}">{{ p.refunded_amount | money }}</span>
+                  {% if refund_reasons.get(p.id) %}<div class="small text-secondary">&ldquo;{{ refund_reasons.get(p.id) }}&rdquo;</div>{% endif %}
                 {% else %}<span class="text-secondary">&mdash;</span>{% endif %}
               </td>
               <td>{{ staff.get(p.recorded_by_id, "unknown") }}</td>
