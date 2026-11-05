@@ -21,6 +21,7 @@ from flask_migrate import downgrade, upgrade
 
 from app import create_app
 from app.extensions import db
+from config import TestingConfig
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from migrations.versions.e39e6dffcb5d_add_payment_ledger import (  # noqa: E402
@@ -35,9 +36,38 @@ PRE_REVISION = "c2d5f8a1b3e6"
 
 
 def _app(tmp_path, name: str):
-    application = create_app("testing")
-    application.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{(tmp_path / name).as_posix()}"
-    return application
+    """A throwaway, per-call SQLite file -- isolated from whatever
+    TEST_DATABASE_URL otherwise points at (including real MySQL in CI).
+
+    Flask-SQLAlchemy's db.init_app(), called inside create_app(), binds the
+    engine from app.config["SQLALCHEMY_DATABASE_URI"] at that moment and
+    ignores any later change to app.config (its own docstring says so).
+    Setting application.config AFTER create_app() returns -- the previous
+    shape of this helper -- was therefore always a no-op: under a plain
+    SQLite run that was invisible, because TestingConfig's own default
+    ("sqlite://") and this tmp_path file are both SQLite and equally
+    empty/isolated; under TEST_DATABASE_URL=mysql+... every test using this
+    helper was silently running its migrations and raw seed SQL against
+    the shared MySQL test database instead of an isolated per-test file --
+    which is what turned _seed_legacy()'s SQLite-only `INSERT OR IGNORE`
+    into a live MySQL syntax error, and the half-applied migration state
+    left behind in that *shared* database into cascading failures across
+    unrelated tests. Patching the config *class* attribute before
+    create_app() runs is what actually takes effect, since db.init_app()
+    reads it at that point -- restored immediately after, since the engine
+    is already bound by the time create_app() returns.
+
+    The identical pattern (override after create_app()) exists in
+    test_m5_migration.py, test_ops_migration.py, test_staff_migration.py
+    and test_migrations.py; it carries the same latent defect there, only
+    invisible because their seed SQL happens to be portable across both
+    dialects. Not fixed here -- out of this correction's scope."""
+    original_uri = TestingConfig.SQLALCHEMY_DATABASE_URI
+    TestingConfig.SQLALCHEMY_DATABASE_URI = f"sqlite:///{(tmp_path / name).as_posix()}"
+    try:
+        return create_app("testing")
+    finally:
+        TestingConfig.SQLALCHEMY_DATABASE_URI = original_uri
 
 
 def _seed_legacy(conn, *, order_id, user_id=1, total="100.00", refunded="0.00", method="cash",
