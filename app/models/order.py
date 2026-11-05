@@ -85,6 +85,10 @@ class Order(db.Model):
         sa.CheckConstraint(
             "ABS(total - (subtotal - discount_amount + tax_amount)) < 0.005", name="ck_orders_total_formula"
         ),
+        # M7.5.1: the payment-ledger settlement projection (see
+        # app/models/payment_ledger.py and app/services/payment_ledger.py).
+        sa.CheckConstraint("amount_settled >= 0", name="ck_orders_amount_settled_nonnegative"),
+        sa.CheckConstraint("amount_settled <= total", name="ck_orders_amount_settled_within_total"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -167,6 +171,17 @@ class Order(db.Model):
         sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False
     )
 
+    # M7.5.1: net amount settled via the payment ledger (payments minus
+    # refunds/corrections). The M7.5.1 migration backfills it once from the
+    # existing payments table; M7.5.2's app/services/payment_ledger.py then
+    # maintains it going forward for any order paid/refunded through that
+    # (not yet route-wired) service. Orders still going through the legacy
+    # app/services/payments.py keep whatever value the one-time backfill
+    # set and nothing updates it further -- see the M7.5.2 report.
+    amount_settled: Mapped[Decimal] = mapped_column(
+        sa.Numeric(10, 2), nullable=False, server_default="0", default=Decimal("0.00")
+    )
+
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan", order_by="OrderItem.id"
     )
@@ -176,6 +191,9 @@ class Order(db.Model):
     customer: Mapped["User"] = relationship(foreign_keys=[user_id])  # noqa: F821
     table: Mapped["RestaurantTable | None"] = relationship()  # noqa: F821
     payment: Mapped["Payment | None"] = relationship(back_populates="order", uselist=False)  # noqa: F821
+    ledger_entries: Mapped[list["PaymentLedgerEntry"]] = relationship(  # noqa: F821
+        back_populates="order", order_by="PaymentLedgerEntry.created_at"
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
         return f"<Order id={self.id} user_id={self.user_id} status={self.status.value} total={self.total}>"

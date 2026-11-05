@@ -380,6 +380,71 @@ def test_two_full_refunds_cannot_overdraw(app, db):
         assert _db.session.get(Payment, payment_id).refunded_amount == Decimal(full)
 
 
+# --- Milestone 7.5.2: ledger-backed payments/refunds --------------------------------
+
+
+def test_two_concurrent_partial_ledger_payments_cannot_overpay(app, db):
+    """Unlike the legacy payments table (UNIQUE order_id), nothing stops two
+    ledger 'payment' inserts for the same order at the database level --
+    the order-row lock in record_ledger_payment is the only thing
+    serialising them. Two partial payments that individually fit under the
+    balance due but together would exceed it must not both succeed."""
+    from decimal import Decimal
+
+    from app.models.payment_ledger import PaymentLedgerEntry
+    from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order = place(customer, price="100.00", qty=1)
+        order_id, total = order.id, order.total
+        partial = (total * Decimal("0.6")).quantize(Decimal("0.01"))  # each < total, together > total
+
+        def pay(staff_id):
+            def act():
+                try:
+                    record_ledger_payment(_db.session.get(Order, order_id), partial, "cash",
+                                          _db.session.get(User, staff_id))
+                    return "ok"
+                except LedgerPaymentError:
+                    return "refused"
+            return act
+
+        results = _race(app, pay(a), pay(b))
+        assert sorted(map(str, results)) == ["ok", "refused"], results
+        _db.session.rollback()
+        assert _db.session.get(Order, order_id).amount_settled == partial
+        count = _db.session.query(PaymentLedgerEntry).filter_by(order_id=order_id).count()
+        assert count == 1
+
+
+def test_two_full_ledger_refunds_cannot_overdraw(app, db):
+    from decimal import Decimal
+
+    from app.models.payment_ledger import PaymentLedgerEntry
+    from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment, refund_ledger_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order = place(customer, price="80.00", qty=1)
+        payment = record_ledger_payment(order, order.total, "cash", _db.session.get(User, a))
+        order_id, payment_id, full = order.id, payment.id, str(payment.amount)
+
+        def refund():
+            try:
+                refund_ledger_payment(_db.session.get(PaymentLedgerEntry, payment_id), full, "race",
+                                      _db.session.get(User, a))
+                return "ok"
+            except LedgerPaymentError:
+                return "refused"
+
+        results = _race(app, refund, refund)
+        assert sorted(map(str, results)) == ["ok", "refused"], results
+        _db.session.rollback()
+        assert _db.session.get(PaymentLedgerEntry, payment_id).refunded_amount == Decimal(full)
+        assert _db.session.get(Order, order_id).amount_settled == Decimal("0.00")
+
+
 # --- Milestone 12: pricing ---------------------------------------------------------
 
 

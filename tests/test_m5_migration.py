@@ -72,6 +72,8 @@ def test_m5_upgrade_downgrade_upgrade_keeps_existing_menu(tmp_path):
         upgrade()
         with db.engine.connect() as conn:
             assert conn.execute(sa.text("SELECT COUNT(*) FROM restaurant_profile")).scalar() == 1
-            assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == "c2d5f8a1b3e6"
+            # Tracks whatever the current head is, not literally M5's own
+            # revision -- update this each time a later migration lands.
+            assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == "e39e6dffcb5d"
         db.session.remove()
         db.engine.dispose()

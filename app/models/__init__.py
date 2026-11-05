@@ -17,6 +17,7 @@ from app.models.menu_item import MenuItem, MenuItemTranslation
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.order import CancellationActor, DiscountType, Order, OrderItem, OrderSource, OrderStatus
 from app.models.payment import Payment, PaymentMethod
+from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
 from app.models.pricing_settings import PricingSettings
 from app.models.restaurant_profile import RestaurantProfile
 from app.models.reservation import Reservation, ReservationStatus
