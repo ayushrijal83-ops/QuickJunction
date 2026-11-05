@@ -793,14 +793,24 @@ def test_live_backup_and_restore_drill(mysql_test_url, tmp_path):
         # Simulate total data loss: restore now refuses any target that has
         # even one table left in it (see ensure_target_is_empty), so a
         # realistic disaster-recovery drill drops everything, not just the
-        # one table this test cares about.
+        # one table this test cares about. SHOW TABLES order is not FK
+        # order (e.g. 'categories' sorts before 'category_translations',
+        # whose FK references it), so FK checks must be off for this
+        # drop-all -- the same pattern tests/conftest.py's
+        # _fresh_schema_for_mysql_migration_tests already uses to safely
+        # wipe this same shared schema. Scoped to this one transient
+        # connection, closed right after, so nothing else is affected;
+        # FK enforcement for the actual restore being verified below is
+        # untouched.
         conn = pymysql.connect(host=url.host, port=url.port or 3306, user=url.username,
                                 password=url.password or "", database=url.database)
         try:
             with conn.cursor() as cur:
+                cur.execute("SET FOREIGN_KEY_CHECKS = 0")
                 cur.execute("SHOW TABLES")
                 for (table,) in cur.fetchall():
                     cur.execute(f"DROP TABLE `{table}`")
+                cur.execute("SET FOREIGN_KEY_CHECKS = 1")
             conn.commit()
         finally:
             conn.close()
