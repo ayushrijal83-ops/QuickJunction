@@ -15,7 +15,6 @@ from app.extensions import db as _db
 from app.models.order import Order
 from app.models.payment import Payment, PaymentMethod
 from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
-from app.services.payments import record_payment
 from tests.conftest import rejected_by_check_constraint
 from tests.test_restaurant_ops import customer, place
 from tests.test_payments import member

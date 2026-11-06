@@ -20,11 +20,10 @@ from app.models.restaurant_table import TableStatus
 from app.models.user import Role
 from app.services.orders import OrderStatusError, cancel_order_as_customer, update_order_status
 from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment, refund_ledger_payment
-from app.services.payments import PaymentError, record_payment, refund_payment
 from app.services.sales import build_report
 from app.services.tables import create_table
 from app.utils.clock import db_today
-from tests.conftest import csrf_token, make_user, rejected_by_check_constraint
+from tests.conftest import csrf_token, make_legacy_payment, make_user, rejected_by_check_constraint
 from tests.test_restaurant_ops import customer, place, set_status
 
 PASSWORD = "correct-horse-1"
@@ -76,20 +75,13 @@ def test_payment_amount_overstating_the_balance_due_is_rejected(client, db):
     assert _db.session.get(Order, order.id).amount_settled == D("0.00")
 
 
-def test_invalid_method_and_double_payment_rejected(db):
-    order, cook = place(customer()), member()
-    with pytest.raises(PaymentError):
-        record_payment(order, "bitcoin", cook)
-    record_payment(order, "cash", cook)
-    with pytest.raises(PaymentError) as exc:
-        record_payment(order, "cash", cook)
-    assert "already paid" in exc.value.errors["payment"][0]
-    assert _db.session.query(Payment).count() == 1
-
-
 def test_database_enforces_one_payment_per_order_and_refund_bounds(db):
+    """The UNIQUE order_id / CHECK refund-bound constraints are schema-level
+    guarantees that must hold regardless of which writer touches the table --
+    app/services/payments.py (retired M7.5.4.7) used to be that writer; the
+    row is now built directly via the make_legacy_payment test fixture."""
     order, cook = place(customer()), member()
-    p = record_payment(order, "cash", cook)
+    p = make_legacy_payment(order, cook)
     with pytest.raises(sa.exc.IntegrityError):
         _db.session.add(Payment(order_id=order.id, method=PaymentMethod.CASH, amount=D("1.00"), recorded_by_id=cook.id))
         _db.session.flush()
@@ -98,14 +90,6 @@ def test_database_enforces_one_payment_per_order_and_refund_bounds(db):
         _db.session.execute(sa.text("UPDATE payments SET refunded_amount = amount + 1 WHERE id = :i"), {"i": p.id})
         _db.session.flush()
     _db.session.rollback()
-
-
-def test_cancelled_order_cannot_be_paid(db):
-    user = customer()
-    order = place(user)
-    cancel_order_as_customer(order, user)
-    with pytest.raises(PaymentError):
-        record_payment(order, "cash", member())
 
 
 def test_payment_rbac_and_csrf(app, client, db):
@@ -126,38 +110,6 @@ def test_payment_rbac_and_csrf(app, client, db):
 
 
 # --- refunds ------------------------------------------------------------------------
-
-
-def test_partial_then_full_refund_never_exceeds_amount(db):
-    p = record_payment(place(customer(), price="100.00", qty=2), "cash", member())
-    assert p.amount == D("226.00")  # 200.00 + 13 % tax
-    assert refund_payment(p, "50", "cold fries") == D("50.00")
-    assert (p.refunded_amount, p.refund_reason, p.fully_refunded) == (D("50.00"), "cold fries", False)
-    with pytest.raises(PaymentError):
-        refund_payment(p, "176.01", None)
-    refund_payment(p, "176.00", None)
-    assert p.fully_refunded and p.net_amount == D("0.00")
-    with pytest.raises(PaymentError):
-        refund_payment(p, "0.01", None)
-
-
-@pytest.mark.parametrize("amount", ["0", "-5", "abc", "NaN", "Infinity", ""])
-def test_invalid_refund_amounts(db, amount):
-    p = record_payment(place(customer()), "cash", member())
-    with pytest.raises(PaymentError):
-        refund_payment(p, amount, None)
-    assert p.refunded_amount == D("0.00")
-
-
-def test_stale_concurrent_refund_cannot_overdraw(db):
-    """Two admins both read 'nothing refunded yet' and each refund the full
-    amount; the conditional UPDATE lets only the first through."""
-    p = record_payment(place(customer(), price="100.00", qty=1), "cash", member())
-    refund_payment(p, "100.00", None)
-    set_committed_value(p, "refunded_amount", D("0.00"))  # the second admin's stale view
-    with pytest.raises(PaymentError):
-        refund_payment(p, "100.00", None)
-    assert p.refunded_amount == D("100.00")
 
 
 def test_refund_is_admin_only(app, client, db):
@@ -276,8 +228,3 @@ def test_release_never_overrides_a_non_occupied_table(db):
     cancel_order_as_customer(order, user)
     _db.session.refresh(table)
     assert table.status == TableStatus.RESERVED
-
-
-def test_money_is_decimal_not_float(db):
-    p = record_payment(place(customer(), price="0.10", qty=3), "cash", member())
-    assert isinstance(p.amount, Decimal) and p.amount == D("0.34")  # 3 x 0.10 + 0.039 tax -> 0.04

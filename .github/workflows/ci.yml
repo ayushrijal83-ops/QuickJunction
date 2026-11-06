@@ -8,7 +8,10 @@
 #                    if any of those fifteen is skipped. Update this count (here
 #                    and in the guard step below) whenever a test is added to or
 #                    removed from that file -- M7.5.2/M7.5.3 added two without
-#                    updating it, which this fix corrects.
+#                    updating it once; M7.5.4 added one more; M7.5.4.4 added one
+#                    more still; M7.5.4.7 retired app/services/payments.py and
+#                    removed the two concurrency tests that exclusively covered
+#                    its own now-nonexistent business rules (seventeen -> fifteen).
 #   dependency-audit pip-audit. Blocking for the runtime environment
 #                    (requirements.txt, resolved and installed); report-only for
 #                    the optional AI stack (requirements-ai.txt) -- see

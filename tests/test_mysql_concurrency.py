@@ -301,36 +301,11 @@ def _paid_order_fixture():
     return customer, staff_ids, place
 
 
-def test_two_cashiers_cannot_both_take_payment(app, db):
-    from app.models.payment import Payment
-    from app.services.payments import PaymentError, record_payment
-
-    customer, (a, b), place = _paid_order_fixture()
-    for _ in range(ROUNDS):
-        order_id = place(customer).id
-
-        def pay(staff_id):
-            def act():
-                try:
-                    record_payment(_db.session.get(Order, order_id), "cash", _db.session.get(User, staff_id))
-                    return "ok"
-                except PaymentError:
-                    return "refused"
-            return act
-
-        results = _race(app, pay(a), pay(b))
-        assert sorted(map(str, results)) == ["ok", "refused"], results
-        _db.session.rollback()
-        assert _db.session.query(Payment).filter_by(order_id=order_id).count() == 1
-
-
 def test_payment_vs_cancel_never_leaves_a_cancelled_order_holding_money(app, db):
     """M7.5.3: the cancellation guard (app/services/orders.py) now checks
     orders.amount_settled exclusively, so this race is against the
-    ledger-backed record_ledger_payment -- the live path -- not the legacy
-    record_payment, which this guard no longer sees at all (a known,
-    documented limitation of leaving that function uncalled by any route;
-    see app/services/payment_ledger.py's cross-path note)."""
+    ledger-backed record_ledger_payment -- the only payment-writing path
+    left since app/services/payments.py was retired (M7.5.4.7)."""
     from app.services.payment_ledger import LedgerPaymentError, record_ledger_payment
 
     customer, (a, b), place = _paid_order_fixture()
@@ -358,31 +333,6 @@ def test_payment_vs_cancel_never_leaves_a_cancelled_order_holding_money(app, db)
         _db.session.rollback()
         row = _db.session.get(Order, order_id)
         assert (row.status == OrderStatus.CANCELLED) != (row.amount_settled > 0), (row.status, row.amount_settled)
-
-
-def test_two_full_refunds_cannot_overdraw(app, db):
-    from decimal import Decimal
-
-    from app.models.payment import Payment
-    from app.services.payments import PaymentError, record_payment, refund_payment
-
-    customer, (a, b), place = _paid_order_fixture()
-    for _ in range(ROUNDS):
-        order = place(customer)
-        payment_id = record_payment(order, "cash", _db.session.get(User, a)).id
-        full = str(order.total)
-
-        def refund():
-            try:
-                refund_payment(_db.session.get(Payment, payment_id), full, None)
-                return "ok"
-            except PaymentError:
-                return "refused"
-
-        results = _race(app, refund, refund)
-        assert sorted(map(str, results)) == ["ok", "refused"], results
-        _db.session.rollback()
-        assert _db.session.get(Payment, payment_id).refunded_amount == Decimal(full)
 
 
 # --- Milestone 7.5.2: ledger-backed payments/refunds --------------------------------
@@ -421,6 +371,141 @@ def test_two_concurrent_partial_ledger_payments_cannot_overpay(app, db):
         assert _db.session.get(Order, order_id).amount_settled == partial
         count = _db.session.query(PaymentLedgerEntry).filter_by(order_id=order_id).count()
         assert count == 1
+
+
+def test_reconciliation_cannot_clobber_a_concurrent_genuine_ledger_payment(app, db):
+    """M7.5.4: scripts/reconcile_payment_ledger.py races a genuine
+    record_ledger_payment against the same order's legacy-payment backfill.
+    Whichever wins the order-row lock first, the loser must detect the
+    conflict *inside* that lock and back off cleanly -- never a duplicated
+    backfill entry, never a clobbered amount_settled, never a CHECK
+    violation. The legacy-shaped fixture row always charges the full total
+    (app/services/payments.py's own record_payment used to guarantee this;
+    M7.5.4.7 retired it, so the row is now built directly via
+    make_legacy_payment, which mirrors the same default), so the two
+    outcomes are deterministic: reconcile first leaves amount_settled at
+    the full total and refuses the extra payment; the payment first leaves
+    amount_settled at just that partial amount and reconcile backs off,
+    leaving the legacy row for a later run."""
+    from app.models.payment_ledger import PaymentLedgerEntry
+    from app.services.payment_ledger import record_ledger_payment
+    from scripts.reconcile_payment_ledger import _apply_one
+    from tests.conftest import make_legacy_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order = place(customer, price="90.00", qty=1)
+        legacy_payment = make_legacy_payment(order, _db.session.get(User, a))
+        order_id, payment_id, total = order.id, legacy_payment.id, order.total
+
+        def reconcile():
+            return _apply_one(payment_id).action
+
+        def pay_more():
+            try:
+                record_ledger_payment(_db.session.get(Order, order_id), "20.00", "card",
+                                      _db.session.get(User, b))
+                return "ok"
+            except Exception:
+                return "refused"
+
+        results = _race(app, reconcile, pay_more)
+        assert sorted(map(str, results)) in (["reconciled", "refused"], ["flagged", "ok"]), results
+        _db.session.rollback()
+
+        order_after = _db.session.get(Order, order_id)
+        assert 0 <= order_after.amount_settled <= total
+        entries = _db.session.query(PaymentLedgerEntry).filter_by(order_id=order_id).all()
+        payment_entries = [e for e in entries if e.entry_type.value == "payment"]
+        assert len(payment_entries) == 1, payment_entries
+
+
+def test_reconciliation_payment_lock_is_real_against_a_concurrent_legacy_refund(app, db):
+    """M7.5.4.4: regression for the M7.5.4.3 review finding that
+    scripts/reconcile_payment_ledger.py's _apply_one read the legacy
+    payment row's amount/refunded_amount from an object loaded before any
+    lock was taken. The fix re-fetches and locks that row itself, after the
+    order lock, with populate_existing=True -- SQLite accepts but does not
+    enforce FOR UPDATE (see this module's own docstring), so only a real
+    MySQL server proves this lock is an actual InnoDB row lock: a
+    concurrent raw conditional UPDATE against this exact payments row
+    (never locking the order, exactly the shape app/services/payments.py's
+    now-retired refund_payment used -- M7.5.4.7 removed that module, so the
+    race is reproduced here directly rather than through a service call)
+    must either complete before reconcile's locked read -- which then
+    correctly backfills the refund -- or block until reconcile's
+    transaction ends.
+
+    What this proves: whichever side's write reaches the payments row
+    first, the ledger payment entry and amount_settled this run writes are
+    always mutually consistent with each other (both read under the same
+    lock, in the same transaction) -- never a torn mix of a stale amount
+    and a fresh one, and never a duplicated or corrupted entry.
+
+    What this does NOT, and structurally cannot, prove: a refund that
+    commits strictly *after* reconciliation has already finished is a
+    separate, pre-existing, documented gap -- a write with this shape never
+    locks the order or touches the ledger, so nothing the reconcile script
+    does can retroactively notice a write that had not happened yet when
+    its own lock was released. This is precisely the risk M7.5.4.7 closed
+    by retiring app/services/payments.py as a *live* writer; this test's
+    raw UPDATE exists only to keep proving the row lock itself is real,
+    not to suggest such a writer still exists in production."""
+    from decimal import Decimal
+
+    import sqlalchemy as sa
+
+    from app.models.payment import Payment
+    from app.models.payment_ledger import PaymentLedgerEntry
+    from scripts.reconcile_payment_ledger import _apply_one
+    from tests.conftest import make_legacy_payment
+
+    customer, (a, b), place = _paid_order_fixture()
+    for _ in range(ROUNDS):
+        order = place(customer, price="60.00", qty=1)
+        legacy_payment = make_legacy_payment(order, _db.session.get(User, a))
+        order_id, payment_id = order.id, legacy_payment.id
+
+        def reconcile():
+            return _apply_one(payment_id).action
+
+        def refund():
+            try:
+                stmt = (
+                    sa.update(Payment)
+                    .where(Payment.id == payment_id, Payment.refunded_amount + Decimal("10.00") <= Payment.amount)
+                    .values(refunded_amount=Payment.refunded_amount + Decimal("10.00"), refunded_at=sa.func.now())
+                    .execution_options(synchronize_session=False)
+                )
+                won = _db.session.execute(stmt).rowcount == 1
+                _db.session.commit()
+                return "refunded" if won else "refund-failed"
+            except Exception:
+                _db.session.rollback()
+                return "refund-failed"
+
+        results = _race(app, reconcile, refund)
+        # Both always succeed regardless of which one reaches the payments
+        # row first -- the loser waits on the row lock, it is never refused
+        # or left to corrupt the other's work.
+        assert sorted(map(str, results)) == ["reconciled", "refunded"], results
+        _db.session.rollback()
+
+        entries = _db.session.query(PaymentLedgerEntry).filter_by(order_id=order_id).all()
+        payment_entries = [e for e in entries if e.entry_type.value == "payment"]
+        refund_entries = [e for e in entries if e.entry_type.value == "refund"]
+        assert len(payment_entries) == 1, payment_entries  # never duplicated, whichever order they ran in
+
+        entry = payment_entries[0]
+        order_after = _db.session.get(Order, order_id)
+        # Internally consistent with itself, whatever this run saw under
+        # its own lock -- the one guarantee the fix actually makes.
+        assert order_after.amount_settled == entry.amount - (entry.refunded_amount or Decimal("0.00"))
+        # Paired correctly either way: a refund entry exists if and only if
+        # the payment entry's own refunded_amount reflects that refund.
+        assert (len(refund_entries) == 1) == (entry.refunded_amount == Decimal("10.00"))
+        if refund_entries:
+            assert refund_entries[0].amount == Decimal("-10.00")
 
 
 def test_two_full_ledger_refunds_cannot_overdraw(app, db):

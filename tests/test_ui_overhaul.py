@@ -20,7 +20,7 @@ from app.services.reservations import create_reservation
 from app.services.tables import create_table
 from app.utils.clock import db_today
 from app.utils.formatting import CURRENCY_SYMBOL
-from tests.conftest import make_user
+from tests.conftest import make_legacy_payment, make_user, refund_legacy_payment
 from tests.test_restaurant_ops import customer, place, set_status
 
 PASSWORD = "correct-horse-1"
@@ -156,11 +156,9 @@ def test_admin_dashboard_shows_the_business_view(client, db):
 
 
 def test_reconciliation_gap_order_shows_needs_reconciliation_not_refunded(client, db):
-    from app.services.payments import record_payment
-
     boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
     order = place(customer(), price="40.00", qty=1)
-    record_payment(order, "cash", boss)
+    make_legacy_payment(order, boss)
     login(client, "boss2", Role.ADMIN)
     body = page(client, f"/staff/orders/{order.id}")
     assert "Needs reconciliation" in body
@@ -172,11 +170,10 @@ def test_reconciliation_gap_order_cannot_be_paid_again(client, db):
     an unreconciled legacy-paid order, and nothing in the ledger backs it
     -- confirming this is a real data gap, not just a hidden button."""
     from app.models.payment_ledger import PaymentLedgerEntry
-    from app.services.payments import record_payment
 
     boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
     order = place(customer(), price="40.00", qty=1)
-    record_payment(order, "cash", boss)
+    make_legacy_payment(order, boss)
     login(client, "boss2", Role.ADMIN)
     body = page(client, f"/staff/orders/{order.id}")
     assert "not yet reconciled" in body.lower()
@@ -205,12 +202,10 @@ def test_fully_refunded_legacy_order_is_labelled_correctly_and_still_flagged(cli
     refunded_amount says so independently of reconciliation) -- but it is
     still unreconciled, so the page still flags it rather than silently
     treating it as fully settled and safe to act on."""
-    from app.services.payments import record_payment, refund_payment
-
     boss = make_user(username="boss", email="boss@example.com", password=PASSWORD, role=Role.ADMIN)
     order = place(customer(), price="30.00", qty=1)
-    payment = record_payment(order, "cash", boss)
-    refund_payment(payment, str(payment.amount), "test")
+    payment = make_legacy_payment(order, boss)
+    refund_legacy_payment(payment, payment.amount, "test")
     login(client, "boss2", Role.ADMIN)
     body = page(client, f"/staff/orders/{order.id}")
     assert "Fully refunded" in body

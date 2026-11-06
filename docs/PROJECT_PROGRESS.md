@@ -3688,3 +3688,206 @@ New: `tests/test_m6_2_responsive.py`.
 
 Commits: `6357098` (preference page headings), `2e549022a0c43985f2719fb46d88a119b0e0c6a9`
 (checkout button branding, responsive layouts, new test file).
+
+# M7.5.4 — Payment-Ledger Legacy-Data Reconciliation Utility ✅ (tool only -- not yet run against production)
+
+Date: 2026-11-05. Builds on the payment ledger work shipped between this
+file's M6.2 entry above and this one -- M7.5.1 (ledger schema + one-time
+migration backfill), M7.5.2 (ledger-backed payment/refund service), and
+M7.5.3 (live route cutover) -- none of which were recorded in this file when
+they shipped; this entry does not retroactively document them, only this
+milestone. See `app/services/payment_ledger.py`'s "Cross-path note" and
+`docs/STATUS.md`'s M7.5.4 row for that context.
+
+## What this adds
+
+`scripts/reconcile_payment_ledger.py`: a standalone operator tool that
+backfills a ledger `payment` entry (and a `refund` entry, where the legacy
+row was refunded) for an order paid through the legacy
+`app/services/payments.py` route after the M7.5.1 migration's one-time
+backfill ran but before the M7.5.3 cutover deployed -- closing the
+reconciliation gap `app/templates/staff/order_detail.html`'s
+`unreconciled_legacy_payment` guard has been warning about since M7.5.3.
+
+Deliberately **not** a re-run of the migration's own backfill SQL: that SQL
+recomputes `amount_settled` unconditionally for every order with a legacy
+payment, which is only safe once, offline, with no concurrent writers. This
+script instead locks one order at a time (`SELECT ... FOR UPDATE`),
+re-verifies eligibility *inside* that lock immediately before writing, and
+writes `amount_settled` only via a conditional `UPDATE ... WHERE
+amount_settled = 0` -- so it can never discard genuine ledger activity
+recorded on an order after this run's scan started.
+
+Safety model: read-only dry run by default; `--apply` additionally requires
+`--confirm "RECONCILE <n>"` naming the exact eligible count *this run's own
+scan* printed; a non-SQLite target database name must end in `_test` unless
+`--allow-production-target` is given (mirrors `scripts/restore_database.py`).
+A record that does not cleanly fit -- both a legacy payment and an existing
+ledger entry already present, an unexpectedly non-zero `amount_settled`, or
+an out-of-range legacy refund amount -- is reported for manual review and
+left untouched, never guessed at. The `unreconciled_legacy_payment` UI guard
+is unchanged and stays in place.
+
+## Verification
+
+`tests/test_payment_ledger_reconciliation.py` (new, 13 tests, SQLite):
+unrefunded/partially-refunded/fully-refunded legacy payments reconcile to
+the correct ledger entries and `amount_settled`; re-running `--apply` is a
+clean no-op; an order with both a legacy payment and an existing ledger
+entry already (the ordinary pre-M7.5.1 state) is left alone and counted
+separately; an unexpectedly non-zero `amount_settled` and an out-of-range
+legacy refund amount are both flagged, not touched; a genuine ledger payment
+recorded on an order after the scan is never clobbered; one order's forced
+failure rolls back cleanly without blocking another order's reconciliation
+in the same run; dry run never writes anything. One test is an opt-in,
+skip-by-default MySQL check (`TEST_DATABASE_URL`).
+
+`tests/test_mysql_concurrency.py` (1 new test, opt-in): races the script's
+own per-order apply against a genuine `record_ledger_payment` call on the
+same order, asserting that whichever wins the row lock first, the other
+detects the conflict cleanly -- exactly one ledger payment entry and a
+settlement within bounds either way, never a duplicate or an overwrite.
+
+| Run | Result |
+| --- | --- |
+| `tests/test_payment_ledger_reconciliation.py` | **12 passed, 1 skipped** (SQLite; the MySQL test skips without `TEST_DATABASE_URL`) |
+| `tests/test_mysql_concurrency.py` | **16 collected, 16 skipped** (SQLite; all MySQL-only, including the new one) |
+| SQLite, full suite | **1258 passed, 21 skipped, 0 failed** |
+| MySQL | **not run** -- no local MySQL server available this session; the opt-in tests above have not been executed for real |
+
+## Known limitations
+
+- **No production reconciliation has been performed.** This milestone ships
+  the tool and its tests only. Before any real use: take a fresh backup,
+  restore it into a disposable copy, dry-run against the copy, `--apply`
+  against the copy and verify the report by hand, only then `--apply`
+  against the real database immediately after a fresh backup. See
+  `docs/PRODUCTION_READINESS.md` P7.
+- The opt-in MySQL test and concurrency race have not been executed against
+  a real MySQL server in this session.
+- No audit_logs row is written by this script (matching the original
+  migration's own backfill, which never wrote one either) -- the ledger
+  entries themselves, each naming the script in their `reason`, are the
+  durable record.
+
+## Files changed
+
+New: `scripts/reconcile_payment_ledger.py`, `tests/test_payment_ledger_reconciliation.py`.
+
+Modified: `tests/test_mysql_concurrency.py` (one new concurrency test),
+`.github/workflows/ci.yml` (concurrency-test guard count 15 → 16),
+`docs/STATUS.md`, `docs/PRODUCTION_READINESS.md`.
+
+# M7.5.4.7 — Retire Legacy Payment Writers ✅
+
+Date: 2026-11-06. Builds on M7.5.4 above and the independent review/fix work
+that followed it (M7.5.4.3's review, M7.5.4.4's stale-payment-read fix,
+M7.5.4.5's verification), none of which were recorded in this file when they
+shipped; this entry does not retroactively document them, only this
+milestone.
+
+## Why
+
+M7.5.4.5's verification confirmed a structural gap no amount of locking
+inside `scripts/reconcile_payment_ledger.py` could close on its own: if a
+legacy refund committed through `app/services/payments.py`'s
+`refund_payment` *after* reconciliation had already finished with an order,
+nothing would ever notice -- `refund_payment` never touched the ledger or
+the order row, so there was no event for anything downstream to react to.
+The only way to close this for good was to stop that function from being
+able to write at all.
+
+## What this does
+
+`app/services/payments.py` -- `record_payment`, `refund_payment`,
+`PaymentError` -- is **deleted outright**, not hard-disabled behind a flag
+and not redirected into `app/services/payment_ledger.py` (a mechanical
+redirect would have changed callers' return types and row shapes -- a
+`Payment` vs. a `PaymentLedgerEntry` -- for no safety benefit over deleting
+it, since nothing live called it either way; see the M7.5.4.6 audit this
+milestone implements). `app/services/payment_ledger.py`'s
+`record_ledger_payment`/`refund_ledger_payment` are now the only code in
+the application that can write a payment or a refund, in production and in
+every test.
+
+**Unchanged, as required:** the legacy `Payment` model and `payments`
+table (historical rows remain exactly as readable as before), the
+`payment_ledger_entries` schema and service, the staff payment/refund
+routes, `scripts/reconcile_payment_ledger.py`'s logic and locking, and the
+`unreconciled_legacy_payment` UI guard (`app/templates/staff/order_detail.html`,
+`app/templates/partials/_payment_badge.html`) -- it stays in place; nothing
+about this milestone lets it be removed, since no real reconciliation has
+been run.
+
+## Test migration
+
+Every test that called the retired functions fell into one of two
+categories:
+
+- **Testing the legacy writer's own business rules** (double-payment
+  rejection, refund-bound checks, stale-concurrent-refund protection,
+  Decimal precision, the cancelled-order guard) -- removed outright where
+  `tests/test_payment_ledger_service.py` already proves the identical
+  property for the ledger-backed path (it does, in every case here), since
+  the behavior under test no longer exists to regress. 11 such tests
+  (`tests/test_payments.py`) and 2 such concurrency tests
+  (`tests/test_mysql_concurrency.py`, redundant with
+  `test_two_concurrent_partial_ledger_payments_cannot_overpay` and
+  `test_two_full_ledger_refunds_cannot_overdraw`) were removed this way.
+  `tests/test_pricing.py::test_refunds_still_bounded_by_the_actual_payment`
+  was rewritten rather than removed, since its discount-then-refund-bound
+  interplay was not otherwise covered -- now built on
+  `record_ledger_payment`/`refund_ledger_payment`.
+- **Using the legacy functions only as a fixture** to construct the
+  "legacy-paid, pre-ledger `payments` row" shape the reconciliation tooling
+  and the UI guard exist to handle (`tests/test_ui_overhaul.py`,
+  `tests/test_payment_ledger_reconciliation.py`, and the M7.5.4.4
+  stale-read regression and lock tests in `tests/test_mysql_concurrency.py`)
+  -- rewritten against two new test-only fixtures in `tests/conftest.py`,
+  `make_legacy_payment`/`refund_legacy_payment`, which insert the identical
+  row shape directly rather than through the (now nonexistent) service
+  functions. One MySQL-only test
+  (`test_reconciliation_payment_lock_is_real_against_a_concurrent_legacy_refund`)
+  needed its concurrent writer reproduced as an inline raw conditional
+  `UPDATE` (the same statement `refund_payment` used internally) rather
+  than a fixture call, since its entire point is racing a real concurrent
+  writer against the reconciler's new row lock -- fixing, in passing, a
+  pre-existing latent `NameError` (missing `Decimal` import) in that same
+  test that nothing had caught because it is always skipped outside a real
+  MySQL run.
+
+`tests/test_payment_ledger.py`'s unused `record_payment` import (dead code,
+unrelated to this test's own coverage) was also removed.
+
+## Verification
+
+| Run | Result |
+| --- | --- |
+| `tests/test_payments.py`, `test_pricing.py`, `test_ui_overhaul.py`, `test_payment_ledger_reconciliation.py`, `test_payment_ledger.py`, `test_payment_ledger_service.py`, `test_payment_ledger_migration.py`, `test_mysql_concurrency.py` (focused) | **0 failed** |
+| `tests/test_mysql_concurrency.py` (collected) | **15** (was 17; the 2 removed tests covered only the retired writer's own business rules) |
+| SQLite, full suite | **1249 passed, 20 skipped, 0 failed** (was 1258 passed, 21 skipped before M7.5.4.4; 1260/22 after it; 11 fewer passed + 2 fewer skipped here account for exactly the tests removed above) |
+| MySQL | **not run** -- no local MySQL server available this session, same as M7.5.4/M7.5.4.4 |
+| Repo-wide search | `record_payment`, `refund_payment`, `PaymentError`, `app.services.payments` -- no remaining imports or calls anywhere in `app/` or `tests/`; only historical prose mentions remain in docstrings/docs describing what the retired functions used to do |
+
+## Known limitations (unchanged from M7.5.4)
+
+**No production reconciliation has been performed.** This milestone closes
+the post-commit-writer race at the code level by removing the writer that
+could win it -- it does not itself reconcile any real installation's data.
+The procedure in `docs/PRODUCTION_READINESS.md` P7 (fresh backup, dry run
+against a disposable restore, verified `--apply` against that restore, only
+then `--apply` against the real database immediately after a fresh backup)
+is unchanged and still required before any real use.
+
+## Files changed
+
+Modified: `app/services/payment_ledger.py` (docstring/comment accuracy
+only -- no behavior change), `scripts/reconcile_payment_ledger.py`
+(docstring accuracy only -- no behavior change), `tests/conftest.py` (two
+new fixtures), `tests/test_payments.py`, `tests/test_pricing.py`,
+`tests/test_ui_overhaul.py`, `tests/test_payment_ledger_reconciliation.py`,
+`tests/test_payment_ledger.py`, `tests/test_mysql_concurrency.py`,
+`.github/workflows/ci.yml` (concurrency-test guard count 17 → 15),
+`docs/STATUS.md`, `docs/PRODUCTION_READINESS.md`.
+
+Deleted: `app/services/payments.py`.

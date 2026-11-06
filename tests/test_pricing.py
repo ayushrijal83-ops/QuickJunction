@@ -19,7 +19,6 @@ from app.models.pricing_settings import PricingSettings
 from app.models.user import Role
 from app.services.orders import OrderStatusError, update_order_status
 from app.services.payment_ledger import record_ledger_payment, refund_ledger_payment
-from app.services.payments import PaymentError, record_payment, refund_payment
 from app.services.pricing import PricingError, apply_discount, current_settings, price, update_settings
 from app.services.sales import build_report
 from app.utils.clock import db_today
@@ -281,12 +280,19 @@ def test_completed_or_cancelled_orders_cannot_be_discounted(db):
 
 
 def test_refunds_still_bounded_by_the_actual_payment(db):
+    """M7.5.4.7: the legacy record_payment/refund_payment this test used to
+    exercise are retired; the ledger-backed equivalents' own refund-bound
+    checks are covered directly in test_payment_ledger_service.py
+    (test_over_refund_rejected, test_partial_then_full_refund_never_exceeds_amount).
+    What is still specific to pricing is that a discount applied *before*
+    payment correctly shrinks the amount a full refund must match, and that
+    the order becomes cancellable once that (discounted) amount is fully
+    refunded -- covered here with the ledger-backed service instead."""
     cook = member()
     order = apply_discount(thousand(), "fixed", "100", "voucher", cook)
-    payment = record_payment(order, "cash", cook)
-    with pytest.raises(PaymentError):
-        refund_payment(payment, "1017.01", None)
-    refund_payment(payment, "1017.00", None)
+    payment = record_ledger_payment(order, order.total, "cash", cook)
+    assert order.total == D("1017.00")  # 1000 - 100 voucher, + 13 % tax on 900
+    refund_ledger_payment(payment, order.total, "full refund", cook)
     update_order_status(order, OrderStatus.CANCELLED)  # fully refunded -> cancellable
     assert order.status == OrderStatus.CANCELLED
 

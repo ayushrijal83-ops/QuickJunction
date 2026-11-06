@@ -223,6 +223,41 @@ def make_menu_item(
     return item
 
 
+def make_legacy_payment(order, actor, *, method: str = "cash", amount: str | None = None):
+    """Insert a legacy ``payments`` row directly, bypassing
+    app/services/payments.py (retired M7.5.4.7) -- for tests that need the
+    pre-cutover 'payments row, no ledger entry' shape
+    scripts/reconcile_payment_ledger.py exists to repair. Mirrors the
+    retired ``record_payment``'s own defaults: the full order total, method
+    ``cash`` unless given otherwise."""
+    from app.models.payment import Payment, PaymentMethod
+
+    payment = Payment(
+        order_id=order.id,
+        method=PaymentMethod(method),
+        amount=Decimal(amount) if amount is not None else order.total,
+        recorded_by_id=actor.id,
+    )
+    _db.session.add(payment)
+    _db.session.commit()
+    return payment
+
+
+def refund_legacy_payment(payment, amount, reason: str | None = None):
+    """Apply a refund directly to a legacy ``payments`` row, bypassing the
+    retired ``refund_payment``. Not a re-implementation of its validation --
+    callers needing to exercise refund-bound checking use
+    ``refund_ledger_payment`` instead; this is a fixture-construction
+    convenience only."""
+    from datetime import datetime
+
+    payment.refunded_amount = Decimal(str(amount))
+    payment.refunded_at = datetime.utcnow()
+    payment.refund_reason = reason
+    _db.session.commit()
+    return payment
+
+
 def csrf_token(client: FlaskClient, get_url: str) -> str:
     """Fetch a form page and pull its CSRF token, the way a browser would
     submit it back."""

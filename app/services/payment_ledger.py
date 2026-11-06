@@ -9,17 +9,23 @@ staff routes by M7.5.3).
 field and ``RefundForm.reason`` is mandatory, and the refund route takes
 the target payment entry's id in its URL (``/orders/<id>/payments/<entry_id>/
 refund``) rather than assuming one payment per order. The legacy
-``app/services/payments.py`` (``Payment``/``payments``, one row per order,
-always for the order's full total) is no longer called by any route --
-it remains only for pre-cutover historical data and the tests that still
-exercise it directly. See the M7.5.3 report for the cutover's full scope,
-including the still-open reconciliation gap for orders paid through the
-legacy route between the M7.5.1 migration and this cutover actually
-deploying (``app/templates/partials/_payment_badge.html`` and
-``app/templates/staff/order_detail.html`` carry the UI-side mitigation).
+``app/services/payments.py`` writer (``record_payment``/``refund_payment``,
+one row per order, always for the order's full total) was retired outright
+in M7.5.4.7, once it was confirmed unreachable from any live route -- this
+module is now the *only* supported payment-writing path. The legacy
+``Payment``/``payments`` table itself is untouched and remains for
+historical data and reconciliation (see ``app/models/payment.py`` and
+``scripts/reconcile_payment_ledger.py``). See the M7.5.3 report for the
+cutover's full scope, including the still-open reconciliation gap for
+orders paid through the legacy route between the M7.5.1 migration and the
+M7.5.3 cutover actually deploying (``app/templates/partials/_payment_badge.html``
+and ``app/templates/staff/order_detail.html`` carry the UI-side
+mitigation, and it is not yet safe to remove -- see M7.5.4's "Known
+limitations").
 
-Locking, same rule as ``app/services/payments.py`` and ``app/services/
-orders.py``: every operation here locks the order row first (``SELECT ...
+Locking, same rule the retired ``app/services/payments.py`` also followed,
+and ``app/services/orders.py`` still does: every operation here locks the
+order row first (``SELECT ...
 FOR UPDATE``) and holds it for the whole transaction, before it ever
 touches a ``payment_ledger_entries`` row. That single lock is what makes
 multiple payments/refunds against the same order safe without a second,
@@ -42,19 +48,21 @@ unconditional" -- so each function writes its own fixed
 ledger write and the ``amount_settled``/``refunded_amount`` projection
 update. There is nothing for a caller to bypass.
 
-Cross-path note (resolved by M7.5.3, with one residual gap): ``app/
+Cross-path note (resolved by M7.5.3's cutover and M7.5.4.7's retirement of
+the legacy writer, with one residual historical gap): ``app/
 services/orders.py``'s cancellation guard (``holds_payment`` /
 ``_apply_transition``) and ``app/services/pricing.py``'s discount guard
-now check ``orders.amount_settled`` exclusively, not the legacy
-``payments`` table -- safe because this module's route cutover means
-nothing live writes to ``payments`` for those guards to miss. The one
+check ``orders.amount_settled`` exclusively, not the legacy ``payments``
+table -- safe because nothing can write to ``payments`` for those guards
+to miss, now that ``app/services/payments.py`` no longer exists. The one
 remaining gap is historical: an order paid through the legacy route
-*after* the M7.5.1 migration ran but *before* this cutover actually
+*after* the M7.5.1 migration ran but *before* the M7.5.3 cutover actually
 deployed has a ``payments`` row with no corresponding ledger entry, and
 ``amount_settled`` stuck at 0 for it. See the M7.5.3 report for the
-required reconciliation procedure (not yet executed against any real
-database) and ``_payment_badge.html``/``order_detail.html`` for the
-interim UI guard against double-collecting such an order.
+required reconciliation procedure (``scripts/reconcile_payment_ledger.py``,
+not yet executed against any real database) and
+``_payment_badge.html``/``order_detail.html`` for the interim UI guard
+against double-collecting such an order.
 """
 
 from __future__ import annotations
@@ -115,7 +123,7 @@ def get_payment_entry_for_order(order_id: int, entry_id: int) -> PaymentLedgerEn
 def record_ledger_payment(order: Order, raw_amount, raw_method, actor: User) -> PaymentLedgerEntry:
     """Record one 'payment' ledger entry against ``order``.
 
-    Unlike ``app.services.payments.record_payment`` (exactly one payment,
+    Unlike the retired ``app.services.payments.record_payment`` (exactly one payment,
     always the full total), this supports partial and multiple payments:
     ``raw_amount`` may be anything greater than zero and up to the order's
     current balance due (``total - amount_settled``).
@@ -177,7 +185,7 @@ def refund_ledger_payment(payment_entry: PaymentLedgerEntry, raw_amount, reason:
     """Refund ``raw_amount`` (<= what remains unrefunded) against
     ``payment_entry``, which must be a 'payment' ledger row. Returns the new
     'refund' entry. A non-empty ``reason`` is mandatory (stricter than the
-    legacy ``refund_payment``'s optional one).
+    retired legacy ``refund_payment``'s optional one).
 
     Writes its own fixed ``PAYMENT_REFUNDED`` audit event every time the
     refund is accepted, in the same transaction -- there is no caller
@@ -193,7 +201,7 @@ def refund_ledger_payment(payment_entry: PaymentLedgerEntry, raw_amount, reason:
 
     locked = _lock_order(payment_entry.order_id)
 
-    # Same shape as app.services.payments.refund_payment's conditional
+    # Same shape as the retired app.services.payments.refund_payment's conditional
     # UPDATE: the comparison runs against the current database row, so a
     # caller holding a stale in-memory refunded_amount cannot over-refund.
     update_payment = (
