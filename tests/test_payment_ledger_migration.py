@@ -22,6 +22,7 @@ from flask_migrate import downgrade, upgrade
 from app import create_app
 from app.extensions import db
 from config import TestingConfig
+from tests.conftest import wipe_mysql_schema
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from migrations.versions.e39e6dffcb5d_add_payment_ledger import (  # noqa: E402
@@ -402,7 +403,41 @@ def test_downgrade_on_untouched_ledger_is_a_clean_noop_reconstruction(tmp_path):
 # running under MySQL's parser and InnoDB rather than SQLite's. The
 # `_fresh_schema_for_mysql_migration_tests` fixture in conftest.py wipes
 # TEST_DATABASE_URL's schema before each test in this module automatically
-# (its name matches "migration").
+# (its name matches "migration") -- but that only protects the first of
+# these two tests against whatever ran earlier; it does not run *between*
+# or *after* them. Both write directly into that shared database via their
+# own `_mysql_app()`, bypassing the standard `app`/`db` fixture (and its
+# own create_all()/drop_all()) entirely, so neither gets *any* automatic
+# teardown on its own -- hence `_cleanup_shared_mysql_schema` below, which
+# both request explicitly.
+
+@pytest.fixture
+def _cleanup_shared_mysql_schema():
+    """Guarantees the shared TEST_DATABASE_URL MySQL database is wiped
+    after test_mysql_full_round_trip_payment_and_refund and
+    test_mysql_downgrade_refuses_on_adjustment, regardless of how they
+    end. This matters most for the second one: its entire point is
+    proving that a downgrade is correctly *refused*, which by design
+    leaves the upgraded schema -- and the order_id=1 it seeded -- fully
+    intact when the test body returns. Nothing in either test's own body
+    can double as that cleanup (dropping the schema mid-test would
+    contradict what each is trying to prove), so it belongs here instead,
+    in a fixture finalizer that pytest runs whether the test body returns
+    normally, raises, or (via `_mysql_test_url()`) skips -- never only
+    the pass path.
+
+    Without this, a non-"migration"-named test file collected directly
+    afterward (e.g. tests/test_payment_ledger_reconciliation.py, by
+    plain alphabetical collection order) would inherit that leftover
+    order_id=1 through its own `app` fixture's create_all(), which never
+    clears rows out of a table that already exists -- this was confirmed
+    to be the actual cause of a previously-failing MySQL CI run (not
+    hypothetical)."""
+    try:
+        yield
+    finally:
+        wipe_mysql_schema(os.environ.get("TEST_DATABASE_URL", ""))
+
 
 def _mysql_test_url():
     url = os.environ.get("TEST_DATABASE_URL", "")
@@ -436,7 +471,7 @@ def _seed_legacy_mysql(conn, *, order_id, user_id=1, total="100.00", refunded="0
     ), {"oid": order_id, "total": total, "refunded": refunded, "uid": user_id, "reason": refund_reason})
 
 
-def test_mysql_full_round_trip_payment_and_refund():
+def test_mysql_full_round_trip_payment_and_refund(_cleanup_shared_mysql_schema):
     application = _mysql_app()
     with application.app_context():
         upgrade(revision=PRE_REVISION)
@@ -465,7 +500,7 @@ def test_mysql_full_round_trip_payment_and_refund():
         db.engine.dispose()
 
 
-def test_mysql_downgrade_refuses_on_adjustment():
+def test_mysql_downgrade_refuses_on_adjustment(_cleanup_shared_mysql_schema):
     application = _mysql_app()
     with application.app_context():
         upgrade(revision=PRE_REVISION)

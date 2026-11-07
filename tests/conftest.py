@@ -49,23 +49,44 @@ def rejected_by_check_constraint():
     return pytest.raises((IntegrityError, OperationalError), match=r"(?i)check constraint")
 
 
+def wipe_mysql_schema(uri: str) -> None:
+    """Drops every table the database at ``uri`` currently has. No-op for
+    anything that is not a MySQL URL (SQLite tests never need this -- each
+    gets a fresh in-memory database for free).
+
+    Shared by two different callers that both need "leave this shared
+    MySQL *_test database exactly as empty as a fresh one, regardless of
+    what the last thing to touch it did": _fresh_schema_for_mysql_migration_tests
+    below (runs this *before* every "migration"-named test, since an opt-in
+    MySQL run shares one database across the whole suite and one test's
+    leftovers would otherwise break the next), and
+    tests/test_payment_ledger_migration.py's own
+    ``_cleanup_shared_mysql_schema`` fixture (runs this *after* the two
+    tests that write directly into that shared database via their own
+    ``_mysql_app()``, bypassing the standard ``app``/``db`` fixture
+    entirely -- including after a test whose entire point is proving a
+    downgrade is correctly *refused*, which by design leaves the upgraded
+    schema, and whatever it seeded, still standing when the test body
+    itself ends)."""
+    if not uri.startswith("mysql"):
+        return
+    assert_disposable_test_database(uri)
+    engine = sa.create_engine(uri)
+    with engine.begin() as conn:
+        conn.execute(sa.text("SET FOREIGN_KEY_CHECKS = 0"))
+        for table in sa.inspect(conn).get_table_names():
+            conn.execute(sa.text(f"DROP TABLE `{table}`"))  # names come from the server, not input
+        conn.execute(sa.text("SET FOREIGN_KEY_CHECKS = 1"))
+    engine.dispose()
+
+
 @pytest.fixture(autouse=True)
 def _fresh_schema_for_mysql_migration_tests(request):
     """Migration tests assume an empty database. On SQLite each gets a fresh
     in-memory one for free; an opt-in MySQL run shares one ``*_test``
     database, so wipe it first or one test's leftovers break the next."""
-    uri = os.environ.get("TEST_DATABASE_URL", "")
-    if "migration" in request.module.__name__ and uri.startswith("mysql"):
-        import sqlalchemy as sa
-
-        assert_disposable_test_database(uri)
-        engine = sa.create_engine(uri)
-        with engine.begin() as conn:
-            conn.execute(sa.text("SET FOREIGN_KEY_CHECKS = 0"))
-            for table in sa.inspect(conn).get_table_names():
-                conn.execute(sa.text(f"DROP TABLE `{table}`"))  # names come from the server, not input
-            conn.execute(sa.text("SET FOREIGN_KEY_CHECKS = 1"))
-        engine.dispose()
+    if "migration" in request.module.__name__:
+        wipe_mysql_schema(os.environ.get("TEST_DATABASE_URL", ""))
     yield
 
 

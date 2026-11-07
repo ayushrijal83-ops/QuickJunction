@@ -107,25 +107,97 @@ def _run_main(argv: list[str]) -> int:
     """main() pushes its own nested Flask app context (``with
     app.app_context():``). Flask-SQLAlchemy 3.x scopes ``db.session`` by
     app-context id (``flask_sqlalchemy.extension._make_scoped_session``'s
-    default ``scopefunc``), so even though the faked create_app() returns
-    this *same* Flask app object, main()'s inner context gets its own,
-    separate session -- whatever it commits is invisible to this test's own
-    session (and the ``order``/``payment`` objects already cached in it)
-    until that session is told to stop trusting its cache. expire_all()
-    does that: every already-loaded object is re-read from the database on
-    its next attribute access instead of silently returning its
-    pre-reconciliation copy. This matters as much for proving a refusal
-    path really wrote nothing as it does for checking a successful apply's
-    effects -- without it, a stale cache could make either kind of
-    assertion pass for the wrong reason.
+    default ``scopefunc``, confirmed by reading
+    ``flask_sqlalchemy/session.py``'s ``_app_ctx_id``), so even though the
+    faked create_app() returns this *same* Flask app object, main()'s inner
+    context gets its own, separate ``Session`` object -- a different
+    identity from this test's own "observer" session (the one the ``app``
+    fixture's outer ``with application.app_context():`` block bound, and
+    that ``order``/``payment`` were already loaded into by the time this
+    runs). Call the one main() used the "CLI session" and this one the
+    "observer session" throughout.
+
+    Why expire_all() alone is not enough (the failure mode below is what
+    actually happened in CI run 42349911400 against real MySQL 8.0 -- this
+    is a diagnosed, not a hypothetical, bug): under MySQL's default
+    REPEATABLE READ isolation, a
+    session's first statement opens a transaction whose MVCC snapshot is
+    then fixed for every later statement in it, however fresh. By the time
+    this runs, the observer session already has such a transaction open --
+    started by this test's own setup reads (_legacy_paid_order's
+    ``_db.session.refresh(order)`` and its two assert queries) -- whose
+    snapshot necessarily predates whatever the CLI session went on to
+    commit. expire_all() only invalidates this session's cached Python
+    objects; it does not end that transaction, so a "fresh" SELECT issued
+    inside it is still bound to the old snapshot and cannot see the CLI
+    session's commit. That is exactly what produced NoResultFound and
+    stale zero counts in the five failing tests against real MySQL --
+    SQLite's single shared StaticPool connection never surfaced it, which
+    is why this passed there and in every prior local run.
+
+    The fix: end the observer session's existing transaction with
+    rollback() *before* expiring anything, so its next statement opens a
+    brand-new transaction with a fresh snapshot -- one that can see the
+    CLI session's already-committed write. rollback() is the right choice,
+    not commit(): everything the observer session has done up to this
+    point is read-only setup/assertion queries (_legacy_paid_order's own
+    order/payment are committed for real by checkout()/make_legacy_payment()
+    themselves, via their own commit_with()/db.session.commit() calls,
+    before this function is ever invoked -- never left for this rollback
+    to lose), so there is nothing of this session's own to discard.
+
+    Why this cannot roll back the CLI's own commit: rollback() acts only
+    on the observer session's own transaction, on whatever connection the
+    observer session currently holds checked out from the pool. The CLI
+    session is a *different* scoped Session object, keyed by its own,
+    distinct app-context id, holding its own separate connection -- and it
+    already called commit() (via commit_with()) and was torn down when
+    main()'s ``with app.app_context():`` block exited, before main()
+    returned and before this function runs at all. There is no session or
+    connection overlap for this rollback() to reach into.
+
+    expire_all() still runs afterward: SQLAlchemy's rollback() already
+    expires every object as a side effect, so this is belt-and-suspenders
+    rather than strictly load-bearing -- kept because it costs nothing and
+    documents the intent explicitly rather than relying on an implicit
+    side effect.
+
+    Guard against a future test breaking that "nothing of this session's
+    own to discard" invariant: every call site today commits its setup
+    data before reaching this function (see above), but nothing stops a
+    later test in this file from mutating an ORM object without
+    committing first and then calling this helper -- rollback() would
+    silently discard that change, turning a real bug into a confusing,
+    unrelated-looking assertion failure three lines later instead of a
+    clear one right here. ``session.new``/``dirty``/``deleted`` are
+    SQLAlchemy's own, ordinary way to ask "does this session have
+    unflushed pending changes" -- not a custom tracking mechanism, just
+    reading state the session already maintains for its own unit-of-work
+    bookkeeping. This catches the common case (an uncommitted ORM
+    add/mutate/delete); it does not audit raw-SQL writes already flushed
+    but never committed, which would need inspecting the DBAPI connection
+    itself -- out of scope for what a "clear diagnostic in the common
+    case" needs to be.
 
     Guarded by has_app_context(): the gate-refusal tests call this with no
     ``app``/``db`` fixture active at all (main() never gets far enough to
-    build one), so there is no test-side session to expire."""
+    build one), so there is no observer session to clean up."""
     from flask import has_app_context
 
     result = reconcile_module.main(argv)
     if has_app_context():
+        pending = _db.session.new | _db.session.dirty | _db.session.deleted
+        if pending:
+            kinds = sorted({type(obj).__name__ for obj in pending})
+            raise AssertionError(
+                f"_run_main() cannot safely roll back the observer session: it has "
+                f"{len(pending)} uncommitted change(s) pending ({', '.join(kinds)}). "
+                "This helper's rollback() is meant only to end a read-only transaction "
+                "left open by prior setup/assertion queries -- never to silently discard "
+                "real test data. Commit (or explicitly discard) these changes before "
+                "calling _run_main()."
+            )
+        _db.session.rollback()
         _db.session.expire_all()
     return result
 
