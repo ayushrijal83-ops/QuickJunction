@@ -422,7 +422,16 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["DATABASE_URL"] = args.database_url
 
     from sqlalchemy.engine import make_url
-    url = make_url(args.database_url)
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        url = make_url(args.database_url)
+    except (ArgumentError, ValueError):
+        # Matches config.py's _parse_database_url: never echo any part of the
+        # DSN back -- SQLAlchemy's own parse error can repeat the original
+        # string, password included, for some malformed inputs.
+        say("[FAILED] --database-url is not a valid database URL (value not shown).")
+        return 1
     if url.get_backend_name() != "sqlite":
         name = url.database or ""
         try:
