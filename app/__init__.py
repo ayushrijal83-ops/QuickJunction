@@ -22,6 +22,7 @@ from app.utils.headers import register_security_headers
 from app.utils.imagery import register_imagery
 from app.utils.locale import register_locale
 from app.utils.logging import configure_logging
+from app.utils.ratelimit import init_rate_limiting
 from config import BaseConfig, database_uses_root, get_config
 
 __all__ = ["create_app"]
@@ -60,6 +61,7 @@ def create_app(config_name: str | None = None) -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
     csrf.init_app(app)
+    init_rate_limiting(app)
 
     # Import for the side effect of registering models on db.metadata, which
     # is what `flask db migrate` inspects.

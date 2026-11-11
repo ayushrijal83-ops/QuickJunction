@@ -17,6 +17,13 @@ PyMySQL==1.2.0
 
 python-dotenv==1.2.2
 
+# Redis client (S1): shared rate-limit counters, so every worker enforces the
+# same limits (app/utils/ratelimit.py). Imported only when REDIS_URL is set;
+# without it the limiter counts in each process's memory, so development and
+# the test suite need no Redis server. On Python older than 3.11.3 it pulls in
+# async-timeout, which is not pinned here (see docs/STATUS.md "Dependency state").
+redis==8.1.0
+
 # Password hashing (Argon2id) and email validation for WTForms' Email().
 argon2-cffi==25.1.0
 email-validator==2.3.0

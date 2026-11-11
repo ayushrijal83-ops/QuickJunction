@@ -120,6 +120,9 @@ a client. CI reports these advisories without failing.
 | Tests collected after M6.2 | **1104** (11 new in `tests/test_m6_2_responsive.py`) |
 | SQLite after M6.2 | **1092 passed, 12 skipped, 0 failed** — verified 2026-11-01 |
 | MySQL after M6.2 | **not run.** The 12 MySQL-only concurrency tests have not been re-verified against a real MySQL instance since M6.2 landed; their last confirmed pass was at the locale fix + M6.1 state above |
+| M7.4 — inventory concurrency fix (closes known issue #35) | Commit `67bbb74`, 2026-11-02; not recorded in this table when it shipped. `deduct_for_order` now locks every needed ingredient (`SELECT ... FOR UPDATE`, ascending id order) at order completion and refuses the whole `→ COMPLETED` transition if stock is short, instead of letting a served order drive stock negative. Checkout's `shortages()` check is unchanged and explicitly advisory-only. Details: `docs/PROJECT_PROGRESS.md` "M7.4 — Inventory Concurrency Fix" |
+| Migration head after M7.4 | unchanged (no schema change — the fix is locking + control flow only) |
+| Tests after M7.4 | `tests/test_inventory.py::test_completion_refused_when_stock_is_insufficient` (replaces a test asserting the old behavior) + new MySQL-only race `tests/test_mysql_concurrency.py::test_two_orders_racing_to_complete_cannot_oversell_a_scarce_ingredient`; CI's concurrency guard count moved 12 → 13 at this commit (now 15, see M7.5.4.7 below) |
 | M7.5.4 — payment-ledger legacy-data reconciliation utility | Builds on the M7.5.1 payment ledger foundation, M7.5.2 ledger-backed payment/refund service, and M7.5.3 live route cutover (all shipped since this table's M6.2 entry above, undocumented here until now). `scripts/reconcile_payment_ledger.py`: a standalone, dry-run-by-default, `--apply --confirm "RECONCILE <n>"`-gated operator tool that backfills a ledger entry for any order paid through the legacy route after the M7.5.1 migration ran but before the M7.5.3 cutover deployed (see `app/services/payment_ledger.py`'s "Cross-path note"). One order per transaction, lock-then-reverify, never an unconditional settlement overwrite; an inconsistent record is reported for manual review, never guessed at. Details: `docs/PRODUCTION_READINESS.md` P7 |
 | Tests collected after M7.5.4 (**interim checkpoint, superseded by M7.5.4.7 below -- not the current total**) | **1279** (13 new in `tests/test_payment_ledger_reconciliation.py`, 1 new MySQL race in `tests/test_mysql_concurrency.py`) |
 | SQLite after M7.5.4 | **1258 passed, 21 skipped, 0 failed** |
@@ -128,6 +131,12 @@ a client. CI reports these advisories without failing.
 | Tests collected after M7.5.4.7 | **1269** (11 legacy-writer-specific tests removed from `tests/test_payments.py`; 2 redundant legacy-writer concurrency tests removed from `tests/test_mysql_concurrency.py`, now 15) |
 | SQLite after M7.5.4.7 | **1249 passed, 20 skipped, 0 failed** |
 | MySQL after M7.5.4.7 | **not run against a real installation** (same as M7.5.4 -- no local MySQL server available this session); **no production reconciliation has been performed** |
+| M7.5.4.9 — payment-ledger integrity audit (standing, read-only) | Commit `d425b72`, 2026-11-07; not recorded in this table when it shipped. `scripts/audit_payment_ledger.py` -- a **permanent** operator/CI health check (not a one-time migration tool like M7.5.4): checks the ledger's internal consistency and its agreement with `Order.amount_settled` and the legacy `payments` table; never writes anything. Exit codes: 0 clean, 1 finding or malformed/disallowed target, 2 no database URL given. Details: `docs/PROJECT_PROGRESS.md` "M7.5.4.9" |
+| Tests collected after M7.5.4.9 | **+24** (`tests/test_payment_ledger_audit.py`) |
+| M7.5.5.1 — real-schema backup → restore → payment-ledger-audit drill | Commits `c048e8f` (added, 2026-11-08), `3b9cd36` (reverted same day -- MySQL CI job hung reproducibly on 2 consecutive runs, ~38 min with no output before the 45-min timeout), `3fb5c7d` (re-added with the metadata-lock issue fixed, 2026-11-08). Proves the *actual* schema (orders/payments/payment_ledger_entries, real FKs and CHECKs) round-trips through a real `mysqldump`/restore cycle and still passes the M7.5.4.9 audit afterward -- closing the one gap `test_live_backup_and_restore_drill`'s single custom table never covered. Details: `docs/PROJECT_PROGRESS.md` "M7.5.5.1" |
+| Tests collected after M7.5.5.1 | **1314** (+1 MySQL-only, `tests/test_payment_ledger_backup_restore_drill.py`) |
+| SQLite at this checkpoint (commit `3fb5c7d`) | **1286 passed, 28 skipped, 0 failed** -- CI run `42489009615`, confirmed SUCCESS via `gh run view` |
+| MySQL 8.0 at this checkpoint | **1307 passed, 7 skipped, 0 failed** -- same CI run; concurrency guard **15 passed** (not skipped) |
 
 ---
 
@@ -166,8 +175,11 @@ separately. Since M2 the LLM is **disabled by default in every environment**;
 Production deployment configuration (WSGI service, reverse proxy, TLS,
 systemd, Docker) · admin user
 management (deactivate, reset, role change) · password change / reset · email
-of any kind · multi-worker-safe rate limiting · automated backups,
-restore scripts · upgrade/rollback tooling · version endpoint · pagination on
+of any kind · multi-worker-safe rate limiting · scheduled (unattended)
+backups, backup failure alerting, off-machine backup copies, backup key
+escrow and a disaster-recovery runbook (the backup and restore *scripts*
+themselves exist since M7.2 — see the known-issues table below) ·
+upgrade/rollback tooling · version endpoint · pagination on
 the staff order queue, customer history, audit and payment views · server-side
 menu search · order notes · delivery address · receipts · restaurant
 configuration (slots, currency, branding are code constants) · notifications ·
@@ -195,26 +207,37 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | 28 | No production deployment configuration |
 | 29 | Test fixture keeps one app context per test (identity can leak between simulated users) |
 | 32 | Full downgrade to base fails on MySQL (pre-M10 revisions) |
-| 35 / 36 | Stock checked not reserved; no ingredient costs |
+| ~~35~~ | ~~Stock checked not reserved~~ — **closed in M7.4** (2026-11-02, commit `67bbb74`): completion now locks and refuses under shortage; see `docs/PROJECT_PROGRESS.md` "M7.4" |
+| 36 | No ingredient costs (unrelated to #35; separate, still-open valuation gap) |
 | 37 | No order notes |
-| — | Runtime DB account also holds DDL privileges; from the 2026-10-03 audit; scheduled for Phase 1. Customer dine-in and the reservation cap were closed in M2; public `/register/staff` was removed in M4 |
+| — | Database privilege separation is implemented but not yet proven live (was: "Runtime DB account also holds DDL privileges", 2026-10-03 audit). M7.3 (commit `9160305`): `scripts/db_setup.py setup` creates a DML-only runtime account (`qj_user`: `SELECT, INSERT, UPDATE, DELETE`) and a separate `qj_migrator` account for migrations, used through `MIGRATION_DATABASE_URL` (`migrations/env.py`). Still open: (a) an installation created before M7.3 keeps its DDL grants until an operator runs the opt-in `db_setup.py narrow-runtime` — it is never run automatically; (b) the live drill `tests/test_privilege_separation.py::test_live_privilege_separation_drill` has not been executed against a real server — it was skipped in CI run `42489009615` because it needs `QJ_MYSQL_ADMIN_PASSWORD`; the separation is proven by mocked tests only. `docs/PRODUCTION_READINESS.md` S10 stays IN PROGRESS. Customer dine-in and the reservation cap were closed in M2; public `/register/staff` was removed in M4 |
 | — | No "add items to an open order": a seated table takes one open order at a time (M3), so a party's follow-up order needs a new order once the table is freed |
 | — | AI-stack dependency advisories (above) |
 | — | No partial/split payment ledger or outstanding-balance workflow: `payments.order_id` is unique, so an order is paid in full in one transaction or not at all; refunds alone can be partial. From the 2026-11-01 project health audit; a product-scope decision, not yet made |
-| — | No automated backup/restore tooling exists (see "What does NOT exist" above); from the 2026-11-01 audit, which also re-confirmed the inventory check-then-deduct race (#35/36) and the in-process-only rate limiter (#5) are both still open |
+| — | Backups are not yet operational, although the tooling exists (was: "No automated backup/restore tooling exists", 2026-11-01 audit). M7.2 (commit `75ab4b8`) delivered `scripts/backup_database.py` (`mysqldump --single-transaction`, atomic write, SHA-256 checksum, Fernet encryption by default, count-based retention) and `scripts/restore_database.py` (checksum verification, refuses a non-empty target, post-restore row-count check). `tests/test_backup_restore.py::test_live_backup_and_restore_drill` and the M7.5.5.1 real-schema drill both ran, not skipped, on MySQL 8.0 in CI run `42489009615`. Still open: nothing runs a backup unattended (the `schtasks`/cron commands are documented in `docs/DATABASE_SETUP_GUIDE.md` §19 but not registered anywhere); no success/failure alerting; no off-machine copy; no key escrow; no disaster-recovery runbook; no drill against a real installation, because none exists yet. `docs/PRODUCTION_READINESS.md` P1–P6. The same 2026-11-01 audit re-confirmed the in-process-only rate limiter (#5), which is still open; its inventory check-then-deduct race (#35) was closed by M7.4 (commit `67bbb74`) — see above |
 
 ---
 
 ## Next planned milestone
 
-**M7 — Production Reliability Foundation** (not started). Addresses the
-highest-severity gaps found in the 2026-11-01 project health audit, in this
-proposed order: (1) automated database backup and a tested restore
-procedure; (2) separate the database runtime account (DML only) from a
-migration-only account (DDL), so the application can no longer
-`ALTER`/`DROP` a table; (3) close the inventory stock-reservation race
-between the shortage check and `deduct_for_order()`; (4) replace the
-in-process rate limiter with a shared-store implementation, once a
-multi-worker deployment is planned. Deliberately not a new customer-facing
-feature — the audit's own instruction was not to add features before
-resolving foundational reliability issues. No task has started.
+**M7 — Production Reliability Foundation.** Addressed the highest-severity
+gaps found in the 2026-11-01 project health audit, in this order: (1)
+automated database backup and a tested restore procedure — **tooling
+delivered, M7.2** (backup/restore scripts and a CI-run restore drill;
+unattended scheduling, alerting and off-machine copies are still open);
+(2) separate the database runtime account (DML only) from a migration-only
+account (DDL) — **implemented, M7.3** (the live privilege drill has not
+been run and pre-M7.3 installations need the opt-in `narrow-runtime`);
+(3) close the inventory stock-reservation race between the shortage check
+and `deduct_for_order()` — **done, M7.4** (2026-11-02, commit `67bbb74`;
+closes known issue #35 above). The code for (1)–(3) has shipped; the
+remaining gaps for (1) and (2) are operational and are listed in the
+known-issues table above. This paragraph described all of M7 as "not
+started" until the 2026-11-10 documentation reconciliation.
+
+**Remaining: (4) replace the in-process rate limiter (S1) with a
+shared-store implementation**, once a multi-worker deployment is planned.
+This is the one item from the original M7 list not yet started, and is the
+next scoped piece of work. Deliberately not a new customer-facing feature
+— the audit's own instruction was not to add features before resolving
+foundational reliability issues.

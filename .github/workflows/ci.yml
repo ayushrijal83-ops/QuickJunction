@@ -12,6 +12,12 @@
 #                    more still; M7.5.4.7 retired app/services/payments.py and
 #                    removed the two concurrency tests that exclusively covered
 #                    its own now-nonexistent business rules (seventeen -> fifteen).
+#   test-redis       the rate-limiter tests on a disposable Redis service, so the
+#                    Lua sliding window in app/utils/ratelimit.py runs against a
+#                    real server (tests/test_ratelimit_redis.py skips without
+#                    TEST_REDIS_URL), with a guard that fails the job unless
+#                    exactly 14 Redis tests ran and passed. The other two jobs run the same
+#                    files with no Redis: the in-memory path.
 #   dependency-audit pip-audit. Blocking for the runtime environment
 #                    (requirements.txt, resolved and installed); report-only for
 #                    the optional AI stack (requirements-ai.txt) -- see
@@ -105,6 +111,43 @@ jobs:
             exit 1
           fi
           grep -Eq "^15 passed" concurrency.txt || { echo "::error::expected 15 passed concurrency tests" >&2; exit 1; }
+
+  test-redis:
+    name: Tests (Redis rate limiter)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      # A throwaway server that lives only for this job. The tests write under
+      # their own random key prefix and delete only those keys.
+      TEST_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run in-memory rate-limiter tests
+        run: python -m pytest tests/test_ratelimit.py -o addopts="" -q -rs
+      - name: Run Redis rate-limiter tests and require all 14 to pass
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_ratelimit_redis.py -o addopts="" -q -rs | tee ratelimit_redis.txt
+          # The summary is exactly "14 passed in <t>s" only when all 14 ran and
+          # passed: any skip, failure, error or count change alters this line.
+          grep -Eq "^14 passed in " ratelimit_redis.txt || { echo "::error::expected exactly 14 passed Redis rate-limiter tests (none skipped); is TEST_REDIS_URL reaching Redis?" >&2; exit 1; }
 
   dependency-audit:
     name: Dependency audit (pip-audit)

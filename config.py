@@ -78,6 +78,19 @@ class BaseConfig:
     # app/services/reservations.py::create_reservation.
     RESERVATION_ACTIVE_LIMIT: int = int(os.environ.get("RESERVATION_ACTIVE_LIMIT", "2"))
 
+    # --- rate limiting (S1) --------------------------------------------------
+    # Shared store for rate-limit counters, so every worker enforces the same
+    # limits: redis://, rediss:// (TLS) or unix:// (local socket). Unset, the
+    # limiter counts in each process's own memory -- fine for one development
+    # process, refused by ProductionConfig. May carry a password, so it is
+    # never logged. See docs/SECURITY.md section 22.
+    REDIS_URL: str | None = os.environ.get("REDIS_URL") or None
+    # Connect and read timeout for that store. Short on purpose: when Redis
+    # does not answer in time the limiter falls back to in-memory counting
+    # rather than hold up a login.
+    REDIS_SOCKET_TIMEOUT_MS: int = int(os.environ.get("REDIS_SOCKET_TIMEOUT_MS", "200"))
+    RATELIMIT_KEY_PREFIX: str = "qj:rl"
+
     # --- account codes (M4) ------------------------------------------------
     # Lifetime of the one-time codes in app/services/accounts.py. An unused
     # invitation or reset code stops working after this many hours.
@@ -157,6 +170,12 @@ class BaseConfig:
             raise ConfigError("STAFF_INVITE_TTL_HOURS and PASSWORD_RESET_TTL_HOURS must be 1-720.")
         if cls.RESERVATION_ACTIVE_LIMIT < 1:
             raise ConfigError("RESERVATION_ACTIVE_LIMIT must be at least 1.")
+        if cls.REDIS_URL and not redis_url_is_supported(cls.REDIS_URL):
+            raise ConfigError(
+                f"{cls.__name__}: REDIS_URL must be a redis://, rediss:// or unix:// URL (value not shown)."
+            )
+        if not 50 <= cls.REDIS_SOCKET_TIMEOUT_MS <= 2000:
+            raise ConfigError("REDIS_SOCKET_TIMEOUT_MS must be 50-2000.")
         if missing:
             env_names = {"SQLALCHEMY_DATABASE_URI": "DATABASE_URL"}
             required = ", ".join(env_names.get(n, n) for n in missing)
@@ -209,6 +228,9 @@ class TestingConfig(BaseConfig):
     # The 1.2 GB model must never be loaded by the ordinary test suite --
     # tests that exercise inference opt in explicitly by flipping this.
     LLM_ENABLED = False
+    # Never taken from the environment: the suite's limiter state must be
+    # per-test and in memory. The Redis tests opt in through TEST_REDIS_URL.
+    REDIS_URL = None
 
 
 class ProductionConfig(BaseConfig):
@@ -234,6 +256,26 @@ class ProductionConfig(BaseConfig):
                 "DATABASE_URL connects as the MySQL root account. Use the dedicated "
                 "application account instead -- see docs/MYSQL_SETUP_HANDOFF.md section 5."
             )
+        if not cls.REDIS_URL:
+            raise ConfigError(
+                "Production requires REDIS_URL: without a shared store each worker would "
+                "enforce rate limits on its own. See docs/SECURITY.md section 22."
+            )
+
+
+def redis_url_is_supported(url: str | None) -> bool:
+    """True for a redis://, rediss:// or unix:// URL that names a host (or,
+    for unix://, a socket path). Never returns or logs any part of it."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url or "")
+        if parts.scheme in ("redis", "rediss"):
+            parts.port  # a non-numeric port raises ValueError here
+            return bool(parts.hostname)
+    except ValueError:
+        return False
+    return parts.scheme == "unix" and bool(parts.path)
 
 
 def _parse_database_url(uri: str | None):

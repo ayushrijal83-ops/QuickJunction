@@ -1183,8 +1183,8 @@ No schema change was made in M08; no migration was added.
 | 37 | Orders have no free-text "kitchen notes" field (e.g. "no onions"); the kitchen screen shows items, quantities, source/table and timings only | adding customer notes is a small follow-up if wanted |
 | 38 | ~~M15 UI not reviewed in a browser~~ — **closed in M16**: customer, staff and admin walked through in Chrome on a seeded scratch DB; no console/CSP errors | — |
 | 39 | Admin payments and audit views show the latest 200 rows, unpaginated; the audit view is filterable by event type only | fine for a demo; add paging/date filters if volume grows |
-| 35 | Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative (shown "short"). Recipes are read at completion time, not snapshotted per order | deliberate — a served order is never blocked; staff correct counts with an adjustment |
-| 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope |
+| 35 | ~~Stock is checked at checkout but not reserved: two concurrent orders can both pass and the later completion takes stock negative~~ — **closed in M7.4** (2026-11-02, commit `67bbb74`): checkout's `shortages()` is now explicitly advisory only; `deduct_for_order` locks every needed ingredient (`SELECT ... FOR UPDATE`, ascending id order) at completion and refuses the whole `→ COMPLETED` transition if stock is insufficient, so two orders racing for the same scarce ingredient can never both complete. See "M7.4 — Inventory Concurrency Fix" below | — |
+| 36 | Inventory records quantities only — no unit cost, so no inventory valuation or COGS/profit | valuation needs purchase prices, out of scope; unrelated to #35 and still open |
 | 33 | ~~Migration `c3a9d7e21f58` not yet applied to live `quickjunctiondb`~~ — **closed**: applied and verified 2026-09-29 (see "M11 live MySQL verification") | — |
 | 28 | No production deployment configuration (no WSGI service unit, TLS termination, or reverse-proxy config in the repo) | **blocks production** — roadmap Phase 2 *[M0]* |
 | 40 | No partial/split payment ledger or outstanding-balance workflow: `payments.order_id` is unique, so an order is paid in full in one transaction or not at all; refunds alone can be partial. Found in the 2026-11-01 project health audit | a product decision, not a bug — relevant if split bills/installments are ever needed |
@@ -3891,3 +3891,247 @@ new fixtures), `tests/test_payments.py`, `tests/test_pricing.py`,
 `docs/STATUS.md`, `docs/PRODUCTION_READINESS.md`.
 
 Deleted: `app/services/payments.py`.
+
+# M7.4 — Inventory Concurrency Fix: Prevent Overselling at Completion ✅
+
+Date: 2026-11-02, commit `67bbb74`. Not recorded in this file when it
+shipped; this entry documents it now from the commit diff, the code's own
+docstrings, and the tests, since those are the only contemporaneous record
+available. Closes known issue #35 above.
+
+## The race
+
+Stock was checked at checkout (`shortages()`) but not reserved: two
+customers' carts could both pass that check for the same scarce ingredient,
+and the *second* order to reach completion would still complete, taking
+`Ingredient.current_quantity` negative. At the time this was a deliberate
+trade-off ("a served order is never blocked"), recorded as known issue #35.
+M7.4 replaces that trade-off with a hard gate instead of removing the
+advisory checkout check.
+
+## What changed
+
+`app/services/inventory.py::deduct_for_order` is now the authoritative,
+concurrency-safe stock gate:
+
+- Every ingredient the completing order needs is locked with
+  `SELECT ... FOR UPDATE`, **in ascending ingredient-id order**, so two
+  orders needing overlapping ingredients can never deadlock each other.
+- Only after that lock is held does it compare locked quantity against
+  requirement. If any ingredient is short, it raises `InventoryError` and
+  deducts **nothing** for the order — not a partial deduction.
+- `app/services/orders.py::_apply_transition` now imports `InventoryError`
+  and catches it around the `deduct_for_order` call inside the
+  `→ COMPLETED` transition, rolling back the whole transition (status
+  change included) on a shortage. A completed order is therefore a
+  guarantee the stock existed, not just a record that staff clicked a
+  button.
+- `app/models/ingredient.py`'s docstring was corrected to match: there is
+  still no CHECK constraint on `current_quantity` (so a deliberate, signed
+  admin `ADJUSTMENT` can still set it negative to correct a miscount), but
+  the reason stock cannot go negative *from an order* is now the
+  application-level lock, not "deliberately allowed to go negative."
+- The checkout-time `shortages()` check is unchanged in behavior and now
+  explicitly documented as advisory-only — it exists to give an honest
+  answer before checkout, not to prevent the race; the race is prevented at
+  completion.
+
+## Tests
+
+- `tests/test_inventory.py::test_completion_refused_when_stock_is_insufficient`
+  replaces the old `test_served_order_completes_even_if_stock_went_short`
+  (which asserted the now-removed behavior): two orders buy the same
+  scarce stock; the first completes, the second's completion raises
+  `OrderStatusError` with "Not enough stock…", the order stays `READY`, and
+  the ingredient's quantity and ledger are both unchanged — nothing was
+  deducted for the refused order.
+- `tests/test_mysql_concurrency.py::test_two_orders_racing_to_complete_cannot_oversell_a_scarce_ingredient`
+  (new, MySQL-only): two orders race via real threads to complete against
+  stock sized for exactly one of them; asserts exactly one wins (`COMPLETED`)
+  and one is refused (`READY`), stock never goes negative, and exactly one
+  `SALE` movement row exists for the ingredient (on the winner only) —
+  repeated over multiple rounds per the file's `ROUNDS` convention.
+- `.github/workflows/ci.yml`'s concurrency guard count moved from 12 to 13
+  passed, confirming the new test actually executes against MySQL in CI,
+  not just on SQLite where it is skipped.
+
+This test is still present today, still counted in the current CI
+concurrency guard (now 15, after later work added and then removed other
+races — see M7.5.4/M7.5.4.7 above), and still passing: confirmed by reading
+the current file and by the CI run cited under M7.5.5.1 below.
+
+## Verified still intact at the current checkpoint
+
+Re-checked against HEAD (`3fb5c7d`) during the 2026-11-10 documentation
+reconciliation: no commit since `67bbb74` has touched the locking or
+exception-handling logic (`git log` on `app/services/inventory.py` and
+`app/services/orders.py` shows only the unrelated M7.5.x payment-ledger
+work after it); `tests/test_inventory.py` passes 25/25 on SQLite.
+
+## Known limitations
+
+- This closes the *stock* race only. It does nothing about ingredient
+  costing/valuation (#36), which remains open and is unrelated.
+- Recipes are still read at completion time, not snapshotted per order (a
+  recipe changed between order placement and completion uses the *current*
+  recipe) — unchanged by this milestone, not a concurrency issue.
+
+## Files changed
+
+Modified: `app/services/inventory.py`, `app/services/orders.py`,
+`app/models/ingredient.py`, `tests/test_inventory.py`,
+`tests/test_mysql_concurrency.py`, `.github/workflows/ci.yml`.
+
+# M7.5.4.9 — Payment-Ledger Integrity Audit (Standing, Read-Only) ✅
+
+Date: 2026-11-07, commit `d425b72`. Not recorded in this file when it
+shipped; this entry documents it now from the script's own module
+docstring, the test file, and the commit diff.
+
+## What this adds
+
+`scripts/audit_payment_ledger.py`: a **permanent** operator/CI health
+check, not a one-time migration tool like M7.5.4's reconciliation script.
+It answers, on demand, "is `payment_ledger_entries` internally consistent,
+and does it agree with `Order.amount_settled` and the legacy `payments`
+table?" It never writes anything — no inserts, updates, deletes, locks, or
+repairs — and does not call or alter `scripts/reconcile_payment_ledger.py`
+in any way; it only reads the same schema that script writes to.
+
+Checks performed: a ledger payment entry's `refunded_amount` projection
+must equal the sum of its linked refund entries (A1); a refund/correction
+entry's `reversed_entry_id` must resolve to an actual `payment`-type entry
+(A2) belonging to the same order (A3); `Order.amount_settled` must equal
+the signed sum of its ledger entries (A4), with the zero-ledger-entries
+case split out as its own, more severe label (C1) since it should be
+structurally impossible post-M7.5.1; and a legacy `payments.refunded_amount`
+must never exceed the ledger's own recorded refund total for that order
+(B2, deliberately one-directional — see the script's own docstring for
+why). An order with a legacy payment but no ledger entry yet is reported
+separately as "awaiting reconciliation," never mixed into integrity
+findings — that is M7.5.4's expected, documented gap, not corruption.
+
+Exit codes mirror `scripts/reconcile_payment_ledger.py`'s own conventions:
+0 (clean), 1 (a finding, or a malformed/disallowed `--database-url` —
+usable directly as a cron/CI health check), 2 (no `--database-url`/
+`DATABASE_URL` given).
+
+Read-only design is dialect-aware: on MySQL it opens a genuinely separate
+pooled connection (rolled back, never committed) so it cannot affect an
+ambient session's pending work or transaction boundary; on SQLite (where
+`StaticPool` hands out the *same* physical connection to every caller,
+verified empirically) it instead reads through the ambient `db.session`
+itself under `session.no_autoflush`, never calling
+`commit()`/`rollback()`/`expire_all()`.
+
+## Tests
+
+`tests/test_payment_ledger_audit.py` (new, 24 tests): every rule (A1–A4,
+B2, C1) and its "stays clean" counterpart exercised against the standard
+`db` fixture; the "awaiting reconciliation" classification kept separate
+from findings; the CLI (`main()`) exit codes and the same
+production-target gate convention `test_reconcile_cli_safety.py`
+established, using the same `create_app()`-monkeypatch technique for the
+same reason (`config.BaseConfig` binds `DATABASE_URL` at class-definition
+time).
+
+| Run | Result |
+| --- | --- |
+| `tests/test_payment_ledger_audit.py`, SQLite, run locally 2026-11-10 | **22 passed, 2 skipped** (the 2 skips are MySQL-only) |
+| Same file, MySQL 8.0, CI run `42489009615` | all 24 executed: none appears among that job's 7 skipped tests, and the job had 0 failures |
+
+## Known limitations
+
+- This is a diagnostic tool, not a fix: a finding still requires manual
+  investigation or a run of `scripts/reconcile_payment_ledger.py`
+  (M7.5.4) or `payment_ledger.py`'s own write paths. It changes nothing by
+  itself.
+- Not yet wired into a scheduled CI/cron job — exists as a script an
+  operator or a future automation can invoke, per its own docstring design
+  for exactly that use.
+
+## Files changed
+
+New: `scripts/audit_payment_ledger.py`, `tests/test_payment_ledger_audit.py`.
+
+# M7.5.5.1 — Real-Schema Backup → Restore → Payment-Ledger-Audit Drill ✅
+
+Date: 2026-11-08, commits `c048e8f` (added), `3b9cd36` (reverted — see
+below), `3fb5c7d` (re-added, fixed). Not recorded in this file when it
+shipped; this entry documents it now from the test file's own docstring and
+the commit history.
+
+## The gap this closes
+
+`tests/test_backup_restore.py::test_live_backup_and_restore_drill` already
+proves the backup/restore *mechanism* for real against MySQL, but only for
+one small custom table it creates for the purpose, with no foreign keys and
+no CHECK constraints. It never proved that the *actual* Quick Junction
+schema — `orders`/`payments`/`payment_ledger_entries`, with their real FKs
+and CHECK constraints — round-trips correctly, or that a restored copy's
+financial data still passes M7.5.4.9's integrity audit. That is the gap the
+M7.5.5 read-only inspection identified.
+
+## What this adds
+
+`tests/test_payment_ledger_backup_restore_drill.py`: an additive
+integration test that calls the real, unmocked entry functions of
+`scripts/backup_database.py` (`create_backup`),
+`scripts/restore_database.py` (`restore_backup`) and
+`scripts/audit_payment_ledger.py` (`run_audit`) against a real-schema
+MySQL database seeded with orders/payments/ledger entries. It wipes every
+table in the disposable `TEST_DATABASE_URL` database (simulating total data
+loss, the same pattern `test_live_backup_and_restore_drill` already
+established), restores into it, and then re-runs the integrity audit
+against the restored copy to confirm it is still clean. It does not modify
+or weaken `backup_database.py`, `restore_database.py`, or
+`audit_payment_ledger.py`.
+
+## The revert and fix (transparency, not hidden)
+
+The first version (`c048e8f`) made the MySQL CI job hang reproducibly —
+confirmed on two consecutive runs, both stalling at the same point with no
+output for ~38 minutes before GitHub's 45-minute job timeout killed it. It
+was reverted (`3b9cd36`) to restore a green `main` while the hang was
+diagnosed offline, per the revert commit's own message.
+
+`3fb5c7d` re-added the test; its only difference from the reverted
+`c048e8f` version is one added `_db.session.rollback()` (plus its comment)
+immediately before the table wipe. Per that comment: the test's own
+session had an open transaction (SQLAlchemy autobegin after a
+`.refresh()`), which held a shared metadata lock on the tables it had
+read; the wipe's `DROP TABLE` runs on a *different* connection, needs an
+exclusive metadata lock, and so blocked behind it until MySQL's
+`lock_wait_timeout`. The wipe step was the blocked party, not the lock
+holder. The comment records this as reproduced against a real MySQL
+server (error 1205) before the fix was written; this entry relies on that
+comment and on the green CI run below, not on an independent
+reproduction.
+
+## Verification
+
+| Run | Result |
+| --- | --- |
+| `tests/test_payment_ledger_backup_restore_drill.py` | **1 test, MySQL-only** (skips without `TEST_DATABASE_URL`) |
+| CI run `42489009615` on commit `3fb5c7d` (`gh run view`) | **SUCCESS** — `Tests (SQLite)`, `Tests (MySQL 8.0)`, `Dependency audit` all green |
+| Tests (SQLite) job | **1286 passed, 28 skipped** |
+| Tests (MySQL 8.0) job | **1307 passed, 7 skipped** |
+| MySQL concurrency guard | **15 passed** (not skipped) |
+
+This is the current, fully verified state of the full suite as of this
+checkpoint — no regression from the revert/re-add cycle.
+
+## Known limitations
+
+- MySQL-only; skips entirely on SQLite (the mechanism it tests — real
+  `mysqldump`/restore round-trip — has no SQLite equivalent in this
+  codebase).
+- Restores into the *same* disposable database rather than a separately
+  created one, a deliberate deviation documented in the test's own
+  docstring (CI's MySQL service account has no `CREATE DATABASE` grant);
+  `restore_database.py`'s own safety gate (`ensure_target_is_empty`) is
+  exercised identically either way.
+
+## Files changed
+
+New (after the revert/re-add cycle): `tests/test_payment_ledger_backup_restore_drill.py`.
