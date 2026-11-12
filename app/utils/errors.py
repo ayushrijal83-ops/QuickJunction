@@ -28,7 +28,9 @@ already depends on.
 
 from __future__ import annotations
 
-from flask import Flask, jsonify, render_template, request
+import math
+
+from flask import Flask, jsonify, make_response, render_template, request
 from werkzeug.exceptions import HTTPException
 
 _GENERIC_MESSAGE = "An internal error occurred."
@@ -63,6 +65,25 @@ def render_error(status: int, message: str):
     if wants_html():
         return _html_error(status, message)
     return _json_error(status, message)
+
+
+def with_retry_after(response, decision):
+    """Make ``response`` a 429 carrying ``Retry-After`` (whole seconds,
+    rounded up, at least 1) when the limiter knows when a slot frees up.
+    ``response`` is anything ``make_response`` accepts."""
+    response = make_response(response)
+    response.status_code = 429
+    if decision.retry_after is not None:
+        response.headers["Retry-After"] = str(max(1, math.ceil(decision.retry_after)))
+    return response
+
+
+def render_rate_limited(message: str, decision):
+    """A rate-limited request, in whichever form the caller asked for (the
+    generic error page or the JSON error body), with ``Retry-After``. The
+    message is the caller's fixed sentence: nothing about the store, the key
+    or the counts is ever included."""
+    return with_retry_after(render_error(429, message), decision)
 
 
 def register_error_handlers(app: Flask) -> None:

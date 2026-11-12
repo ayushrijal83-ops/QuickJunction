@@ -4135,3 +4135,97 @@ checkpoint — no regression from the revert/re-add cycle.
 ## Files changed
 
 New (after the revert/re-add cycle): `tests/test_payment_ledger_backup_restore_drill.py`.
+
+# S1-B — Rate Limiting on the Application Routes (ready for review, not yet CI-verified)
+
+Builds on S1-A (commit `60195ae`, the Redis-backed limiter; CI green on
+SQLite, MySQL 8.0, `redis:7.4` and the dependency audit). S1-B reuses that
+implementation; it does not replace it.
+
+## What this adds
+
+| Route | Policy | Identifier |
+| --- | --- | --- |
+| `POST /login`, `/login/staff`, `/login/admin` | 5 failed attempts / 15 min | client IP + normalized username |
+| `POST /account/password` | 5 wrong current passwords / 15 min (unchanged; now on the shared backend) | session user id |
+| `POST /register` | 10 / 60 min | client IP |
+| `POST /account/setup` | 10 / 15 min | client IP |
+| `POST /checkout` | 8 / 5 min | session customer id |
+| `POST /reservations` | 10 / 5 min | session customer id |
+| `GET /recommendations/explain` | 4 / min | session customer id |
+
+- All numbers in one table, `RATE_LIMITS` in `config.py`, validated at
+  startup and applied by `init_rate_limiting`.
+- Refusals return 429 with `Retry-After` (seconds until the oldest entry
+  leaves the window, from the Redis server clock or the local clock); form
+  routes re-render with a flash message as login always did, the others use
+  the existing `render_error` HTML/JSON convention.
+- Limits are checked after authentication/authorization and before any
+  service call, so a 429 creates or changes nothing (no order, payment,
+  ledger entry, stock movement, reservation, consumed code, or model call).
+
+## Login concurrency
+
+The login view (and password change) moved from check → verify → record to
+`try_reserve` → verify → resolve: wrong secret keeps the reservation as the
+failure; right secret `reset`s the key as before; no verdict (an error, or a
+rejected *new* password) `release`s that one reservation. While Redis is
+healthy the reservations are atomic in the shared store, so concurrent
+requests across workers cannot get more than 5 wrong passwords checked per
+key between successes. During a Redis outage the bound is per worker only,
+and a lost Redis reply can over-count (never under-count). An unresolved
+reservation (crashed worker) expires with the window. Login also refuses
+usernames outside `USERNAME_PATTERN` without a database lookup, closing an
+accent-variant bypass on MySQL's accent-insensitive collation. S1-B added
+`FailureRateLimiter.release` (Redis `ZREM` of the reservation's own member)
+and the retry time returned by the Lua script. Full design and trade-offs:
+`docs/SECURITY.md` §22.5.
+
+## Verification
+
+| Run | Result |
+| --- | --- |
+| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1404 passed, 49 skipped, 0 failed** after the pre-CI corrections (1392 / 46 before them; baseline before S1-B: 1351 passed, 37 skipped) |
+| `tests/test_mysql_username_collation.py` | **not run** — MySQL-only (3 tests), no local MySQL; the CI MySQL job's guard requires all 3 to pass |
+| `tests/test_ratelimit.py` + `tests/test_ratelimit_routes.py`, both orders | 101 passed |
+| `tests/test_ratelimit_redis.py` against a real Redis | **not run** — no Redis server locally |
+| `tests/test_ratelimit_redis.py` against a `fakeredis` TCP server | 23 passed in 3 of 4 runs; the 4th failed one unmodified S1-A concurrency test, which fails the same way on the S1-A commit under fakeredis. Not evidence of Redis behaviour |
+| MySQL 8.0 | **not run** locally |
+| `git diff --check` | clean |
+
+S1-B is complete only once the CI `test-redis` job (guard now requires
+exactly 23 passed), `test-mysql` and `test-sqlite` pass on the commit.
+
+## Known limitations
+
+- Degraded mode (Redis down) limits per worker and starts from a fresh
+  count; counts are not carried across the switch (`docs/SECURITY.md` §22.6).
+- With 4 login failures on record, a second simultaneous attempt is refused
+  while the first holds the last slot, even if its password is right.
+- IP-keyed limits are shared by everyone behind one NAT.
+- No audit events for the new 429s; no alerting on degraded mode.
+- No Redis server is deployed anywhere yet.
+
+## Files changed
+
+`app/utils/ratelimit.py`, `app/utils/errors.py`, `config.py`,
+`app/routes/auth.py`, `app/routes/account.py`, `app/routes/orders.py`,
+`app/routes/reservations.py`, `app/routes/preferences.py`,
+`tests/conftest.py`, `tests/test_ratelimit.py`, `tests/test_ratelimit_redis.py`,
+`.github/workflows/ci.yml`, `docs/SECURITY.md`, `docs/STATUS.md`,
+`docs/PROJECT_PROGRESS.md`, `docs/PRODUCTION_READINESS.md`.
+New: `tests/test_ratelimit_routes.py`.
+
+Pre-CI corrections after self-review: `app/services/auth.py`
+(`authenticate_user` refuses names outside `USERNAME_PATTERN` after the dummy
+hash comparison -- an accent-variant bypass of the per-username login limit on
+MySQL's accent-insensitive collation, present since before S1-A);
+`tests/test_m5_catalog.py`, `tests/test_m6_design.py` (a fixture username
+`op` became `operator`: 2 characters is not a username any production path
+can create);
+new `tests/test_login_username_pattern.py` (12 cases from 4 functions,
+all backends) and `tests/test_mysql_username_collation.py` (3, MySQL-only,
+CI guard requires all 3 to pass); the concurrency wording in
+`docs/SECURITY.md` §22.5/§22.6 and above made precise; a stale type hint.
+
+---

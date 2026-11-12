@@ -3,11 +3,17 @@
 Two different things are limited, and they are kept as two APIs on purpose:
 
 ``FailureRateLimiter``  counts *failed* attempts (login, wrong current
-                        password). Callers ask ``is_limited``, do the work,
-                        then ``record_failure`` or ``reset`` -- the three
-                        methods the login view has always used.
+                        password). The routes use ``try_reserve`` (an
+                        atomic check-and-record), then ``reset`` when the
+                        secret was right, ``release`` when no verdict was
+                        reached, and nothing when it was wrong -- the
+                        reservation stands as the recorded failure. The older
+                        ``is_limited`` / ``record_failure`` pair still works
+                        but is not atomic (see docs/SECURITY.md 22.5).
 ``RequestRateLimiter``  counts *requests*. One call, ``attempt``, checks the
                         limit and records the request atomically.
+
+Every policy's numbers come from ``RATE_LIMITS`` in config.py.
 
 Where the counters live:
 
@@ -36,8 +42,10 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from app.utils.logging import get_security_logger
+from config import BaseConfig
 
 _POLICY_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -53,10 +61,13 @@ redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - tonumber(ARGV[1]))
 
 # Check and record in one step. ARGV[2] = limit, ARGV[3] = unique member.
 # A refused request is not recorded, so being refused never extends the window.
+# When refused, the third value is how long (microseconds) until the oldest
+# entry leaves the window -- the earliest a slot can free up (Retry-After).
 _HIT_LUA = _PRUNE + """
 local count = redis.call('ZCARD', KEYS[1])
 if count >= tonumber(ARGV[2]) then
-  return {0, count}
+  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  return {0, count, tonumber(oldest[2]) + tonumber(ARGV[1]) - now}
 end
 redis.call('ZADD', KEYS[1], now, ARGV[3])
 redis.call('PEXPIRE', KEYS[1], math.ceil(tonumber(ARGV[1]) / 1000))
@@ -79,57 +90,88 @@ def _now() -> float:
     return time.monotonic()
 
 
+class _Hit(NamedTuple):
+    allowed: bool
+    count: int
+    retry_after: float | None  # seconds until a slot frees up; refused only
+    token: str | None  # the entry recorded for this call; allowed only
+
+
 @dataclass(frozen=True)
 class RateLimitDecision:
     allowed: bool
     count: int  # entries in the window after this call
     limit: int
     shared: bool  # True only when Redis made the decision
+    # Refused: seconds until the oldest entry leaves the window (Retry-After).
+    retry_after: float | None = None
+    # Allowed: identifies the entry this call recorded, for ``release``.
+    token: str | None = None
 
 
 class _MemoryWindow:
-    """Sliding window in this process. Each method is atomic under the lock."""
+    """Sliding window in this process. Each method is atomic under the lock.
+
+    One window may hold several policies' keys (the password-change limiter
+    shares the login limiter's), so callers pass their own limit and window;
+    the constructor's are only defaults."""
 
     def __init__(self, limit: int, window_seconds: float) -> None:
         self._limit = limit
         self._window = window_seconds
-        self._attempts: dict[str, list[float]] = {}
+        # key -> [(time recorded, entry token), ...], oldest first
+        self._attempts: dict[str, list[tuple[float, str]]] = {}
         self._lock = threading.Lock()
 
-    def _pruned(self, key: str, now: float) -> list[float]:
-        cutoff = now - self._window
-        attempts = [t for t in self._attempts.get(key, []) if t > cutoff]
+    def _pruned(self, key: str, now: float, window: float) -> list[tuple[float, str]]:
+        cutoff = now - window
+        attempts = [entry for entry in self._attempts.get(key, []) if entry[0] > cutoff]
         if attempts:
             self._attempts[key] = attempts
         else:
             self._attempts.pop(key, None)
         return attempts
 
-    def count(self, key: str) -> int:
+    def count(self, key: str, window: float | None = None) -> int:
         with self._lock:
-            return len(self._pruned(key, _now()))
+            return len(self._pruned(key, _now(), window or self._window))
 
-    def add(self, key: str) -> int:
+    def add(self, key: str, window: float | None = None) -> int:
         with self._lock:
             now = _now()
-            attempts = self._pruned(key, now)
-            attempts.append(now)
+            attempts = self._pruned(key, now, window or self._window)
+            attempts.append((now, secrets.token_hex(8)))
             self._attempts[key] = attempts
             return len(attempts)
 
-    def hit(self, key: str) -> tuple[bool, int]:
+    def hit(self, key: str, limit: int | None = None, window: float | None = None) -> _Hit:
+        limit = limit or self._limit
+        window = window or self._window
         with self._lock:
             now = _now()
-            attempts = self._pruned(key, now)
-            if len(attempts) >= self._limit:
-                return False, len(attempts)
-            attempts.append(now)
+            attempts = self._pruned(key, now, window)
+            if len(attempts) >= limit:
+                return _Hit(False, len(attempts), attempts[0][0] + window - now, None)
+            token = secrets.token_hex(8)
+            attempts.append((now, token))
             self._attempts[key] = attempts
-            return True, len(attempts)
+            return _Hit(True, len(attempts), None, token)
+
+    def release(self, key: str, token: str) -> None:
+        with self._lock:
+            attempts = [entry for entry in self._attempts.get(key, []) if entry[1] != token]
+            if attempts:
+                self._attempts[key] = attempts
+            else:
+                self._attempts.pop(key, None)
 
     def reset(self, key: str) -> None:
         with self._lock:
             self._attempts.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._attempts.clear()
 
 
 class _RedisWindowStore:
@@ -150,14 +192,22 @@ class _RedisWindowStore:
     def _window_us(window_seconds: float) -> int:
         return int(window_seconds * 1_000_000)
 
-    def hit(self, policy: str, identifier: str, limit: int, window_seconds: float) -> tuple[bool, int]:
+    def hit(self, policy: str, identifier: str, limit: int, window_seconds: float) -> _Hit:
         # The member is random per request, so two requests in the same
-        # microsecond are two entries, never one overwriting the other.
-        allowed, count = self._hit(
+        # microsecond are two entries, never one overwriting the other. It is
+        # also the reservation token ``release`` removes.
+        token = secrets.token_hex(16)
+        result = self._hit(
             keys=[self.key(policy, identifier)],
-            args=[self._window_us(window_seconds), limit, secrets.token_hex(16)],
+            args=[self._window_us(window_seconds), limit, token],
         )
-        return bool(allowed), int(count)
+        if int(result[0]):
+            return _Hit(True, int(result[1]), None, token)
+        return _Hit(False, int(result[1]), max(int(result[2]), 0) / 1_000_000, None)
+
+    def release(self, policy: str, identifier: str, token: str) -> None:
+        # One member of one sorted set: a single, atomic command.
+        self._client.zrem(self.key(policy, identifier), token)
 
     def add(self, policy: str, identifier: str, window_seconds: float) -> int:
         return int(self._add(keys=[self.key(policy, identifier)],
@@ -296,17 +346,25 @@ class _WindowLimiter:
         self._backend = backend
         self._local = local or _MemoryWindow(limit, window_seconds)
 
+    def configure(self, limit: int, window_seconds: float) -> None:
+        """Apply this policy's numbers from configuration."""
+        if limit < 1 or window_seconds <= 0:
+            raise ValueError("a rate limit needs a positive limit and window")
+        self.limit = limit
+        self.window_seconds = window_seconds
+
     def _run(self, operation, fallback):
         if self._backend is None:
             return fallback(), False
         return self._backend.run(self.name, operation, fallback)
 
     def _hit(self, key: str) -> RateLimitDecision:
-        (allowed, count), shared = self._run(
+        hit, shared = self._run(
             lambda store: store.hit(self.name, key, self.limit, self.window_seconds),
-            lambda: self._local.hit(key),
+            lambda: self._local.hit(key, self.limit, self.window_seconds),
         )
-        return RateLimitDecision(allowed=allowed, count=count, limit=self.limit, shared=shared)
+        return RateLimitDecision(allowed=hit.allowed, count=hit.count, limit=self.limit, shared=shared,
+                                 retry_after=hit.retry_after, token=hit.token)
 
     def reset(self, key: str) -> None:
         self._run(lambda store: store.reset(self.name, key), lambda: None)
@@ -327,38 +385,89 @@ class FailureRateLimiter(_WindowLimiter):
 
     def is_limited(self, key: str) -> bool:
         count, _ = self._run(lambda store: store.count(self.name, key, self.window_seconds),
-                             lambda: self._local.count(key))
+                             lambda: self._local.count(key, self.window_seconds))
         return count >= self.limit
 
     def record_failure(self, key: str) -> None:
-        self._run(lambda store: store.add(self.name, key, self.window_seconds), lambda: self._local.add(key))
+        self._run(lambda store: store.add(self.name, key, self.window_seconds),
+                  lambda: self._local.add(key, self.window_seconds))
 
     def try_reserve(self, key: str) -> RateLimitDecision:
         """Atomic alternative to ``is_limited`` + ``record_failure``: count
         this attempt as a failure *before* it is checked, unless the limit is
-        already reached. The caller then calls ``reset`` on success and does
-        nothing on failure. Not used by the login view yet -- see
-        docs/SECURITY.md section 22.5."""
+        already reached, so attempts in flight at the same time hold a slot
+        each and cannot together exceed the limit in the store that decided
+        (Redis: across workers; during an outage: per worker only). Then
+        exactly one of:
+
+        * the secret was wrong -- do nothing: the reservation is the failure;
+        * the secret was right -- ``reset`` (clears the key, as it always has);
+        * no verdict (an error, or a rejection that is not a wrong secret) --
+          ``release(key, decision.token)`` removes this reservation only.
+
+        A reservation nobody resolves (the worker died) is an ordinary entry:
+        it leaves the window ``window_seconds`` later, like any failure.
+        See docs/SECURITY.md section 22.5."""
         return self._hit(key)
 
+    def release(self, key: str, token: str | None) -> None:
+        """Withdraw one reservation made by ``try_reserve``, leaving every
+        other entry (other attempts, in flight or failed) untouched."""
+        if token is None:
+            return
+        self._run(lambda store: store.release(self.name, key, token), lambda: None)
+        self._local.release(key, token)  # it may have been made during an outage
+
     @property
-    def _attempts(self) -> dict[str, list[float]]:
+    def _attempts(self) -> dict[str, list[tuple[float, str]]]:
         """The in-memory counters (what tests clear between cases)."""
         return self._local._attempts
 
 
 _default_backend = SharedBackend()
 
-# 5 failures per 15 minutes per (ip, normalized-username) pair.
-login_limiter = FailureRateLimiter("login", 5, 15 * 60, backend=_default_backend)
 
-# 5 wrong current passwords per 15 minutes per account. In memory only, in the
-# same store it has always used, until S1-B moves it to the shared backend.
-password_change_limiter = FailureRateLimiter("password_change", 5, 15 * 60, backend=None,
-                                             local=login_limiter._local)
+def _policy(name: str) -> tuple[int, int]:
+    return BaseConfig.RATE_LIMITS[name]
+
+
+# Keyed by f"{client ip}:{normalized username}".
+login_limiter = FailureRateLimiter("login", *_policy("login"), backend=_default_backend)
+
+# Keyed by f"password-change:{user id}". Shares the login limiter's in-memory
+# store (its keys cannot collide: every login key starts with an IP), so the
+# existing tests' ``login_limiter._attempts.clear()`` still resets both.
+password_change_limiter = FailureRateLimiter("password_change", *_policy("password_change"),
+                                             backend=_default_backend, local=login_limiter._local)
+
+# Keyed by client IP only -- never by a submitted username, email or code, so
+# rotating them does not reset the count and nobody can exhaust another
+# person's allowance by naming them.
+registration_limiter = RequestRateLimiter("registration", *_policy("registration"), backend=_default_backend)
+account_setup_limiter = RequestRateLimiter("account_setup", *_policy("account_setup"), backend=_default_backend)
+
+# Keyed by the authenticated user's id (from the server-side session).
+checkout_limiter = RequestRateLimiter("checkout", *_policy("checkout"), backend=_default_backend)
+reservation_limiter = RequestRateLimiter("reservation", *_policy("reservation"), backend=_default_backend)
+ai_explanation_limiter = RequestRateLimiter("ai_explanation", *_policy("ai_explanation"), backend=_default_backend)
+
+POLICIES: dict[str, _WindowLimiter] = {
+    limiter.name: limiter
+    for limiter in (login_limiter, password_change_limiter, registration_limiter, account_setup_limiter,
+                    checkout_limiter, reservation_limiter, ai_explanation_limiter)
+}
+
+
+def reset_local_counters() -> None:
+    """Forget every in-memory count (all policies). For tests; the shared
+    store is not touched."""
+    for limiter in POLICIES.values():
+        limiter._local.clear()
 
 
 def init_rate_limiting(app) -> None:
+    for name, (limit, window_seconds) in app.config["RATE_LIMITS"].items():
+        POLICIES[name].configure(limit, window_seconds)
     _default_backend.configure(
         app.config.get("REDIS_URL"),
         secret=app.config["SECRET_KEY"],

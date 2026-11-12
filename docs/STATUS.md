@@ -137,6 +137,11 @@ a client. CI reports these advisories without failing.
 | Tests collected after M7.5.5.1 | **1314** (+1 MySQL-only, `tests/test_payment_ledger_backup_restore_drill.py`) |
 | SQLite at this checkpoint (commit `3fb5c7d`) | **1286 passed, 28 skipped, 0 failed** -- CI run `42489009615`, confirmed SUCCESS via `gh run view` |
 | MySQL 8.0 at this checkpoint | **1307 passed, 7 skipped, 0 failed** -- same CI run; concurrency guard **15 passed** (not skipped) |
+| S1 — shared rate limiting | **S1-A** (commit `60195ae`): Redis sliding-window limiter, per-process fallback, `REDIS_URL` required in production; CI green on SQLite, MySQL 8.0, `redis:7.4` and the dependency audit. **S1-B** (uncommitted, ready for review): the limiter on login, password change, registration, account setup, checkout, reservations and AI explanation; login and password change moved to atomic reserve-then-resolve. Details: `docs/SECURITY.md` §22, `docs/PROJECT_PROGRESS.md` "S1-B" |
+| Tests after S1-B | +41 `tests/test_ratelimit_routes.py`, +9 `tests/test_ratelimit_redis.py` (now 23; CI guard updated to 23), +12 `tests/test_login_username_pattern.py`, +3 MySQL-only `tests/test_mysql_username_collation.py` (new CI guard: all 3 must pass) |
+| SQLite after S1-B (local, Windows, Python 3.10) | **1404 passed, 49 skipped, 0 failed** (including the pre-CI corrections) — skips are the 23 Redis tests (no `TEST_REDIS_URL`) and 26 MySQL-only tests, 3 of them the new username-collation tests |
+| Redis after S1-B | **not yet run against a real Redis server** — no Redis on the development machine. Run locally only against a `fakeredis` TCP server (not evidence). Needs the CI `test-redis` job |
+| MySQL after S1-B | **not run** (no local MySQL); needs the CI `test-mysql` job |
 
 ---
 
@@ -175,7 +180,8 @@ separately. Since M2 the LLM is **disabled by default in every environment**;
 Production deployment configuration (WSGI service, reverse proxy, TLS,
 systemd, Docker) · admin user
 management (deactivate, reset, role change) · password change / reset · email
-of any kind · multi-worker-safe rate limiting · scheduled (unattended)
+of any kind · a deployed Redis server for the shared rate limiter (the
+code exists since S1-A/S1-B; no installation has one) · scheduled (unattended)
 backups, backup failure alerting, off-machine backup copies, backup key
 escrow and a disaster-recovery runbook (the backup and restore *scripts*
 themselves exist since M7.2 — see the known-issues table below) ·
@@ -197,7 +203,7 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | --- | --- |
 | 3 | Anonymous cart discarded on login |
 | 4 | Checkout idempotency relies on cart clearing, no idempotency key |
-| 5 | Login rate limiter is in-process only (`ProxyFix` added in M2; set `TRUSTED_PROXY_COUNT` behind a proxy) |
+| 5 | ~~Login rate limiter is in-process only~~ — addressed in code by S1-A (shared Redis limiter, commit `60195ae`) and S1-B (seven routes on it, uncommitted at the time of writing; pending its CI `test-redis` run). Remaining: no Redis deployed anywhere; degraded mode during a Redis outage is per-worker (`docs/SECURITY.md` §22.6). Set `TRUSTED_PROXY_COUNT` behind a proxy |
 | 8 | No audit-log retention job |
 | 12 / 39 | Unpaginated staff queue, customer history, admin payments/audit (200-row cap) |
 | 13 | `migrations/env.py` uses deprecated `get_engine()` (breaks on Flask-SQLAlchemy 3.2) |
@@ -235,9 +241,10 @@ remaining gaps for (1) and (2) are operational and are listed in the
 known-issues table above. This paragraph described all of M7 as "not
 started" until the 2026-11-10 documentation reconciliation.
 
-**Remaining: (4) replace the in-process rate limiter (S1) with a
-shared-store implementation**, once a multi-worker deployment is planned.
-This is the one item from the original M7 list not yet started, and is the
-next scoped piece of work. Deliberately not a new customer-facing feature
-— the audit's own instruction was not to add features before resolving
-foundational reliability issues.
+**(4) replace the in-process rate limiter (S1) with a shared-store
+implementation** — in progress. S1-A (commit `60195ae`, CI green including
+`redis:7.4`) built the Redis-backed limiter; S1-B integrates it into login,
+registration, account setup, password change, checkout, reservations and AI
+explanation (`docs/SECURITY.md` §22.9). S1-B is ready for review but **not
+verified against real Redis until its CI `test-redis` job passes**; see
+"S1 — shared rate limiting" in the unreleased-changes table.

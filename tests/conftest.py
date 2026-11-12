@@ -24,6 +24,7 @@ from app.models.category import Category
 from app.models.enums import Cuisine, DietaryType, SpiceLevel
 from app.models.menu_item import MenuItem
 from app.models.user import Role, User
+from app.utils.ratelimit import reset_local_counters
 from app.utils.security import hash_password
 
 _CSRF_TAG_RE = re.compile(r'<input[^>]*name="csrf_token"[^>]*>')
@@ -118,6 +119,15 @@ def _register_test_probes(application: Flask) -> None:
         return jsonify(message="admin access confirmed")
 
     application.register_blueprint(probes)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_counters():
+    """Every rate-limit policy's in-memory counters start empty in each test,
+    so one test's requests (all from 127.0.0.1) never throttle the next."""
+    reset_local_counters()
+    yield
+    reset_local_counters()
 
 
 @pytest.fixture

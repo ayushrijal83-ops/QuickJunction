@@ -183,6 +183,19 @@ def authenticate_user(username: str, password: str) -> User | None:
     account -- returns the identical None, so a caller cannot distinguish
     them and neither can the response built from it.
     """
+    # Every account's username matches USERNAME_PATTERN (the registration
+    # form, identity_errors and so create_admin and staff invitations all
+    # enforce it), so a name that does not match cannot be anyone's -- refuse
+    # it without asking the database. Asking would be wrong on MySQL: its
+    # accent-insensitive collation (utf8mb4_unicode_ci, utf8mb4_0900_ai_ci)
+    # matches "alicé" to the account "alice", and each such spelling gets its
+    # own login rate-limit key, so rotating accents would give an attacker a
+    # fresh allowance of password guesses per variant. The dummy comparison
+    # keeps the timing of this refusal like any other unknown username.
+    if not USERNAME_PATTERN.fullmatch((username or "").strip()):
+        verify_password(_DUMMY_HASH, password)
+        return None
+
     user = db.session.query(User).filter_by(username=normalize_username(username)).first()
 
     if user is None:

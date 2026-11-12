@@ -708,9 +708,10 @@ def test_switcher_rejects_a_stale_or_foreign_csrf_token(app, client, db):
 def test_operations_users_get_english_menu_content_even_with_a_nepali_session(app, client, db, role):
     item = make_menu_item(name="Paneer Tikka")
     add_translation(item)
-    make_user(username="op", email="op@example.com", password=PASSWORD, role=role)
+    # Usernames are 3-32 characters (USERNAME_PATTERN); login refuses others.
+    make_user(username="operator", email="op@example.com", password=PASSWORD, role=role)
     req(client, "get", "/menu?lang=ne")  # chosen as a guest, kept across sign-in
-    req(client, "post", "/login", data={"username": "op", "password": PASSWORD})
+    req(client, "post", "/login", data={"username": "operator", "password": PASSWORD})
     menu = body(req(client, "get", "/menu"))
     assert html_lang(menu) == "en" and NEPALI_NAME not in menu and "Paneer Tikka" in menu
     assert 'action="/locale"' not in menu

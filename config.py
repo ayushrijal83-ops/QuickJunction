@@ -90,6 +90,21 @@ class BaseConfig:
     # rather than hold up a login.
     REDIS_SOCKET_TIMEOUT_MS: int = int(os.environ.get("REDIS_SOCKET_TIMEOUT_MS", "200"))
     RATELIMIT_KEY_PREFIX: str = "qj:rl"
+    # Every rate-limit policy, as policy name -> (limit, window in seconds).
+    # The single place these numbers live: app/utils/ratelimit.py builds its
+    # limiters from this table and init_rate_limiting re-applies the app's
+    # copy. Deliberately not read from the environment -- a typo in a deploy
+    # file must not silently loosen a security limit. What each one keys on
+    # is in docs/SECURITY.md section 22.
+    RATE_LIMITS: dict = {
+        "login": (5, 15 * 60),             # failed logins per (IP, normalized username)
+        "password_change": (5, 15 * 60),   # wrong current passwords per account
+        "registration": (10, 60 * 60),     # sign-up submissions per IP
+        "account_setup": (10, 15 * 60),    # one-time-code submissions per IP
+        "checkout": (8, 5 * 60),           # checkout submissions per customer
+        "reservation": (10, 5 * 60),       # booking submissions per customer
+        "ai_explanation": (4, 60),         # explanation page loads per customer
+    }
 
     # --- account codes (M4) ------------------------------------------------
     # Lifetime of the one-time codes in app/services/accounts.py. An unused
@@ -176,6 +191,13 @@ class BaseConfig:
             )
         if not 50 <= cls.REDIS_SOCKET_TIMEOUT_MS <= 2000:
             raise ConfigError("REDIS_SOCKET_TIMEOUT_MS must be 50-2000.")
+        if set(cls.RATE_LIMITS) != set(BaseConfig.RATE_LIMITS):
+            raise ConfigError("RATE_LIMITS must define exactly these policies: "
+                              + ", ".join(sorted(BaseConfig.RATE_LIMITS)) + ".")
+        for name, policy in cls.RATE_LIMITS.items():
+            if (not isinstance(policy, tuple) or len(policy) != 2
+                    or not all(isinstance(v, int) and not isinstance(v, bool) and v >= 1 for v in policy)):
+                raise ConfigError(f"RATE_LIMITS[{name!r}] must be (limit, window_seconds), both positive integers.")
         if missing:
             env_names = {"SQLALCHEMY_DATABASE_URI": "DATABASE_URL"}
             required = ", ".join(env_names.get(n, n) for n in missing)

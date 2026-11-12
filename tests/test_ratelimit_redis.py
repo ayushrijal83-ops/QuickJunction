@@ -13,6 +13,8 @@ connection pool -- standing in for a separate gunicorn worker process.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -20,10 +22,13 @@ import threading
 import time
 
 import pytest
+from flask import g
 
 import app.utils.ratelimit as ratelimit
 from app import create_app
 from app.extensions import db as _db
+from app.models.user import User
+from app.services.tables import create_table
 from app.utils.ratelimit import FailureRateLimiter, RequestRateLimiter, SharedBackend, login_limiter
 from config import TestingConfig
 from tests.conftest import make_user
@@ -305,3 +310,168 @@ def test_login_route_is_limited_through_redis(redis_app, worker, raw, prefix):
     assert another_worker.is_limited("127.0.0.1:alice")  # a second worker enforces the same limit
     another_worker.reset("127.0.0.1:alice")
     assert login("correct-horse-1").status_code == 302
+
+
+# --- S1-B: reservations, Retry-After, release ------------------------------------
+
+
+def test_refusal_reports_when_the_oldest_entry_leaves_the_window(worker):
+    limiter = RequestRateLimiter("checkout", 2, 60, backend=worker())
+    limiter.attempt("u")
+    limiter.attempt("u")
+    refused = limiter.attempt("u")
+    assert not refused.allowed and refused.shared
+    assert 59 < refused.retry_after <= 60  # from the server's clock, in seconds
+
+
+def test_release_removes_exactly_one_reservation(worker, raw, prefix):
+    limiter = FailureRateLimiter("login", 5, 900, backend=worker())
+    first, second, third = (limiter.try_reserve("k") for _ in range(3))
+    assert all(d.allowed and d.shared and d.token for d in (first, second, third))
+    limiter.release("k", second.token)
+    (key,) = keys(raw, prefix)
+    assert sorted(raw.zrange(key, 0, -1)) == sorted([first.token, third.token])
+    limiter.release("k", "not-a-token")
+    assert raw.zcard(key) == 2
+
+
+def test_an_unresolved_reservation_expires_with_the_window(worker, raw, prefix):
+    """A worker that dies between reserving and resolving: its entry ages
+    out like any failure and the key expires, so nobody stays locked out."""
+    limiter = FailureRateLimiter("login", 2, 1, backend=worker())
+    assert limiter.try_reserve("k").allowed and limiter.try_reserve("k").allowed  # never resolved
+    assert not limiter.try_reserve("k").allowed
+    (key,) = keys(raw, prefix)
+    assert 0 < raw.pttl(key) <= 1000
+    time.sleep(1.1)
+    assert limiter.try_reserve("k").allowed
+
+
+def test_concurrent_reservations_across_clients_admit_only_the_free_slots(worker):
+    limiters = [FailureRateLimiter("login", 5, 900, backend=worker()) for _ in range(4)]
+    for _ in range(4):
+        limiters[0].record_failure("k")
+    results = run_together([(lambda limiter=limiters[i % 4]: limiter.try_reserve("k")) for i in range(20)])
+    winners = [d for d in results if d.allowed]
+    assert len(winners) == 1  # one free slot, one attempt in flight
+    limiters[1].release("k", winners[0].token)  # any worker can withdraw it
+    assert limiters[2]._backend._store.count("login", "k", 900) == 4
+
+
+# --- S1-B: the routes, wired to Redis ---------------------------------------------
+
+
+def digest(identifier: str) -> str:
+    return hmac.new(SECRET.encode(), identifier.encode(), hashlib.sha256).hexdigest()
+
+
+def req(client, method, url, **kw):
+    g.pop("current_user", None)  # known issue #29: one app context, shared g
+    return getattr(client, method)(url, **kw)
+
+
+def signed_in(application, username):
+    make_user(username=username, email=f"{username}@example.com", password="correct-horse-1")
+    client = application.test_client()
+    response = req(client, "post", "/login", data={"username": username, "password": "correct-horse-1"})
+    assert response.status_code == 302
+    return client
+
+
+def test_customer_routes_count_in_redis_under_hmac_keys(redis_app, worker, raw, prefix, monkeypatch):
+    monkeypatch.setattr("app.routes.preferences.generate_explanation", lambda r, **kw: "fine")
+    client = signed_in(redis_app, "alice")
+    alice_id = str(_db.session.query(User).filter_by(username="alice").one().id)
+    create_table("T01", 4)
+
+    for _ in range(8):
+        assert req(client, "post", "/checkout", data={}).status_code == 302
+    for _ in range(10):
+        assert req(client, "post", "/reservations", data={}).status_code == 302
+    for _ in range(4):
+        assert req(client, "get", "/recommendations/explain").status_code == 200
+    for refused in (req(client, "post", "/checkout", data={}), req(client, "post", "/reservations", data={}),
+                    req(client, "get", "/recommendations/explain")):
+        assert refused.status_code == 429 and int(refused.headers["Retry-After"]) >= 1
+
+    expected = {f"{prefix}:{policy}:{digest(alice_id)}": count
+                for policy, count in (("checkout", 8), ("reservation", 10), ("ai_explanation", 4))}
+    assert {key: raw.zcard(key) for key in keys(raw, prefix)} == expected  # the login reset its own key
+    assert not RequestRateLimiter("checkout", 8, 300, backend=worker()).attempt(alice_id).allowed
+    assert ratelimit.checkout_limiter._local._attempts == {}  # nothing counted in this process
+
+
+def test_ip_routes_count_in_redis_and_ignore_rotating_identities(redis_app, raw, prefix):
+    client = redis_app.test_client()
+    for n in range(10):
+        # Invalid sign-ups under rotating names, and wrong codes: all counted per IP.
+        req(client, "post", "/register", data={"username": f"x{n}", "email": f"bad{n}", "password": "a"})
+        req(client, "post", "/account/setup", data={"code": f"guess-{n}", "password": "a", "password_confirm": "a"})
+    assert req(client, "post", "/register", data={"username": "fresh"}).status_code == 429
+    assert req(client, "post", "/account/setup", data={"code": "another"}).status_code == 429
+    assert set(keys(raw, prefix)) == {f"{prefix}:registration:{digest('127.0.0.1')}",
+                                      f"{prefix}:account_setup:{digest('127.0.0.1')}"}
+    assert all("127.0.0.1" not in key for key in keys(raw, prefix))
+
+
+def test_password_change_counts_only_wrong_current_passwords_in_redis(redis_app, raw, prefix):
+    client = signed_in(redis_app, "alice")
+    alice_id = _db.session.query(User).filter_by(username="alice").one().id
+
+    def change(current, new="brand-new-pass-42"):
+        return req(client, "post", "/account/password",
+                   data={"current_password": current, "password": new, "password_confirm": new})
+
+    for _ in range(4):
+        assert change("wrong-current-1").status_code == 200
+    for _ in range(3):
+        assert change("correct-horse-1", new="short").status_code == 200  # a policy error: released
+    key = f"{prefix}:password_change:{digest(f'password-change:{alice_id}')}"
+    assert raw.zcard(key) == 4
+    assert change("wrong-current-1").status_code == 200
+    assert change("correct-horse-1").status_code == 429
+
+
+def test_login_attempt_in_flight_is_visible_to_other_workers(redis_app, worker, monkeypatch):
+    import app.routes.auth as auth_routes
+
+    make_user(username="alice", password="correct-horse-1")
+    client = redis_app.test_client()
+    for _ in range(4):
+        req(client, "post", "/login", data={"username": "alice", "password": "wrong-password-1"})
+    another_worker = FailureRateLimiter("login", 5, 900, backend=worker())
+    real, seen = auth_routes.authenticate_user, {}
+
+    def check(username, password):
+        seen["other worker"] = another_worker.try_reserve("127.0.0.1:alice").allowed
+        return real(username, password)
+
+    monkeypatch.setattr(auth_routes, "authenticate_user", check)
+    response = req(client, "post", "/login", data={"username": "alice", "password": "correct-horse-1"})
+    assert response.status_code == 302
+    assert seen["other worker"] is False  # the fifth slot was held while the password was checked
+    assert another_worker._backend._store.count("login", "127.0.0.1:alice", 900) == 0  # success reset it
+
+
+def test_route_outage_falls_back_locally_and_recovers(redis_app, monkeypatch):
+    import redis
+
+    client = signed_in(redis_app, "alice")
+    for _ in range(3):
+        req(client, "post", "/checkout", data={})
+    store = ratelimit._default_backend._store
+    healthy = store._hit
+
+    def unreachable(*args, **kwargs):
+        raise redis.ConnectionError("connection lost")
+
+    monkeypatch.setattr(store, "_hit", unreachable)
+    statuses = [req(client, "post", "/checkout", data={}).status_code for _ in range(9)]
+    assert statuses == [302] * 8 + [429]  # still limited, by this process alone
+    assert ratelimit.rate_limit_status()["degraded"] is True
+
+    monkeypatch.setattr(store, "_hit", healthy)
+    monkeypatch.setattr(ratelimit, "_now", lambda: time.monotonic() + SharedBackend.RETRY_SECONDS)
+    statuses = [req(client, "post", "/checkout", data={}).status_code for _ in range(6)]
+    assert statuses == [302] * 5 + [429]  # Redis still held the 3 from before the outage
+    assert ratelimit.rate_limit_status()["shared"] is True

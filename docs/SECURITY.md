@@ -1466,10 +1466,12 @@ the kitchen board contain no Nepali text.
 
 ---
 
-## 22. Shared rate limiter (S1-A)
+## 22. Shared rate limiter (S1-A, S1-B)
 
-S1-A adds the infrastructure only. The one consumer so far is the existing
-login limiter. No new endpoint is rate limited yet (§22.8).
+S1-A (commit `60195ae`) added the infrastructure; its one consumer was the
+existing login limiter. S1-B wires it into seven routes (§22.9) and moves
+login and password change to an atomic reserve-then-resolve sequence
+(§22.5).
 
 ### 22.1 Architecture
 
@@ -1478,8 +1480,16 @@ get counted:
 
 | Type | Counts | Calls | Used by |
 | --- | --- | --- | --- |
-| `FailureRateLimiter` | failed attempts | `is_limited(key)`, then `record_failure(key)` or `reset(key)` | `login_limiter` (5 per 15 min per IP + username), `password_change_limiter` (5 per 15 min per account) |
-| `RequestRateLimiter` | requests | `attempt(identifier)` — checks and records in one step, returns `allowed`, `count`, `limit`, `shared` | nothing yet; for the S1-B endpoint policies |
+| `FailureRateLimiter` | failed attempts | `try_reserve(key)`, then `reset(key)` (secret right), `release(key, token)` (no verdict) or nothing (secret wrong). The older non-atomic `is_limited` / `record_failure` pair is kept but no route uses it | `login_limiter`, `password_change_limiter` |
+| `RequestRateLimiter` | requests | `attempt(identifier)` — checks and records in one step, returns `allowed`, `count`, `limit`, `shared`, and `retry_after` when refused | registration, account setup, checkout, reservations, AI explanation |
+
+Every policy's numbers live in one place, `RATE_LIMITS` in `config.py`
+(policy → `(limit, window_seconds)`). `config.validate()` refuses a table
+that is missing a policy, names an unknown one, or has a non-positive or
+non-integer value; `init_rate_limiting` applies the app's table to the
+limiters. It is deliberately not read from environment variables, so a typo
+in a deployment file cannot quietly loosen a security limit — changing a
+limit is a code/config change that goes through review.
 
 Where a limiter keeps its counters:
 
@@ -1489,14 +1499,16 @@ Where a limiter keeps its counters:
 | `REDIS_URL` not set (development, tests) | the process's memory | no |
 | `REDIS_URL` set, Redis not answering | the process's memory, until Redis answers again | **no** (§22.6) |
 
-`login_limiter` follows that table. `password_change_limiter` is pinned to
-the in-memory store it has always used (it shares `login_limiter`'s in-memory
-dictionary, under its own `password-change:<id>` keys) and moves to the
-shared store in S1-B. `app/routes/account.py` now imports it by that name;
-its behaviour is unchanged.
+Every limiter follows that table. Since S1-B that includes
+`password_change_limiter`; its in-memory fallback still shares
+`login_limiter`'s dictionary (under its own `password-change:<id>` keys,
+which cannot collide with login's `<ip>:<username>` keys), and in Redis it
+has its own `password_change` policy namespace.
 
 `TestingConfig` sets `REDIS_URL = None` regardless of the environment, so the
-test suite's limiter state is always per-process and the existing
+test suite's limiter state is always per-process. An autouse fixture in
+`tests/conftest.py` (`reset_local_counters()`) empties every policy's
+in-memory counters around each test; the existing
 `login_limiter._attempts.clear()` fixtures keep working.
 
 ### 22.2 The sliding window
@@ -1519,12 +1531,17 @@ so requests with the same timestamp are separate entries; a member derived
 from the timestamp would let one overwrite another and undercount.
 
 A refused request is not recorded, so being refused does not extend the
-window. `record_failure` uses a second script that adds unconditionally (the
-failure has already happened); `is_limited` uses a third that prunes and
-counts.
+window. When it refuses, the script also returns *oldest entry + window −
+now* (server clock): the earliest moment a slot frees up. The routes send it
+as `Retry-After`, rounded up to whole seconds, minimum 1. `record_failure`
+uses a second script that adds unconditionally (the failure has already
+happened); `is_limited` uses a third that prunes and counts. `release`
+is a single `ZREM` of one member — the token `try_reserve` returned — so it
+removes that reservation and nothing else.
 
 The in-memory fallback implements the same window (`_MemoryWindow`), with
-each operation atomic under a lock.
+each operation atomic under a lock; its entries carry a random token too, so
+`release` and `Retry-After` behave identically.
 
 ### 22.3 Keys and logs
 
@@ -1555,8 +1572,9 @@ must provide:
 - **Authentication** whenever Redis is reachable over a network rather than
   only from the same host: `requirepass`, or preferably an ACL user limited
   to the `qj:rl:*` keys and the commands the limiter uses (`EVALSHA`,
-  `EVAL`, `SCRIPT`, `DEL`, `ZADD`, `ZCARD`, `ZREMRANGEBYSCORE`, `PEXPIRE`,
-  `TIME`, plus whatever the client sends when it connects). That command
+  `EVAL`, `SCRIPT`, `DEL`, `ZADD`, `ZCARD`, `ZRANGE`, `ZREM`,
+  `ZREMRANGEBYSCORE`, `PEXPIRE`, `TIME`, plus whatever the client sends when
+  it connects). That command
   list is read from the code and has not been tested against a restricted
   ACL user; verify it on the deployed Redis before relying on it.
 - **TLS** (`rediss://`) whenever traffic leaves the host.
@@ -1573,51 +1591,95 @@ must provide:
 
 ### 22.5 The login check-then-record boundary
 
-**Finding.** The login view checks and records in two steps with the
-password check between them:
+**Finding (S1-A).** Until S1-B the login view checked and recorded in two
+steps with the password check between them — `is_limited(key)`, then
+`authenticate_user(...)` (Argon2, tens of milliseconds or more), then
+`record_failure(key)` if the password was wrong. Each step was atomic; the
+sequence was not. Every request that passed the check before the fifth
+failure was recorded got its password checked, so an attacker got 5 guesses
+plus one per request already in flight (bounded by the server's concurrency).
+`tests/test_ratelimit.py::test_two_step_login_check_lets_concurrent_attempts_overshoot`
+and its Redis equivalent still pin that behaviour *of the two-step API*,
+which remains in the module but is no longer used by any route.
 
-1. `login_limiter.is_limited(key)` — refuse with 429 if 5 failures are on record;
-2. `authenticate_user(...)` — Argon2 verification, tens of milliseconds or more;
-3. `login_limiter.record_failure(key)` if the password was wrong.
+**S1-B: reserve, then resolve.** `app/routes/auth.py` and the password-change
+view in `app/routes/account.py` now do:
 
-Each step is atomic on its own, in memory (lock) and in Redis (script). The
-sequence is not. Every request that passes step 1 before the fifth failure
-is recorded at step 3 gets its password checked. So within one window an
-attacker gets 5 guesses plus one for each additional request already in
-flight — bounded by how many requests the server processes at once (the
-number of gunicorn workers/threads), not unbounded. Before S1-A this was
-also true per worker *and* each worker counted separately; with the shared
-store the per-worker multiplication is gone and the in-flight overshoot
-remains. `tests/test_ratelimit.py::test_two_step_login_check_lets_concurrent_attempts_overshoot`
-and the Redis equivalent pin this behaviour.
+1. `decision = limiter.try_reserve(key)` — one atomic script: if fewer than
+   *limit* entries are in the window, record this attempt now (as a failure)
+   and allow it; otherwise refuse → 429 with `Retry-After`, the password is
+   not checked;
+2. verify the secret (`authenticate_user` / `change_password`);
+3. resolve, exactly once:
 
-**S1-A does not change it.** `app/routes/auth.py` is untouched.
+| Outcome | Action | Effect |
+| --- | --- | --- |
+| Wrong password / wrong current password | nothing | the reservation *is* the recorded failure — one attempt consumed, as before |
+| Correct password (login success; also pending-staff and wrong-portal refusals, which need the right password) | `reset(key)` | the key is cleared, as it always was; the reservation does not consume a slot |
+| No verdict: an exception, or (password change) a rejected *new* password with a correct current one | `release(key, decision.token)` | removes this reservation only; other entries (other attempts, failed or in flight) are untouched |
 
-**Proposed fix, implemented but not wired in:**
-`FailureRateLimiter.try_reserve(key)`. It runs the same atomic script as
-`attempt`: if fewer than 5 entries are in the window it records this attempt
-*before* the password is checked and allows it; otherwise it refuses. The
-login view would become:
+Why this preserves the policy: still 5 failed attempts per 15 minutes per
+`<ip>:<normalized username>` (login) or per account (password change); a
+success still resets the count; non-failures still are not counted. What it
+adds is that an attempt holds its slot *while it is being checked*.
 
-1. `try_reserve(key)` — refused → 429;
-2. `authenticate_user(...)`;
-3. wrong password → nothing to do, the attempt is already counted;
-   correct password → `reset(key)`, as today.
+What that bounds, precisely:
 
-The policy stays 5 failed attempts per 15 minutes per IP + username, and at
-most 5 passwords are ever checked per window. What changes, and why this
-needs a decision rather than a silent swap:
+- **While Redis is healthy,** reservations are atomic in the shared store,
+  so concurrent requests for one key — from any number of workers — cannot
+  have more than 5 unresolved-or-failed attempts in the window at once, and
+  so cannot get more than 5 wrong passwords checked between successes.
+- **A correct password resets the key** (as it always has), which starts a
+  fresh allowance. That needs the correct password, so it is not a way
+  around the limit for someone who lacks it.
+- **During a Redis outage there is no global bound.** Each worker reserves
+  in its own memory, so up to 5 attempts per worker per window, and the
+  counts start afresh when the outage begins and again when Redis returns
+  (§22.6). Do not rely on this as a cross-worker limit.
+- **A release after an exception** withdraws the attempt; the only exception
+  that can follow an actual password comparison is in the rehash branch of
+  `authenticate_user`, which runs only with the correct password.
+- **Timeouts over-count, never under-count.** If Redis ran the reservation
+  but its reply was lost to the socket timeout, the limiter falls back to a
+  local reservation with a different token; the Redis entry stays and counts
+  as a failure until it leaves the window, even if this attempt later
+  succeeds during the outage or is released. This errs towards refusing.
+- **Every reservation expires on its own** after the window (15 minutes),
+  whether it was resolved or not.
+- The key is per `<ip>:<username>`; usernames outside `USERNAME_PATTERN`
+  are refused without a lookup (`authenticate_user`), so accent or other
+  spelling variants that MySQL's accent-insensitive collation would match
+  to an account cannot be used to multiply the allowance
+  (`tests/test_mysql_username_collation.py`).
 
-- An attempt counts from the moment it starts, not from the moment it
-  fails. With 4 failures on record, two simultaneous attempts: the first is
-  checked, the second gets 429 even if its password was right. Today both
-  would be checked.
-- If a request dies between steps 1 and 3, its reservation stays counted as
-  a failure until it expires. Today it would not be counted.
-- `LOGIN_RATE_LIMITED` audit rows would appear in those two cases.
+Behaviour to be aware of (accepted, and tested):
 
-Tests for `try_reserve` (single process, threads, and across Redis clients)
-are in place so the change to `auth.py` can be reviewed on its own.
+- With 4 failures on record, two simultaneous attempts: the first is
+  checked, the second gets 429 — even if its password was right — because
+  the first holds the last slot. Before S1-B both would have been checked.
+  The second user retries after `Retry-After`, or immediately if the first
+  turns out correct (its `reset` frees the key).
+- A success resets the whole key, including other attempts in flight from
+  the same IP + username at that moment. That is the pre-existing "success
+  resets" semantic; it requires the correct password, so it gives an
+  attacker nothing.
+- **Crash safety.** If a worker dies between reserving and resolving, the
+  reservation is an ordinary entry: it leaves the window 15 minutes later
+  and the key expires with it. It costs that user at most one slot for one
+  window; it can never lock anyone out permanently. Tested in memory (fake
+  clock) and on Redis (1-second window).
+- `release` is attempted in both stores; releasing an entry that is not
+  there is a no-op. A reservation made in Redis cannot be released while
+  Redis is unreachable: it stays counted until it leaves the window.
+- `LOGIN_RATE_LIMITED` audit rows are written for every refused attempt, as
+  before.
+
+Tests: `tests/test_ratelimit_routes.py` (an attempt in flight holds its slot,
+success frees it, an error releases it, an unresolved reservation expires,
+`release` withdraws only its own entry, staff/admin portals unchanged) and
+`tests/test_ratelimit_redis.py` (20 concurrent reservations across 4 Redis
+clients admit exactly the one free slot; a second worker sees an in-flight
+login's reservation; release and expiry on a real server).
 
 ### 22.6 Redis outage
 
@@ -1638,6 +1700,11 @@ request and does not switch limiting off:
   Every `attempt`/`try_reserve` result carries `shared`, which is `True`
   only when Redis made that decision.
 
+For the routes (S1-B) this means: logins, checkouts, bookings and the rest
+keep working during an outage, still limited — by each worker's local count —
+and never unlimited. Tested through the routes with a switchable stand-in
+store and against real Redis with the connection forced to fail.
+
 **What degraded means — limitations to plan for:**
 
 - Each worker enforces the limit separately, so the effective limit is up to
@@ -1652,32 +1719,94 @@ request and does not switch limiting off:
   Alerting belongs to monitoring (`docs/PRODUCTION_READINESS.md` D9).
 - A Redis that is slow but under the timeout delays each limited request by
   up to the timeout.
+- A Redis that is slow *beyond* the timeout may still have executed the
+  call: the entry is then recorded in Redis and, for that request, also in
+  the worker's memory. That over-counts (towards refusing), never
+  under-counts; the extra entry leaves the window on schedule.
 
 ### 22.7 Tests
 
 - `tests/test_ratelimit.py` (60, no Redis needed): the in-memory window and
-  its boundary, both limiter types, the unchanged login policy and
-  `_attempts` compatibility, the two-step overshoot and `try_reserve`,
-  fallback, retry spacing, warning throttling, recovery, no URL or
-  identifier in logs or keys, an unreachable Redis handled within the
-  timeout, `REDIS_URL` validation and the production requirement.
-- `tests/test_ratelimit_redis.py` (14, needs `TEST_REDIS_URL`): limits,
-  sliding expiry, key expiry, unique members under simultaneous requests,
-  atomic enforcement across 8 clients, counters shared between independent
-  clients, the login route limited through Redis and enforced by a second
-  worker, loss and recovery of Redis mid-flight.
-- CI: a `test-redis` job runs both files against a `redis:7.4` service and
-  fails if any Redis test is skipped. The SQLite and MySQL jobs run the same
-  files without Redis.
+  its boundary, both limiter types, the unchanged login and password-change
+  policies (the latter now on the shared backend), `_attempts`
+  compatibility, the two-step overshoot and `try_reserve`, fallback, retry
+  spacing, warning throttling, recovery, no URL or identifier in logs or
+  keys, an unreachable Redis handled within the timeout, `REDIS_URL`
+  validation and the production requirement.
+- `tests/test_ratelimit_routes.py` (41, no Redis needed; S1-B): every route
+  in §22.9 — threshold, 429 + `Retry-After`, keying (IP vs. customer id,
+  normalized username, independent IPs/customers, rotating usernames,
+  spoofed `X-Forwarded-For` ignored), no side effects on 429 (no order,
+  order item, payment, ledger entry, stock movement, reservation, consumed
+  code, audit row; cart kept; model not invoked), unchanged success,
+  validation, single-use/expired-code, active-reservation-cap and
+  graceful-degradation behaviour, authorization before counting, JSON 429
+  for API clients, login/password-change reservation semantics, outage →
+  local fallback → recovery through the routes with one throttled warning
+  and nothing sensitive logged, and `RATE_LIMITS` validation.
+- `tests/test_ratelimit_redis.py` (23, needs `TEST_REDIS_URL`): S1-A's 14
+  (limits, sliding and key expiry, unique members, atomicity across 8
+  clients, shared counters, the login route through Redis, mid-flight loss
+  and recovery) plus S1-B's 9: `Retry-After` from the server clock,
+  `release` removes exactly one member, an unresolved reservation expires,
+  concurrent reservations across clients, every customer route and both IP
+  routes counted in Redis under HMAC keys and seen by a second worker,
+  password-change release semantics, an in-flight login visible to another
+  worker, and route-level outage/recovery.
+- CI: the `test-redis` job runs all three files against a `redis:7.4`
+  service and fails unless exactly 23 Redis tests ran and passed. The SQLite
+  and MySQL jobs run the same files without Redis (the Redis file skips
+  there).
 
-**Verification status.** The Redis file has been run locally only against
-`fakeredis`, which executes the real Lua scripts in an embedded Lua
-interpreter but is not a Redis server. It has not yet run against a real
-Redis: no Redis is installed on the development machine and the CI job has
-not run because nothing has been pushed.
+**Verification status.** See `docs/STATUS.md` "S1 — shared rate limiting".
+S1-A's Redis tests passed against real `redis:7.4` in CI. S1-B's have been
+run locally only against a `fakeredis` TCP server — not a Redis server, and
+not counted as evidence — and need the CI `test-redis` job before S1-B is
+considered verified.
 
-### 22.8 Not in S1-A
+### 22.8 Not in S1-B
 
-No rate limit on registration, `/account/setup`, checkout, reservations or
-AI explain; password change not yet on the shared store; `auth.py` not
-switched to `try_reserve`. Those are S1-B and need their own review.
+- No global middleware: only the seven routes in §22.9 are limited.
+- No premium/quota system for AI explanations — that is a separate product
+  feature.
+- No audit event for the new 429s (only login has `LOGIN_RATE_LIMITED`);
+  adding events was out of scope and could need a migration.
+- No alerting on degraded mode (`docs/PRODUCTION_READINESS.md` D9).
+
+### 22.9 Protected routes (S1-B)
+
+| Route | Policy (`RATE_LIMITS`) | Identifier | Counts | On refusal |
+| --- | --- | --- | --- | --- |
+| `POST /login`, `/login/staff`, `/login/admin` | `login` 5 / 15 min | `<client IP>:<username, trimmed + lowercased>` | failed attempts (reserve → resolve, §22.5) | login page, flash, 429, `Retry-After`, `LOGIN_RATE_LIMITED` audit row |
+| `POST /account/password` | `password_change` 5 / 15 min | `password-change:<session user id>` | wrong current passwords (reserve → resolve) | form page, flash, 429, `Retry-After` |
+| `POST /register` | `registration` 10 / 60 min | client IP | every submission, valid or not | form page, flash, 429, `Retry-After`; no account created |
+| `POST /account/setup` | `account_setup` 10 / 15 min | client IP | every submission | form page, flash, 429, `Retry-After`; code not looked up or consumed |
+| `POST /checkout` | `checkout` 8 / 5 min | session customer id | every submission | error page or JSON 429, `Retry-After`; no service call, cart kept |
+| `POST /reservations` | `reservation` 10 / 5 min | session customer id | every submission | error page or JSON 429, `Retry-After`; no service call |
+| `GET /recommendations/explain` | `ai_explanation` 4 / min | session customer id | every request | error page or JSON 429, `Retry-After`; no recommendation query, no inference |
+
+Design points:
+
+- **Order of checks.** Authentication/authorization decorators
+  (`@login_required`, `@customer_required`) and global CSRF run first; an
+  unauthenticated or wrong-role request is refused without being counted
+  and cannot consume a customer's allowance. GET form pages are not counted.
+- **IP, not submitted identity,** for registration and account setup:
+  rotating usernames, emails or codes does not reset the count, and nobody
+  can exhaust another person's allowance by naming them. The IP is
+  `request.remote_addr`, i.e. what `ProxyFix` with `TRUSTED_PROXY_COUNT`
+  (unchanged, default 0) yields — a client-supplied `X-Forwarded-For` is
+  ignored unless a trusted proxy is configured (tested). Customers behind
+  one NAT share the IP allowance; 10 sign-ups per hour per IP is the
+  trade-off accepted for the pilot.
+- **Customer id from the session,** never from the request, for the three
+  customer routes and password change.
+- **Separate from business rules.** The checkout limiter does not replace
+  validation, stock locking or the payment ledger; the reservation limiter
+  is independent of `RESERVATION_ACTIVE_LIMIT` (still enforced under its
+  row lock, tested). They only bound how often those paths can be entered.
+- **Responses.** Fixed, non-sensitive sentences; nothing about the store,
+  keys or counts. Form routes keep the login convention (re-render with a
+  flash message); the others use `render_error` (HTML error page, or JSON
+  `{"error": {"status": 429, "message": ...}}` for API clients). Handled by
+  `with_retry_after` / `render_rate_limited` in `app/utils/errors.py`.

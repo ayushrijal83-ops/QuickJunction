@@ -65,7 +65,7 @@ def test_customer_pages_get_the_customer_design_system(app, db):
 @pytest.mark.parametrize("role", [Role.STAFF, Role.ADMIN])
 def test_operations_pages_never_get_customer_styling(app, db, role):
     make_menu_item()
-    client, _ = signed_in(app, "op", role)
+    client, _ = signed_in(app, "operator", role)  # usernames are 3-32 chars (USERNAME_PATTERN)
     for url in OPS_PAGES + (["/admin/menu", "/admin/settings/restaurant"] if role == Role.ADMIN else []):
         page = get(client, url)
         assert not is_site(page) and "site.css" not in page and "qj-site" not in page, url

@@ -35,7 +35,8 @@ from app.services.reservations import (
 )
 from app.utils.authorization import customer_required, get_current_user, require_role
 from app.utils.clock import db_today
-from app.utils.errors import wants_html
+from app.utils.errors import render_rate_limited, wants_html
+from app.utils.ratelimit import reservation_limiter
 from app.utils.request_meta import client_ip, user_agent
 
 reservations_bp = Blueprint("reservations", __name__)
@@ -79,6 +80,13 @@ def new():
 @reservations_bp.post("/reservations")
 @customer_required
 def create():
+    # Request rate only; separate from RESERVATION_ACTIVE_LIMIT, which
+    # create_reservation still enforces under its row lock. A refused request
+    # never reaches the service, so nothing is created or changed.
+    decision = reservation_limiter.attempt(str(get_current_user().id))
+    if not decision.allowed:
+        return render_rate_limited("You're making reservations too quickly. Please wait a moment and try again.",
+                                   decision)
     form = ReservationForm()
     if not form.validate_on_submit():
         flash("Please choose a date, time, party size and table.", "error")

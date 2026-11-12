@@ -9,7 +9,7 @@ product. The tests use an equivalent test-only blueprint (tests/conftest.py).
 
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, url_for
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.models.account_token import TokenPurpose
 from app.models.audit_log import AuditEvent
@@ -19,7 +19,8 @@ from app.services import dashboard
 from app.services.accounts import AccountError, CodeRejected, change_password, redeem_code
 from app.services.audit import record_event
 from app.utils.authorization import get_current_user, login_required, login_user
-from app.utils.ratelimit import password_change_limiter
+from app.utils.errors import with_retry_after
+from app.utils.ratelimit import account_setup_limiter, password_change_limiter
 from app.utils.request_meta import client_ip, user_agent
 
 account_bp = Blueprint("account", __name__, url_prefix="/account")
@@ -52,26 +53,34 @@ def _form_errors(form, errors: dict[str, list[str]]) -> None:
 @login_required
 def password():
     """Change your own password. Wrong current passwords are counted by the
-    login limiter (keyed per account), so a stolen session cannot be used to
+    password-change limiter (keyed per account), so a stolen session cannot be used to
     brute-force the password. Success revokes every other session of this
     account and keeps this one signed in."""
     user = get_current_user()
     form = PasswordChangeForm()
     if form.validate_on_submit():
-        key = f"password-change:{user.id}"
-        if password_change_limiter.is_limited(key):
+        key = f"password-change:{user.id}"  # the authenticated account, from the session
+        # Atomic check-and-count, as at login: a wrong current password
+        # leaves this reservation as the failure; success resets the key; any
+        # other outcome (a new password the policy rejects, an error) releases it.
+        reservation = password_change_limiter.try_reserve(key)
+        if not reservation.allowed:
             flash("Too many attempts. Try again later.", "error")
-            return render_template("account/password.html", form=form), 429
+            return with_retry_after(render_template("account/password.html", form=form), reservation)
         try:
             change_password(user, form.current_password.data, form.password.data, form.password_confirm.data,
                             audit=lambda u: record_event(AuditEvent.PASSWORD_CHANGED, success=True, user_id=u.id,
                                                          ip_address=client_ip(), user_agent=user_agent()))
         except AccountError as exc:
-            if "current_password" in exc.errors:
-                password_change_limiter.record_failure(key)
+            if "current_password" not in exc.errors:
+                password_change_limiter.release(key, reservation.token)
+            else:
                 record_event(AuditEvent.PASSWORD_CHANGED, success=False, user_id=user.id, ip_address=client_ip(),
                              user_agent=user_agent(), metadata={"reason": "wrong_current_password"}, commit=True)
             _form_errors(form, exc.errors)
+        except BaseException:
+            password_change_limiter.release(key, reservation.token)  # no verdict: not a failure
+            raise
         else:
             password_change_limiter.reset(key)
             login_user(user)  # re-stamp this session with the new version
@@ -89,6 +98,13 @@ def setup():
         flash("Sign out before using a one-time code.", "error")
         return redirect(url_for("account.index"))
     form = AccountSetupForm()
+    if request.method == "POST":
+        # Every submission counts, keyed by IP alone -- never by the code,
+        # which would give each guess a fresh allowance.
+        decision = account_setup_limiter.attempt(client_ip() or "unknown")
+        if not decision.allowed:
+            flash("Too many attempts. Try again later.", "error")
+            return with_retry_after(render_template("account/setup.html", form=form), decision)
     if form.validate_on_submit():
         def audit(user, purpose):
             event = (AuditEvent.STAFF_INVITATION_ACCEPTED if purpose == TokenPurpose.STAFF_INVITE

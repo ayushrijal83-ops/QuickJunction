@@ -67,10 +67,14 @@ def security_log(monkeypatch):
     logger = get_security_logger()
     handler = Collect(level=logging.DEBUG)
     monkeypatch.setattr(logger, "disabled", False)
-    monkeypatch.setattr(logger, "level", logging.DEBUG)
+    # setLevel, not a plain attribute: it also clears the logging module's
+    # isEnabledFor cache, which may hold "INFO is off" from an earlier test.
+    previous_level = logger.level
+    logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
     yield records
     logger.removeHandler(handler)
+    logger.setLevel(previous_level)
 
 
 class StandInStore:
@@ -103,6 +107,12 @@ class StandInStore:
     def count(self, policy, identifier, window_seconds):
         self._call()
         return self._window(policy, 0, window_seconds).count(identifier)
+
+    def release(self, policy, identifier, token):
+        self._call()
+        for (name, _, _), window in self._windows.items():
+            if name == policy:
+                window.release(identifier, token)
 
     def reset(self, policy, identifier):
         self._call()
@@ -237,23 +247,26 @@ def test_login_limiter_attempts_dict_is_still_what_tests_clear():
         login_limiter._attempts.clear()
 
 
-def test_password_change_limiter_stays_in_memory_in_the_same_store():
+def test_password_change_limiter_policy_is_unchanged_and_now_shared():
+    """S1-B moved it to the shared backend; its numbers, and the in-memory
+    store the existing tests clear, are what they were."""
     assert (password_change_limiter.limit, password_change_limiter.window_seconds) == (5, 900)
-    assert password_change_limiter._backend is None
+    assert password_change_limiter._backend is ratelimit._default_backend
     assert password_change_limiter._attempts is login_limiter._attempts
 
 
-def test_password_change_limiter_ignores_a_configured_shared_store(monkeypatch):
+def test_password_change_limiter_uses_a_configured_shared_store(monkeypatch):
     store = StandInStore()
     monkeypatch.setattr(ratelimit._default_backend, "_store", store)
     login_limiter._attempts.clear()
     try:
         password_change_limiter.record_failure("password-change:7")
-        assert store.calls == 0
-        assert "password-change:7" in login_limiter._attempts
-        login_limiter.record_failure("198.51.100.1:bob")
         assert store.calls == 1
-        assert "198.51.100.1:bob" not in login_limiter._attempts
+        assert "password-change:7" not in login_limiter._attempts  # counted in the store, not locally
+        login_limiter.record_failure("198.51.100.1:bob")
+        assert store.calls == 2
+        assert store._window("password_change", 0, 900).count("password-change:7") == 1
+        assert store._window("login", 0, 900).count("password-change:7") == 0  # its own policy namespace
     finally:
         login_limiter._attempts.clear()
 

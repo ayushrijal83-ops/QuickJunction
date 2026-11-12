@@ -35,7 +35,8 @@ from app.services.orders import (
 from app.services.pricing import preview
 from app.utils.authorization import customer_required, get_current_user, login_required
 from app.utils.cart import clear_cart, get_cart
-from app.utils.errors import wants_html
+from app.utils.errors import render_rate_limited, wants_html
+from app.utils.ratelimit import checkout_limiter
 from app.utils.request_meta import client_ip, user_agent
 
 orders_bp = Blueprint("orders", __name__)
@@ -55,6 +56,15 @@ def checkout_page():
 def checkout_submit():
     form = CheckoutForm()
     user = get_current_user()
+
+    # Before anything that can create or change an order, deduct stock or
+    # write a payment: a refused request touches nothing but this counter.
+    # An availability guard only -- validation, stock locking and the
+    # payment ledger below are unchanged and still decide every order.
+    decision = checkout_limiter.attempt(str(user.id))
+    if not decision.allowed:
+        return render_rate_limited("You're placing orders too quickly. Please wait a moment and try again.",
+                                   decision)
 
     if not form.validate_on_submit():
         flash("Could not place your order.", "error")

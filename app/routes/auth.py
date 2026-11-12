@@ -20,7 +20,8 @@ from app.routes.forms import LoginForm, RegistrationForm
 from app.services.audit import login_identifier, record_event
 from app.services.auth import RegistrationError, RegistrationInput, authenticate_user, register_user
 from app.utils.authorization import get_current_user, login_required, login_user, logout_user
-from app.utils.ratelimit import login_limiter
+from app.utils.errors import with_retry_after
+from app.utils.ratelimit import login_limiter, registration_limiter
 from app.utils.request_meta import client_ip as _client_ip
 from app.utils.request_meta import user_agent as _user_agent
 
@@ -77,6 +78,13 @@ def register():
         return redirect(url_for("account.index"))
 
     form = RegistrationForm()
+    if request.method == "POST":
+        # Every submission counts, valid or not, keyed by IP alone: rotating
+        # usernames or emails neither resets it nor targets anyone else.
+        decision = registration_limiter.attempt(_client_ip() or "unknown")
+        if not decision.allowed:
+            flash("Too many sign-up attempts. Try again later.", "error")
+            return with_retry_after(render_template("register.html", form=form, staff=False), decision)
     if form.validate_on_submit():
         try:
             user = register_user(
@@ -122,7 +130,14 @@ def login(portal: str):
         username_key = form.username.data.strip().lower()
         rate_key = f"{ip}:{username_key}"
 
-        if login_limiter.is_limited(rate_key):
+        # Check and count in one atomic step: this attempt is recorded as a
+        # failure *before* the password is checked, so concurrent attempts
+        # each hold a slot and cannot together exceed the limit (across
+        # workers while Redis is up; per worker during an outage). A wrong
+        # password leaves the reservation as the recorded failure; a right one
+        # resets the key (as it always has); no verdict releases it.
+        reservation = login_limiter.try_reserve(rate_key)
+        if not reservation.allowed:
             record_event(
                 AuditEvent.LOGIN_RATE_LIMITED,
                 success=False,
@@ -132,11 +147,15 @@ def login(portal: str):
                 commit=True,
             )
             flash("Too many login attempts. Try again later.", "error")
-            return render_template("login.html", form=form, portal=portal), 429
+            return with_retry_after(render_template("login.html", form=form, portal=portal), reservation)
 
-        user = authenticate_user(form.username.data, form.password.data)
+        try:
+            user = authenticate_user(form.username.data, form.password.data)
+        except BaseException:
+            login_limiter.release(rate_key, reservation.token)  # no verdict: not a failure
+            raise
         if user is None:
-            login_limiter.record_failure(rate_key)
+            # The reservation made above is this failure; nothing to record.
             record_event(
                 AuditEvent.LOGIN_FAILURE,
                 success=False,

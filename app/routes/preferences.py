@@ -21,6 +21,8 @@ from app.services.preferences import PreferenceError, PreferenceInput, get_prefe
 from app.services.local_llm import ExplanationRequest, generate_explanation
 from app.services.recommendations import recommend_for_user
 from app.utils.authorization import customer_required, get_current_user
+from app.utils.errors import render_rate_limited
+from app.utils.ratelimit import ai_explanation_limiter
 
 preferences_bp = Blueprint("preferences", __name__)
 
@@ -84,6 +86,12 @@ def explain():
     the main recommendations page must stay fast.
     """
     user = get_current_user()
+    # First, so a refused request does no work at all -- above all it never
+    # reaches generate_explanation and its seconds of CPU inference.
+    decision = ai_explanation_limiter.attempt(str(user.id))
+    if not decision.allowed:
+        return render_rate_limited("Too many explanation requests. Please wait a minute and try again.", decision)
+
     preference = get_preferences(user.id)
     results = recommend_for_user(user.id, preference)
     top = results[0] if results else None
