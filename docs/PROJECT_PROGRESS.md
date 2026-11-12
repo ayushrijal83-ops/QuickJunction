@@ -4136,9 +4136,10 @@ checkpoint — no regression from the revert/re-add cycle.
 
 New (after the revert/re-add cycle): `tests/test_payment_ledger_backup_restore_drill.py`.
 
-# S1-B — Rate Limiting on the Application Routes (ready for review, not yet CI-verified)
+# S1-B — Rate Limiting on the Application Routes ✅
 
-Builds on S1-A (commit `60195ae`, the Redis-backed limiter; CI green on
+Commit `9ca483b`, 2026-11-12; verified and closed by CI run `43231240136`
+(see Verification). Builds on S1-A (commit `60195ae`, the Redis-backed limiter; CI green on
 SQLite, MySQL 8.0, `redis:7.4` and the dependency audit). S1-B reuses that
 implementation; it does not replace it.
 
@@ -4183,18 +4184,39 @@ and the retry time returned by the Lua script. Full design and trade-offs:
 
 ## Verification
 
+**CI — the verification of record.** Commit
+`9ca483bba7256434ab1e6a3201ce83be3ac96a3f`, CI run `43231240136`: **SUCCESS**,
+all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (Redis rate limiter), real `redis:7.4` | **23 passed, 0 skipped** (guard requires exactly 23); in-memory limiter tests 60 passed, route tests 41 passed |
+| Tests (MySQL 8.0), full suite | **1423 passed, 30 skipped, 0 failed** |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** — an accented variant cannot authenticate as an existing ASCII account under the job's own collation |
+| Tests (SQLite), full suite | **1399 passed, 54 skipped, 0 failed** |
+| Dependency audit (pip-audit) | **passed** |
+
+Every skip is an expected, environment-dependent skip — none is a failure,
+and none is a test a guard requires:
+
+- **MySQL job (30):** 23 Redis tests (no Redis service in this job; they run
+  in the Redis job), 5 AI-model tests (`models/` is git-ignored), 1 migration
+  test for known issue #32, 1 privilege-separation drill that also needs
+  `QJ_MYSQL_ADMIN_PASSWORD` (not provided in CI).
+- **SQLite job (54):** 23 Redis tests, 26 MySQL-only tests (including the 15
+  concurrency and 3 collation tests, which ran in the MySQL job), 5 AI-model
+  tests.
+
+**Local runs before CI** (development machine; no Redis or MySQL available):
+
 | Run | Result |
 | --- | --- |
-| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1404 passed, 49 skipped, 0 failed** after the pre-CI corrections (1392 / 46 before them; baseline before S1-B: 1351 passed, 37 skipped) |
-| `tests/test_mysql_username_collation.py` | **not run** — MySQL-only (3 tests), no local MySQL; the CI MySQL job's guard requires all 3 to pass |
+| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1404 passed, 49 skipped, 0 failed** after the pre-CI corrections (1392 / 46 before them; baseline before S1-B: 1351 passed, 37 skipped). Differs from CI's 1399 / 54 only by the 5 AI-model tests, which run locally where `models/` exists |
 | `tests/test_ratelimit.py` + `tests/test_ratelimit_routes.py`, both orders | 101 passed |
-| `tests/test_ratelimit_redis.py` against a real Redis | **not run** — no Redis server locally |
-| `tests/test_ratelimit_redis.py` against a `fakeredis` TCP server | 23 passed in 3 of 4 runs; the 4th failed one unmodified S1-A concurrency test, which fails the same way on the S1-A commit under fakeredis. Not evidence of Redis behaviour |
-| MySQL 8.0 | **not run** locally |
+| `tests/test_ratelimit_redis.py` against a `fakeredis` TCP server | 23 passed in 3 of 4 runs; the 4th failed one unmodified S1-A concurrency test, which fails the same way on the S1-A commit under fakeredis. Diagnosed: fakeredis replies exceeded the test's 1.0 s socket timeout, so those calls fell back to per-worker memory by design; Redis itself admitted exactly the limit every time. Not evidence of Redis behaviour — the CI run above is |
+| `tests/test_mysql_username_collation.py`, MySQL 8.0 | not runnable locally — verified in CI (above) |
 | `git diff --check` | clean |
-
-S1-B is complete only once the CI `test-redis` job (guard now requires
-exactly 23 passed), `test-mysql` and `test-sqlite` pass on the commit.
 
 ## Known limitations
 

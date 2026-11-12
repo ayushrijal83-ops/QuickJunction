@@ -137,11 +137,14 @@ a client. CI reports these advisories without failing.
 | Tests collected after M7.5.5.1 | **1314** (+1 MySQL-only, `tests/test_payment_ledger_backup_restore_drill.py`) |
 | SQLite at this checkpoint (commit `3fb5c7d`) | **1286 passed, 28 skipped, 0 failed** -- CI run `42489009615`, confirmed SUCCESS via `gh run view` |
 | MySQL 8.0 at this checkpoint | **1307 passed, 7 skipped, 0 failed** -- same CI run; concurrency guard **15 passed** (not skipped) |
-| S1 — shared rate limiting | **S1-A** (commit `60195ae`): Redis sliding-window limiter, per-process fallback, `REDIS_URL` required in production; CI green on SQLite, MySQL 8.0, `redis:7.4` and the dependency audit. **S1-B** (uncommitted, ready for review): the limiter on login, password change, registration, account setup, checkout, reservations and AI explanation; login and password change moved to atomic reserve-then-resolve. Details: `docs/SECURITY.md` §22, `docs/PROJECT_PROGRESS.md` "S1-B" |
+| S1 — shared rate limiting | **S1-A** (commit `60195ae`): Redis sliding-window limiter, per-process fallback, `REDIS_URL` required in production; CI green on SQLite, MySQL 8.0, `redis:7.4` and the dependency audit. **S1-B** (commit `9ca483b`, verified and closed): the limiter on login, password change, registration, account setup, checkout, reservations and AI explanation; login and password change moved to atomic reserve-then-resolve; login refuses usernames outside `USERNAME_PATTERN` (MySQL accent-variant bypass). Details: `docs/SECURITY.md` §22, `docs/PROJECT_PROGRESS.md` "S1-B" |
 | Tests after S1-B | +41 `tests/test_ratelimit_routes.py`, +9 `tests/test_ratelimit_redis.py` (now 23; CI guard updated to 23), +12 `tests/test_login_username_pattern.py`, +3 MySQL-only `tests/test_mysql_username_collation.py` (new CI guard: all 3 must pass) |
 | SQLite after S1-B (local, Windows, Python 3.10) | **1404 passed, 49 skipped, 0 failed** (including the pre-CI corrections) — skips are the 23 Redis tests (no `TEST_REDIS_URL`) and 26 MySQL-only tests, 3 of them the new username-collation tests |
-| Redis after S1-B | **not yet run against a real Redis server** — no Redis on the development machine. Run locally only against a `fakeredis` TCP server (not evidence). Needs the CI `test-redis` job |
-| MySQL after S1-B | **not run** (no local MySQL); needs the CI `test-mysql` job |
+| S1-B CI verification | CI run `43231240136` on commit `9ca483bba7256434ab1e6a3201ce83be3ac96a3f` — **SUCCESS**, all four jobs green, 0 failed anywhere |
+| Redis 7.4 after S1-B (CI `test-redis`) | **23 passed, 0 skipped** against a real `redis:7.4` service (guard requires exactly 23); the same job's in-memory limiter (60) and route (41) tests also passed |
+| MySQL 8.0 after S1-B (CI `test-mysql`) | **1423 passed, 30 skipped, 0 failed**; concurrency guard **15 passed**; username-collation guard **3 passed** (B1 proven on MySQL's own collation). Expected skips, not failures: 23 Redis tests (no Redis service in this job), 5 AI-model tests (`models/` is git-ignored), 1 known issue #32 migration test, 1 privilege-separation drill (needs `QJ_MYSQL_ADMIN_PASSWORD`, not provided in CI) |
+| SQLite after S1-B (CI `test-sqlite`) | **1399 passed, 54 skipped, 0 failed**. Expected skips, not failures: 23 Redis tests, 26 MySQL-only tests (incl. the 3 collation and 15 concurrency tests, which run in the MySQL job), 5 AI-model tests. The local count (1404 / 49) differs only by those 5 model tests, which run where `models/` exists |
+| Dependency audit after S1-B | **passed** (`pip-audit`, blocking for `requirements.txt`) |
 
 ---
 
@@ -203,7 +206,7 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 | --- | --- |
 | 3 | Anonymous cart discarded on login |
 | 4 | Checkout idempotency relies on cart clearing, no idempotency key |
-| 5 | ~~Login rate limiter is in-process only~~ — addressed in code by S1-A (shared Redis limiter, commit `60195ae`) and S1-B (seven routes on it, uncommitted at the time of writing; pending its CI `test-redis` run). Remaining: no Redis deployed anywhere; degraded mode during a Redis outage is per-worker (`docs/SECURITY.md` §22.6). Set `TRUSTED_PROXY_COUNT` behind a proxy |
+| 5 | ~~Login rate limiter is in-process only~~ — addressed in code by S1-A (shared Redis limiter, commit `60195ae`) and S1-B (seven routes on it, commit `9ca483b`, CI run `43231240136` green including real `redis:7.4` and MySQL 8.0). Remaining: no Redis deployed anywhere; degraded mode during a Redis outage is per-worker (`docs/SECURITY.md` §22.6). Set `TRUSTED_PROXY_COUNT` behind a proxy |
 | 8 | No audit-log retention job |
 | 12 / 39 | Unpaginated staff queue, customer history, admin payments/audit (200-row cap) |
 | 13 | `migrations/env.py` uses deprecated `get_engine()` (breaks on Flask-SQLAlchemy 3.2) |
@@ -242,9 +245,11 @@ known-issues table above. This paragraph described all of M7 as "not
 started" until the 2026-11-10 documentation reconciliation.
 
 **(4) replace the in-process rate limiter (S1) with a shared-store
-implementation** — in progress. S1-A (commit `60195ae`, CI green including
-`redis:7.4`) built the Redis-backed limiter; S1-B integrates it into login,
-registration, account setup, password change, checkout, reservations and AI
-explanation (`docs/SECURITY.md` §22.9). S1-B is ready for review but **not
-verified against real Redis until its CI `test-redis` job passes**; see
-"S1 — shared rate limiting" in the unreleased-changes table.
+implementation** — done in code and CI-verified. S1-A (commit `60195ae`,
+CI green including `redis:7.4`) built the Redis-backed limiter; S1-B (commit
+`9ca483b`, CI run `43231240136` green on SQLite, MySQL 8.0, `redis:7.4` and
+the dependency audit) integrates it into login, registration, account setup,
+password change, checkout, reservations and AI explanation
+(`docs/SECURITY.md` §22.9). What remains is operational: no Redis server is
+deployed anywhere yet. See "S1 — shared rate limiting" in the
+unreleased-changes table.
