@@ -4652,3 +4652,129 @@ O3.1 commit. Documentation closure: `docs/STATUS.md`,
 explicit approval.
 
 ---
+
+# O3.2 — Permission Foundation
+
+Implemented 2026-11-13 on top of `cb0107a` (O3.1 closed); commit `f477f1a`,
+pushed to `origin/main` and verified by CI run `43450199986` (see
+Verification). Adds the permission layer O3 will authorize through, **without
+using it anywhere**: every route and service still authorizes through
+`require_role` / `login_required` / `customer_required` and its own checks,
+so the O3.1 baseline passes unchanged. No membership enforcement, schema
+change, migration or production behaviour change.
+
+## What this adds
+
+One module, `app/utils/permissions.py`:
+
+| Part | What it is |
+| --- | --- |
+| Catalog | `Permission`: **26** unique, stable identifiers (`enum.unique`, so a duplicated value fails at import). Defining a permission grants it to nobody. `PERMISSION_SCOPES` tags each one organization- or branch-scoped; scope is not evaluated yet, because an installation has one branch (O1) |
+| Context | `AuthContext`: frozen, slotted, hashable. Fields: `user_id`, `global_role`, `is_active`, `staff_approved`, plus `organization_id`, `branch_id`, `organization_role` and `branch_role`, which are `None` unless a caller supplies them. Loosely typed values are refused (`TypeError`). `auth_context_for_user(user)` builds it from the `User` row; `current_auth_context()` builds it through `get_current_user()`, so the session, deactivation, pending-staff and session-version rules apply exactly as today. Never stored in the session; nothing is taken from request data |
+| Evaluation | `has_permission(context, permission)` / `permissions_for(context)`. True only for a real, eligible context holding a `Permission` member. Denied: no context (or a non-context such as a `User` row), an unknown identifier, a raw string even when spelled like a real permission, an inactive account, a pending STAFF account |
+| Compatibility grants | `COMPATIBILITY_GRANTS`, per global role, derived from today's route gates and service checks -- not the final O3 policy (see below) |
+| Membership roles | `OrganizationRole` (owner, admin) and `BranchRole` (manager, staff), the approved O3 roles. No storage; `ORGANIZATION_ROLE_GRANTS` and `BRANCH_ROLE_GRANTS` are **empty**, so a role in a context, even one set by hand, grants nothing |
+| Service helper | `require_permission(context, permission)`: returns, or raises `PermissionDenied` (carrying the permission). Deliberately not a `ValidationError`, which routes catch and turn into a flash and redirect |
+| Route helper | `@permission_required(permission)`: the same responses as `require_role` (login redirect with `next` or JSON 401; HTML or JSON 403). A non-`Permission` argument is a `TypeError` when the route is defined |
+
+**Compatibility grants** (each commented in the code with the route or
+service it comes from):
+
+- **STAFF (10):** `orders.view`, `orders.manage`, `payments.record`,
+  `discounts.apply`, `tables.operate`, `reservations.manage`, `menu.view`,
+  `menu.availability`, `inventory.view`, `inventory.record`.
+- **ADMIN:** the STAFF set plus 14: `refunds.create`, `payments.view`,
+  `settings.pricing.manage`, `branch.profile.manage`, `tables.manage`,
+  `menu.manage`, `inventory.adjust`, `inventory.manage`, `reports.view`,
+  `audit.view`, `accounts.manage`, `organization.members.manage`,
+  `organization.admins.manage` (an admin may reset or deactivate another
+  admin today) and `branch.members.manage` (the O2 assignment services).
+- **CUSTOMER:** none; customers stay on ownership checks.
+- **Granted to no role:** `organization.view` (no such capability exists
+  today) and `organization.owner.manage` (no owner exists).
+
+**`settings.pricing.manage`.** `/admin/settings` edits only the tax rate and
+the staff discount cap (the one-row `pricing_settings` table,
+`update_settings`), so the permission is named for that capability, not for
+general settings (none exists) and not as `pricing.manage`, which could be
+read as covering menu item prices (`menu.manage`). It is **branch-scoped**:
+the row lives in each branch's own database and applies only to that
+branch's orders, like the restaurant profile (`branch.profile.manage`).
+Changed from the first draft (`pricing.manage`, organization scope) in the
+O3.2 review.
+
+**Eligibility** (`AuthContext.is_eligible`) reproduces today's rule exactly:
+active, and not a STAFF account awaiting approval. `staff_approved` is not
+consulted for ADMIN, so an ADMIN with `staff_approved = false` keeps the
+ADMIN grants, as it keeps ADMIN access today.
+
+## Verification
+
+**CI — the verification of record.** Commit
+`f477f1abf2b9673d90503273e8750e79f4e2a729`, CI run `43450199986`:
+**SUCCESS**, all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **2899 passed, 30 skipped, 0 failed** (O3.1: 2351 / 30). The +548 is exactly the O3.2 test count and the skip count is unchanged, so **all 548 O3.2 tests executed on MySQL** |
+| O2 organization-membership guard | **45 passed** |
+| O1 installation-identity guard | **6 passed** |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **2871 passed, 58 skipped, 0 failed** (O3.1: 2323 / 58) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** |
+
+The expected skips are unchanged from O3.1 (MySQL job 30, SQLite job 58).
+
+**Local runs before CI:**
+
+| Run | Result |
+| --- | --- |
+| `tests/test_permissions.py` (SQLite) | **548 passed**: pinned identifiers and uniqueness; context immutability, type checks and construction from every O3.1 account class; exact ADMIN, STAFF and CUSTOMER grants; pending admin keeps the ADMIN grants and pending staff hold nothing; unknown and raw identifiers, missing or fake contexts and inactive accounts denied; every combination of global, organization and branch role holds no more than its global role; both helpers; and compatibility -- every O3.1 workforce route (54) mapped to a permission, `has_permission` agreeing with the O3.1 pinned outcome for every route and all 8 classes, the services that check roles themselves agreeing when called for real, and `@permission_required` answering exactly like `require_role` for all 8 classes, HTML and JSON |
+| O3.1 baseline (both files, unchanged) | **856 passed** |
+| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **2876 passed, 53 skipped, 0 failed** (before O3.2: 2328 / 53) |
+| Mutation checks (in memory, scratch plugin outside the repository) | Seven simulated faults, each caught: STAFF granted `tables.manage` (5 failures), ADMIN losing refunds (3), eligibility ignored (116), pending admin denied (59), owner granting everything (10), raw strings accepted (1), the route helper answering 403 to anonymous requests (16) |
+| MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` locally; MySQL evidence is the CI run above |
+| `git diff --check` | clean |
+
+## Known limitations
+
+- **Nothing uses the permission layer yet.** No route or service has been
+  moved onto it; that is later O3 work. Until then the compatibility grants
+  only state today's behaviour, checked by tests against the O3.1 baseline.
+- **Pending ADMIN semantics are still not resolved** (see O3.1). O3.2
+  preserves today's behaviour: `staff_approved` decides eligibility for
+  STAFF only. What "pending" means for ADMIN must be decided before O3
+  enforces membership.
+- The organization and branch roles grant nothing and have no storage; the
+  role policy is not implemented.
+- `AuthContext` does not resolve the organization and branch ids itself.
+  The lookup it would use, `get_installation()`, rolls the database session
+  back on errors, which could discard a caller's pending work; no O3.2
+  decision needs the ids, so callers pass them explicitly.
+- The route-to-permission mapping exists only in `tests/test_permissions.py`,
+  to prove the compatibility grants; which permission each route checks
+  becomes real only when routes move onto the layer.
+- `@permission_required` reuses the private `_unauthorized` and
+  `_forbidden` helpers from `app/utils/authorization.py`, so its responses
+  cannot drift from `require_role`'s.
+- The new tests clear `g.current_user` before each request because of known
+  issue #29 (one app context per test).
+- The MySQL CI job took about 28 minutes against its 45-minute timeout.
+- MySQL evidence comes from CI only; nothing was run against a local MySQL
+  server or a real installation.
+
+## Files changed
+
+New: `app/utils/permissions.py`, `tests/test_permissions.py`. No existing
+file changed in the O3.2 commit. Documentation closure: `docs/STATUS.md`,
+`docs/PROJECT_PROGRESS.md`.
+
+## Next
+
+**O3.3 — the next step of the approved O3 implementation sequence.** Not
+started; it waits for review and explicit approval. O3 as a whole is not
+complete.
+
+---
