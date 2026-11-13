@@ -4254,10 +4254,10 @@ CI guard requires all 3 to pass); the concurrency wording in
 
 # O1 — Local Organization & Branch Identity
 
-Implemented 2026-11-13 on top of `2b7e892`; **not yet committed, not yet
-CI-verified.** Each branch keeps its own independent database and
-installation; O1 gives that installation a persistent local identity,
-generated offline, and nothing more.
+Implemented 2026-11-13 on top of `2b7e892`; commit `44e63c2`, verified by
+CI run `43347276196` (see Verification). Each branch keeps its own
+independent database and installation; O1 gives that installation a
+persistent local identity, generated offline, and nothing more.
 
 ## What this adds
 
@@ -4307,20 +4307,43 @@ or synchronization.
 
 ## Verification
 
+**CI — the verification of record.** Commit
+`44e63c2205dbadea2a08983db40fd4ba76076014`, CI run `43347276196`:
+**SUCCESS**, all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **1450 passed, 30 skipped, 0 failed** (S1-B: 1423 / 30). The +27 is exactly the O1 test count and the skip count is unchanged, so **all 27 O1 tests executed on MySQL** |
+| O1 installation-identity guard | **6 passed, 0 skipped** (`tests/test_installation_migration.py` 5 + `tests/test_installation_backup_restore.py` 1, including the MySQL-only constraint test and the real `mysqldump`/restore UUID round trip) |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **1424 passed, 56 skipped, 0 failed** (S1-B: 1399 / 54; +2 skips are the two MySQL-only O1 tests) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** |
+
+Expected skips, none a test a guard requires: MySQL job (30) -- 23 Redis
+tests, 5 AI-model tests, 1 known issue #32 migration test, 1
+privilege-separation drill (needs `QJ_MYSQL_ADMIN_PASSWORD`); SQLite job
+(56) -- 23 Redis tests, 28 MySQL-only tests (including the 2 O1 ones), 5
+AI-model tests.
+
+**Local runs before CI:**
+
 | Run | Result |
 | --- | --- |
 | `tests/test_installation.py` (21, SQLite) | relationships; UUID generation at insert only; `public_id` assignment blocked (ORM attribute level); `public_id` and `hq_id` uniqueness (repeated NULL `hq_id` allowed); singleton (second id = 1 by PK, id = 2 by CHECK); RESTRICT on deleting a referenced organization or branch (raw SQL and ORM); repeated reads identical and write nothing; missing / malformed / non-canonical / duplicated identity and missing tables fail clearly and are not repaired; CLI output, HQ-linked output, CLI failure -- **21 passed** |
 | `tests/test_installation_migration.py` (SQLite) | fresh chain → one identity named "Quick Junction"; missing profile row → fallback name; restart (new app), repeated reads, CLI and a no-op re-`upgrade` leave the identity unchanged; populated installation (users, menu, 3 orders, ledger payments and a refund, a legacy payment, table, reservation, ingredient, stock movement, preference, profile renamed "Cafe Himalaya") → one identity with that name, every pre-existing table's rows, row count and highest id identical, payment-ledger audit report identical; downgrade drops only the three tables and leaves everything else identical; re-upgrade works -- **4 passed, 1 skipped** (the MySQL-only test) |
-| `tests/test_installation_backup_restore.py` | MySQL-only: real `mysqldump` contains the three tables and all three UUIDs; real restore returns the identical rows; `get_installation()` reads the same identity after the restore -- **skipped locally** |
+| `tests/test_installation_backup_restore.py` | MySQL-only: real `mysqldump` contains the three tables and all three UUIDs; real restore returns the identical rows; `get_installation()` reads the same identity after the restore -- **skipped locally; passed on MySQL in CI run `43347276196`** |
 | Existing tests updated | `tests/test_foundation.py` (table set +3), `tests/test_m5_migration.py` (head is now `4c7e2a9f1b38`) |
 | Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1429 passed, 51 skipped, 0 failed** (before O1: 1404 / 49) |
-| MySQL 8.0 | **not run** -- no `TEST_DATABASE_URL` on the development machine. CI's `test-mysql` job gains a guard: `tests/test_installation_migration.py` + `tests/test_installation_backup_restore.py` must report exactly `6 passed` (none skipped); confirmed locally that the guard fails on a SQLite-only run (`4 passed, 2 skipped`) |
+| MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` on the development machine; MySQL evidence is the CI run above. CI's `test-mysql` job gains a guard: `tests/test_installation_migration.py` + `tests/test_installation_backup_restore.py` must report exactly `6 passed` (none skipped); confirmed locally that the guard fails on a SQLite-only run (`4 passed, 2 skipped`) |
 | `git diff --check` | clean |
 
 ## Known limitations
 
-- MySQL evidence (migration, constraints, backup/restore) exists only once
-  CI runs; nothing here has run against MySQL yet.
+- MySQL evidence (migration, constraints, backup/restore) comes from CI
+  (run `43347276196`) only; nothing has been run against a local MySQL
+  server or a real installation.
 - Downgrading this revision discards the identity; there is no tool to
   re-create a specific identity other than restoring a backup.
 - `public_id` immutability is partial: only direct ORM attribute assignment
