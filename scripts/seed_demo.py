@@ -31,6 +31,9 @@ from app.models.menu_item import MenuItem  # noqa: E402
 from app.models.restaurant_table import RestaurantTable  # noqa: E402
 from app.models.user import Role, User  # noqa: E402
 from app.services.menu import sync_menu_item_ingredients  # noqa: E402
+from app.services.installation import InstallationIdentityError  # noqa: E402
+from app.services.organization import (  # noqa: E402
+    MEMBER_ROLES, enroll_new_account, local_organization_and_branch, mirror)
 from app.utils.security import hash_password  # noqa: E402
 
 DEMO_PASSWORD = "demo-password-1"
@@ -139,19 +142,35 @@ def main() -> int:
             sync_menu_item_ingredients(item, [i.strip() for i in ingredients.split(",")])
 
         created_users = 0
-        for username, email, role in ACCOUNTS:
-            if db.session.query(User).filter_by(username=username).first() is None:
-                db.session.add(User(
-                    username=username, email=email,
-                    password_hash=hash_password(DEMO_PASSWORD),
-                    role=role, is_active=True,
-                    # Provisioned by the operator running this script, so the
-                    # demo staff account is approved up front. Staff who sign
-                    # up through the site start pending instead.
-                    staff_approved=(role == Role.STAFF),
-                ))
-                created_users += 1
+        missing = [a for a in ACCOUNTS if db.session.query(User).filter_by(username=a[0]).first() is None]
+        organization = branch = None
+        if any(role in MEMBER_ROLES for _, _, role in missing):
+            # O2: new staff/admin accounts join this installation's
+            # organization and branch in the same commit; without a valid
+            # identity nothing is created rather than a non-member.
+            try:
+                organization, branch = local_organization_and_branch()
+            except InstallationIdentityError as exc:
+                print(f"Demo accounts NOT created: {exc}", file=sys.stderr)
+                return 1
+        membership_audit = []
+        for username, email, role in missing:
+            user = User(
+                username=username, email=email,
+                password_hash=hash_password(DEMO_PASSWORD),
+                role=role, is_active=True,
+                # Provisioned by the operator running this script, so the
+                # demo staff account is approved up front. Staff who sign
+                # up through the site start pending instead.
+                staff_approved=(role == Role.STAFF),
+            )
+            db.session.add(user)
+            if role in MEMBER_ROLES:
+                db.session.flush()
+                membership_audit += enroll_new_account(user, organization, branch)
+            created_users += 1
         db.session.commit()
+        mirror(membership_audit)
 
         for name, capacity in TABLES:
             if db.session.query(RestaurantTable).filter_by(name=name).first() is None:

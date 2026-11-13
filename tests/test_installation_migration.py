@@ -41,6 +41,8 @@ from tests.conftest import make_legacy_payment, rejected_by_check_constraint, wi
 from tests.test_payments import member
 from tests.test_restaurant_ops import customer, place
 
+# O1's own revision. Every upgrade() here stops at it, so these tests keep
+# exercising O1 in isolation now that later revisions (O2) exist.
 HEAD = "4c7e2a9f1b38"
 PREVIOUS = "e39e6dffcb5d"
 IDENTITY_TABLES = {"organizations", "branches", "installation"}
@@ -160,7 +162,7 @@ def test_fresh_database_gets_exactly_one_identity(tmp_path):
     application = _app(tmp_path)
     with application.app_context():
         try:
-            upgrade()
+            upgrade(revision=HEAD)
             assert db.session.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == HEAD
             rows = _assert_one_valid_identity("Quick Junction")
 
@@ -181,7 +183,7 @@ def test_missing_restaurant_profile_falls_back_to_the_default_name(tmp_path):
             upgrade(revision=PREVIOUS)
             db.session.execute(sa.text("DELETE FROM restaurant_profile"))
             _release()
-            upgrade()
+            upgrade(revision=HEAD)
             _assert_one_valid_identity("Quick Junction")
         finally:
             db.session.remove()
@@ -191,7 +193,7 @@ def test_missing_restaurant_profile_falls_back_to_the_default_name(tmp_path):
 def test_identity_survives_restarts_reads_and_cli_without_changing(tmp_path):
     first = _app(tmp_path)
     with first.app_context():
-        upgrade()
+        upgrade(revision=HEAD)
         before = _identity_rows()
         identity = get_installation()
         for _ in range(3):
@@ -209,7 +211,7 @@ def test_identity_survives_restarts_reads_and_cli_without_changing(tmp_path):
         try:
             assert get_installation() == identity
             _release()
-            upgrade()  # already at head: a no-op, never a second identity
+            upgrade(revision=HEAD)  # already there: a no-op, never a second identity
             assert _identity_rows() == before
         finally:
             db.session.remove()
@@ -236,7 +238,7 @@ def test_existing_installation_upgrade_downgrade_and_reupgrade(tmp_path):
             assert before["orders"]["count"] == 3 and before["payments"]["count"] == 1
 
             # --- upgrade: one identity, nothing else touched ---
-            upgrade()
+            upgrade(revision=HEAD)
             assert _tables() == existing | IDENTITY_TABLES | {"alembic_version"}
             rows = _assert_one_valid_identity("Cafe Himalaya")
             assert _snapshot(existing) == before
@@ -254,7 +256,7 @@ def test_existing_installation_upgrade_downgrade_and_reupgrade(tmp_path):
                 assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == PREVIOUS
 
             # --- re-upgrade: works, again exactly one identity ---
-            upgrade()
+            upgrade(revision=HEAD)
             again = _assert_one_valid_identity("Cafe Himalaya")
             assert _snapshot(existing) == before
             # A downgrade discards the identity; re-upgrading mints a new one.
@@ -273,7 +275,7 @@ def test_mysql_migrated_identity_constraints_are_enforced(tmp_path):
     application = _app(tmp_path)
     with application.app_context():
         try:
-            upgrade()
+            upgrade(revision=HEAD)
             assert db.engine.dialect.name == "mysql"
             _assert_one_valid_identity("Quick Junction")
             with db.engine.connect() as conn:

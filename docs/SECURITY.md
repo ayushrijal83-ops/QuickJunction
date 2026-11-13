@@ -1842,3 +1842,52 @@ Design points:
   exactly; it is as sensitive as the rest of the dump, no more.
 - **`hq_id`** (nullable, unique) is reserved for a future HQ-issued id.
   Nothing writes it in O1.
+
+## 24. Organization membership and branch assignment (O2)
+
+- **Membership is not access.** `organization_memberships` and
+  `branch_assignments` record who belongs to the organization and which
+  branch they are assigned to. Nothing in `app/utils/authorization.py`, the
+  login route or `require_role` reads them: sign-in and every permission
+  still depend only on `users.role`, `is_active` and `staff_approved`.
+  Revoking a membership or assignment therefore does **not** end sessions
+  or remove access; a test pins this boundary until O3 changes it on
+  purpose. To remove someone's access today, deactivate the account, as
+  before.
+- **No new way in.** O2 adds no route, form or write command. The service
+  functions are called only by the account-creation paths
+  (`create_admin`, `invite_staff`, `seed_demo.py`), which already require
+  the CLI or an authenticated admin. When an acting account is passed, the
+  service requires an active administrator.
+- **Integrity in the database, not just the code.** Composite foreign keys
+  (`(membership_id, organization_id)`, `(branch_id, organization_id)`) make
+  a cross-organization assignment impossible; unique keys stop duplicate
+  memberships and assignments (a lost race surfaces as a clean error);
+  CHECKs keep `status` to `active`/`revoked` and in step with `revoked_at`;
+  RESTRICT keeps referenced users, memberships, branches and organizations
+  from being deleted.
+- **Atomic and audited.** Every change commits with its
+  `membership_*`/`branch_assignment_*` audit rows or not at all -- any
+  exception, including a failed audit write, rolls the whole change back.
+  Account creation and enrollment are one transaction. Audit metadata holds
+  ids only.
+- **Transaction ownership (limitation).** The public service functions
+  (`add_member`, `assign_branch`, `revoke_membership`,
+  `reinstate_membership`, `revoke_assignment`, `reinstate_assignment`) own
+  the whole session transaction, not just the organization rows: a success
+  commits *all* pending session work, and a refusal, an error or a no-op
+  rolls *all* of it back. A caller with unrelated uncommitted changes would
+  have them committed early or silently discarded, so callers must commit
+  their own work first or use a separate clean session. This matches the
+  existing `set_active`/`commit_with` behaviour and is not enforced yet; no
+  caller is exposed today, because nothing calls these functions. The
+  account-creation helper `enroll_new_account` is the exception: it never
+  commits or rolls back, and its caller commits the account and its
+  enrollment together.
+- **Customers are never members**, enforced by the service (a CHECK cannot
+  see `users.role`); `flask organization members` reports any that appear
+  by other means.
+- **Missing identity fails closed:** without a valid O1 installation
+  identity, account creation and the service refuse instead of creating an
+  account outside the organization.
+- **Offline.** Everything is local; no network call, no HQ id.

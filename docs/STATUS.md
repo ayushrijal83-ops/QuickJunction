@@ -154,6 +154,11 @@ a client. CI reports these advisories without failing.
 | SQLite after O1 (CI `test-sqlite`) | **1424 passed, 56 skipped, 0 failed** (S1-B: 1399 / 54 -- +25 passed, +2 skips: the two MySQL-only O1 tests) |
 | Redis and dependency audit after O1 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
 | MySQL 8.0 locally | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
+| O2 — organization membership & branch assignment | **Implemented, not yet committed or CI-verified.** Two additive tables, `organization_memberships` and `branch_assignments` (`app/models/organization.py`), each row `active` or `revoked`, plus a unique index on O1's `branches (id, organization_id)` (no table rebuild). Composite foreign keys make a cross-organization assignment impossible at the database level. Migration **`4f1d8b2c6a90`** gives every existing ADMIN and STAFF account -- including inactive, pending and invited staff -- one active membership and one active assignment to the local branch; customers get neither; no account field changes and no owner is chosen; it refuses (changing nothing) unless the database holds exactly one organization and one branch. `create_admin()`, `invite_staff()` and `scripts/seed_demo.py` now enroll new staff/admin accounts in the same transaction. Service `app/services/organization.py` (add/assign/revoke/reinstate, all audited atomically) and read-only `flask organization members`. **Membership grants no access**: sign-in and every permission check are unchanged and still read only `users.role`, `is_active`, `staff_approved`. No UI or write command. Details: `docs/PROJECT_PROGRESS.md` "O2" |
+| Migration head after O2 | **`4f1d8b2c6a90`** (revises `4c7e2a9f1b38`) |
+| Tests after O2 | +45: `tests/test_organization.py` (40, one MySQL-only), `tests/test_organization_migration.py` (5, one MySQL-only); new CI guard in `test-mysql`: exactly 45 O2 tests must pass, none skipped. Existing tests adjusted: `tests/test_foundation.py` (+2 tables), `tests/test_m5_migration.py` (head), `tests/test_installation_migration.py` (pinned to O1's revision), and the opt-in `installation_identity` fixture added to the account-creation tests in `test_create_admin.py`, `test_m4_account_security.py`, `test_demo_flow.py`, `test_ratelimit_routes.py` |
+| SQLite after O2 (local, Windows, Python 3.10) | **1472 passed, 53 skipped, 0 failed** (O1 baseline 1429 / 51: +43 passed, +2 MySQL-only skips) |
+| MySQL 8.0 after O2 | **Not yet run** -- no `TEST_DATABASE_URL` on the development machine; pending the CI `test-mysql` job and its new O2 guard |
 
 ---
 
@@ -206,7 +211,9 @@ capacity · HQ registration or activation, any cloud service, branch
 synchronization, an organization portal, multi-branch staff management, an
 Organization Owner role and license enforcement (O1 adds only a *local*
 organization/branch/installation identity; `hq_id` columns exist but nothing
-sets them).
+sets them) · organization or branch roles and any permission that depends on
+membership (O2 records organization membership and branch assignment, but
+they grant and revoke no access; there is no UI or write command for them).
 
 **No capacity claim is made.** Concurrent-user capacity and order throughput
 are UNKNOWN until Phase 5 measures them.

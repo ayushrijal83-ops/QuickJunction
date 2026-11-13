@@ -18,6 +18,10 @@
 #                    (tests/test_installation_migration.py: 5, including one
 #                    MySQL-only; tests/test_installation_backup_restore.py: 1,
 #                    MySQL-only) to pass on MySQL, none skipped.
+#                    A fourth requires all 45 O2 organization-membership tests
+#                    (tests/test_organization.py: 40, one MySQL-only concurrency
+#                    race; tests/test_organization_migration.py: 5, one
+#                    MySQL-only constraint test) to pass on MySQL, none skipped.
 #   test-redis       the rate-limiter tests on a disposable Redis service, so the
 #                    Lua sliding window in app/utils/ratelimit.py runs against a
 #                    real server (tests/test_ratelimit_redis.py skips without
@@ -131,6 +135,15 @@ jobs:
           # ran and passed: the two MySQL-only tests skip, and change this line,
           # if TEST_DATABASE_URL does not reach MySQL.
           grep -Eq "^6 passed(, [0-9]+ warnings?)? in " installation.txt || { echo "::error::expected exactly 6 passed O1 installation-identity tests on MySQL (none skipped)" >&2; exit 1; }
+      - name: Guard - O2 organization membership MySQL tests must execute, not skip
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_organization.py tests/test_organization_migration.py -o addopts="" -q -rs | tee organization.txt
+          # Exactly "45 passed in <t>s" (optionally ", N warnings") only when all
+          # 45 ran and passed: the two MySQL-only tests (the concurrent
+          # add_member race and the migrated-constraint test) skip, and change
+          # this line, if TEST_DATABASE_URL does not reach MySQL.
+          grep -Eq "^45 passed(, [0-9]+ warnings?)? in " organization.txt || { echo "::error::expected exactly 45 passed O2 organization-membership tests on MySQL (none skipped)" >&2; exit 1; }
 
   test-redis:
     name: Tests (Redis rate limiter)

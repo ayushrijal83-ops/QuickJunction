@@ -298,7 +298,7 @@ def boss(db):
     return user("boss", Role.ADMIN)
 
 
-def test_account_setup_is_limited_per_ip(client, boss):
+def test_account_setup_is_limited_per_ip(client, boss, installation_identity):  # O2: invitations need it
     _, code = invite_staff(boss, "newcook", "newcook@example.com")
     for n in range(10):
         assert redeem(client, f"guess-{n}").status_code == 200  # wrong codes: rejected, and counted
@@ -312,7 +312,7 @@ def test_account_setup_is_limited_per_ip(client, boss):
     assert list(account_setup_limiter._local._attempts) == ["127.0.0.1", OTHER_IP]  # IPs, never codes
 
 
-def test_account_setup_flows_are_unchanged_within_the_limit(app, client, boss):
+def test_account_setup_flows_are_unchanged_within_the_limit(app, client, boss, installation_identity):
     cook, invite_code = invite_staff(boss, "newcook", "newcook@example.com")
     assert "invalid or has expired" in redeem(client, "not-a-code").get_data(as_text=True)
     assert redeem(client, invite_code).status_code == 302  # valid invitation

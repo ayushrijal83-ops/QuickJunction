@@ -65,7 +65,7 @@ def fresh(model, id_):
     return _db.session.get(model, id_)
 
 
-def test_full_demo_flow(app, db):
+def test_full_demo_flow(app, db, installation_identity):  # O2: invitations need the identity
     # Setup that exists before the demo: an admin and a menu item.
     make_user(username="boss", email="boss@example.com", password=PW, role=Role.ADMIN)
     burger = make_menu_item(category=make_category(name="Mains"), name="Chicken Burger", price="350.00")

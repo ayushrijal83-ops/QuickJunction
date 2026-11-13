@@ -189,6 +189,24 @@ def _clear_ledger_self_references(request):
 
 
 @pytest.fixture
+def installation_identity(db):
+    """Opt-in (O2): the one Organization, Branch and Installation row that
+    migration 4c7e2a9f1b38 gives every real database. ``create_all()``
+    builds none, and since O2 the account-creation paths
+    (``create_admin``, ``invite_staff``) refuse to run without them.
+
+    Deliberately not autouse: O1's own tests assert behaviour with no
+    identity at all. Returns (organization, branch)."""
+    from app.models.installation import Branch, Installation, Organization
+
+    organization = Organization(name="Quick Junction")
+    branch = Branch(organization=organization, name="Quick Junction")
+    _db.session.add_all([organization, branch, Installation(id=1, branch=branch)])
+    _db.session.commit()
+    return organization, branch
+
+
+@pytest.fixture
 def client(app: Flask) -> FlaskClient:
     return app.test_client()
 

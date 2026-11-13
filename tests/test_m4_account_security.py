@@ -32,6 +32,14 @@ from app.utils.ratelimit import login_limiter
 from app.utils.security import needs_rehash, verify_password
 from tests.conftest import make_user
 
+
+@pytest.fixture(autouse=True)
+def _installation_identity(installation_identity):
+    """O2: staff invitations (and create_admin) need the installation
+    identity a migrated database always has; create_all() builds none."""
+    return installation_identity
+
+
 PASSWORD = "correct-horse-1"
 NEW_PASSWORD = "brand-new-pass-42"
 

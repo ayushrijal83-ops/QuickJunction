@@ -17,6 +17,7 @@ from app.models.menu_item_ingredient import MenuItemIngredient
 from app.models.menu_item import MenuItem, MenuItemTranslation
 from app.models.restaurant_table import RestaurantTable, TableStatus
 from app.models.order import CancellationActor, DiscountType, Order, OrderItem, OrderSource, OrderStatus
+from app.models.organization import BranchAssignment, LifecycleStatus, OrganizationMembership
 from app.models.payment import Payment, PaymentMethod
 from app.models.payment_ledger import LedgerEntryType, PaymentLedgerEntry
 from app.models.pricing_settings import PricingSettings
@@ -30,12 +31,14 @@ __all__ = [
     "CancellationActor",
     "AuditLog",
     "Branch",
+    "BranchAssignment",
     "Category",
     "CategoryTranslation",
     "CustomerPreference",
     "DiscountType",
     "Ingredient",
     "Installation",
+    "LifecycleStatus",
     "MenuItem",
     "MenuItemIngredient",
     "MenuItemTranslation",
@@ -45,6 +48,7 @@ __all__ = [
     "OrderSource",
     "OrderStatus",
     "Organization",
+    "OrganizationMembership",
     "Payment",
     "PaymentMethod",
     "PricingSettings",

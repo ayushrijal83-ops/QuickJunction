@@ -4372,3 +4372,130 @@ Changed: `app/models/__init__.py`, `app/cli.py`, `.github/workflows/ci.yml`,
 `docs/DATABASE_SETUP_GUIDE.md`.
 
 ---
+
+# O2 — Organization Membership & Branch Assignment
+
+Implemented 2026-11-13 on top of `ad2b34e` (O1 closed); **not yet
+committed, not yet CI-verified.** Records which staff and administrator
+accounts belong to this installation's organization and which branch each
+is assigned to. **It grants and revokes no access** -- that is O3.
+
+## Concepts kept apart
+
+| Concept | Where | O2 changes it? |
+| --- | --- | --- |
+| Login account | `users` | No -- no column, role, password, id or session version changes |
+| Organization membership | `organization_memberships` | New |
+| Branch assignment | `branch_assignments` | New |
+| Role and permissions | `users.role` via `require_role` | No -- still the only authority (O3) |
+
+## What this adds
+
+| Table | Columns | Integrity |
+| --- | --- | --- |
+| `organization_memberships` | `id`, `organization_id` → `organizations` (RESTRICT), `user_id` → `users` (RESTRICT), `status` (`active`/`revoked`), `created_at`, `created_by_id`, `revoked_at`, `revoked_by_id` (both → `users`, SET NULL) | UNIQUE (`organization_id`, `user_id`); UNIQUE (`id`, `organization_id`) as a composite-key target; CHECK status allow-list; CHECK `status`/`revoked_at` agree |
+| `branch_assignments` | `id`, `organization_id`, `membership_id`, `branch_id`, the same lifecycle columns | FK (`membership_id`, `organization_id`) → memberships and FK (`branch_id`, `organization_id`) → branches, both RESTRICT, so a cross-organization assignment cannot exist; UNIQUE (`membership_id`, `branch_id`); the same two CHECKs |
+| `branches` (O1) | -- | + unique index `uq_branches_id_organization` (`id`, `organization_id`): a plain `CREATE UNIQUE INDEX`, no rebuild. Declared in `app/models/organization.py`; O1's model file is unchanged |
+
+- **Migration `4f1d8b2c6a90`** (revises `4c7e2a9f1b38`): first checks that
+  the database holds exactly one organization and one branch of it and
+  otherwise stops before any DDL, changing nothing. Then creates the above,
+  widens `ck_audit_logs_event_type` by six events, and backfills: every
+  `admin` and `staff` account -- active or not, approved or pending,
+  invited or not -- gets one active membership and one active assignment to
+  the local branch (`created_by_id` NULL); `customer` accounts get neither.
+  No owner is chosen and the backfill writes no audit row. A fresh database
+  has no accounts, so no memberships, until `flask create-admin`.
+- **Downgrade** deletes the six O2 audit events, restores the previous
+  allow-list and drops the two tables and the index -- losing every
+  membership, assignment and their revocation history. Re-upgrading
+  backfills fresh rows (new ids, all active). Take and verify a backup
+  first; the O1 note about an older revision refusing a downgrade after
+  newer ones have already run applies here too.
+- **Service `app/services/organization.py`:** `add_member`,
+  `assign_branch`, `revoke_membership`, `reinstate_membership`,
+  `revoke_assignment`, `reinstate_assignment` (each commits together with
+  its audit rows, or rolls everything back on any exception -- including a
+  failed audit write; status changes lock the row first); `list_members`
+  and `check_consistency` (read-only). Revoking a membership revokes its
+  active assignments in the same transaction; reinstating it restores none.
+  Repeated revoke/reinstate is a no-op that writes nothing. Customers cannot
+  be members; a revoked membership cannot be assigned; a branch of another
+  organization is refused; the actor, when given, must be an active admin;
+  a lost duplicate race becomes an `OrganizationError`.
+- **Account creation:** `create_admin()` (the `flask create-admin` path),
+  `invite_staff()` and `scripts/seed_demo.py` read the installation
+  identity before writing any account and enroll the new staff/admin
+  account in the same transaction as the account and its audit row, through
+  `enroll_new_account()` (which never commits or rolls back itself).
+  Without a valid identity, `create_admin()` and `invite_staff()` refuse
+  (`RegistrationError` / `AccountError` carrying the identity message) and
+  create nothing; `seed_demo` exits 1 without creating any demo account,
+  membership or assignment, though it may already have seeded its
+  idempotent categories and menu items, which it writes before the
+  accounts. No path ever creates a staff/admin account outside the
+  organization. Successful CLI output is unchanged.
+- **Audit events:** `membership_created|revoked|reinstated`,
+  `branch_assignment_created|revoked|reinstated` (`user_id` = acting admin,
+  NULL for command-line paths; ids in metadata).
+- **CLI `flask organization members`:** organization and branch, each
+  member's account role and state (active / inactive / pending approval /
+  invited), membership and assignment status, then consistency problems
+  (staff/admin without a membership, a customer member, an active
+  membership with no assignment, an active assignment under a revoked
+  membership). Read-only; exit 1 when it finds a problem.
+- **No** UI, write command, role, permission, owner, HQ link or
+  synchronization. Login, `require_role` and `authorization.py` are
+  untouched.
+
+## Verification
+
+| Run | Result |
+| --- | --- |
+| `tests/test_organization.py` (40; SQLite) | DB constraints (both uniques, cross-organization composite-FK rejection in both directions, status and revoked-consistency CHECKs, RESTRICT on user/membership/branch/organization); add/assign incl. pending and inactive staff, customer refused, duplicates refused, revoked membership refused, other-organization branch refused, non-admin actor refused, missing identity; revoke cascade, reinstate without assignments, assignment revoke/reinstate, reinstate under revoked membership refused, no-op repeats, failed audit write rolls back everything; `invite_staff`/`create_admin` enroll atomically, refuse without identity, leave nothing on failure; customer registration enrolls nobody; **revoked membership leaves staff and admin sign-in and role checks unchanged**; list/consistency/CLI; seed_demo enrolls staff and admin only, is idempotent, refuses without identity -- **39 passed, 1 skipped** (MySQL-only concurrent `add_member` race) |
+| `tests/test_organization_migration.py` (5; SQLite) | fresh DB → zero memberships; populated installation (O1's seeded trading data plus admin, inactive admin, approved/pending/deactivated/invited staff, customers) → exactly the 6 staff/admin accounts, all active, one local-branch assignment each, every pre-existing table identical, ledger audit identical, no audit rows; downgrade drops only O2 objects and events, restores the allow-list, leaves everything identical; re-upgrade works; an extra branch or organization refuses the upgrade and changes nothing -- **4 passed, 1 skipped** (MySQL-only constraint test) |
+| Existing tests adjusted | `test_foundation.py` (+2 tables); `test_m5_migration.py` (head); `test_installation_migration.py` (each `upgrade()` pinned to O1's own revision so it keeps testing O1 alone -- test-only, no O1 behaviour change); opt-in `installation_identity` fixture (new in `tests/conftest.py`, not autouse) on the account-creation tests in `test_create_admin.py`, `test_m4_account_security.py`, `test_demo_flow.py`, `test_ratelimit_routes.py` |
+| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1472 passed, 53 skipped, 0 failed** (before O2: 1429 / 51) |
+| MySQL 8.0 | **not run** -- no `TEST_DATABASE_URL` locally. CI's `test-mysql` job gains a guard: both O2 files must report exactly `45 passed` (none skipped); confirmed locally that it fails on a SQLite-only run (`43 passed, 2 skipped`) |
+| `git diff --check` | clean |
+
+## Known limitations
+
+- MySQL evidence exists only once CI runs.
+- Membership grants nothing: a revoked member signs in and works exactly as
+  before until O3 makes permissions consult membership. There is no UI or
+  write command, so revocation is reachable only from code.
+- One installation holds one branch (O1), so a member can be assigned only
+  to the local branch here. The schema is many-to-many; real multi-branch
+  assignment needs HQ and synchronization (later milestones).
+- Accounts inserted directly (tests' `make_user`, manual SQL) are not
+  enrolled; `flask organization members` reports them.
+- Lifecycle history is in the audit log only; a downgrade deletes it.
+- The backfill counts every staff/admin account as an active member, even
+  deactivated ones -- deliberate, since account flags still decide access.
+- **The public service functions own the session transaction**
+  (`add_member`, `assign_branch`, `revoke_membership`,
+  `reinstate_membership`, `revoke_assignment`, `reinstate_assignment`): a
+  success commits all pending session work, and a refusal, an error or a
+  no-op rolls all of it back -- not only the organization rows. Callers
+  must commit unrelated work first or use a separate clean session;
+  otherwise it is committed early or silently discarded (confirmed in the
+  O2 review). Same behaviour as `set_active`/`commit_with`; not enforced
+  in code yet (a dirty-session guard can be added before O3 introduces
+  callers). `enroll_new_account()`, used by the account-creation paths,
+  never commits or rolls back.
+
+## Files changed
+
+New: `app/models/organization.py`, `app/services/organization.py`,
+`migrations/versions/4f1d8b2c6a90_add_organization_membership.py`,
+`tests/test_organization.py`, `tests/test_organization_migration.py`.
+Changed: `app/models/__init__.py`, `app/models/audit_log.py`, `app/cli.py`,
+`app/services/accounts.py`, `app/services/auth.py`, `scripts/seed_demo.py`,
+`.github/workflows/ci.yml`, `tests/conftest.py`, `tests/test_foundation.py`,
+`tests/test_m5_migration.py`, `tests/test_installation_migration.py`,
+`tests/test_create_admin.py`, `tests/test_m4_account_security.py`,
+`tests/test_demo_flow.py`, `tests/test_ratelimit_routes.py`,
+`docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`, `docs/SECURITY.md`.
+
+---

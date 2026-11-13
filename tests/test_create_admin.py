@@ -24,8 +24,10 @@ PASSWORD = "Bootstrap-pass-42"
 
 
 @pytest.fixture
-def run(app, monkeypatch):
-    """Run ``flask create-admin`` with prompt answers, as if from a terminal."""
+def run(app, monkeypatch, installation_identity):
+    """Run ``flask create-admin`` with prompt answers, as if from a terminal.
+    Since O2 the command also needs the installation identity a migrated
+    database always has (``installation_identity``)."""
     monkeypatch.setattr(cli_module, "_is_interactive", lambda: True)
     runner = app.test_cli_runner()
 

@@ -11,6 +11,11 @@ never from piped input -- and it is not printed or logged.
 ``flask installation show`` (O1) prints this installation's local
 organization, branch and installation identity. It only reads; it never
 creates or repairs an identity (see app/services/installation.py).
+
+``flask organization members`` (O2) lists this organization's members, their
+account role and status, their branch assignments, and any missing or
+inconsistent relationship. It only reads; exit status 1 means it found an
+inconsistency. Membership grants no access (see app/services/organization.py).
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.auth import RegistrationError, RegistrationInput, create_admin
 from app.services.installation import InstallationIdentityError, get_installation
+from app.services.organization import check_consistency, list_members
 
 
 def _is_interactive() -> bool:
@@ -94,3 +100,53 @@ def register_cli(app: Flask) -> None:
         click.echo(f"Installation ID:    {identity.installation_public_id}")
         click.echo(f"  Created:          {identity.installation_created_at:%Y-%m-%d %H:%M:%S}")
         click.echo(f"HQ linked:          {'yes' if identity.hq_linked else 'no'}")
+
+    @app.cli.group("organization")
+    def organization_group() -> None:
+        """Organization membership and branch assignments (read-only)."""
+
+    @organization_group.command("members")
+    def organization_members_command() -> None:
+        """List members, assignments and inconsistencies (read-only)."""
+        from app.extensions import db
+        from app.services.accounts import open_invitation_user_ids
+
+        try:
+            identity = get_installation()
+            members = list_members()
+            issues = check_consistency()
+            invited = open_invitation_user_ids()
+        except InstallationIdentityError as exc:
+            raise click.ClickException(str(exc))
+        finally:
+            db.session.rollback()  # nothing was written; end the read transaction
+
+        def account_state(m) -> str:
+            if m.user_id in invited:
+                return "invited"
+            if not m.account_active:
+                return "inactive"
+            if m.role.value == "staff" and not m.staff_approved:
+                return "pending approval"
+            return "active"
+
+        click.echo(f"Organization: {identity.organization_name}")
+        click.echo(f"Branch:       {identity.branch_name}")
+        click.echo(f"Members:      {len(members)}")
+        click.echo("Membership does not grant access: sign-in and permissions follow the account role and status.")
+        for m in members:
+            click.echo("")
+            click.echo(f"  {m.username}  (account: {m.role.value}, {account_state(m)})")
+            click.echo(f"    Membership:  {m.status.value}")
+            if not m.assignments:
+                click.echo("    Branches:    none")
+            for a in m.assignments:
+                click.echo(f"    Branch:      {a.branch_name} -- {a.status.value}")
+        click.echo("")
+        if not issues:
+            click.echo("Consistency:  OK")
+            return
+        click.echo(f"Consistency:  {len(issues)} issue(s)")
+        for issue in issues:
+            click.echo(f"  - [{issue.kind}] {issue.message}")
+        sys.exit(1)

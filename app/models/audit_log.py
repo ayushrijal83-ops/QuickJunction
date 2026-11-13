@@ -113,6 +113,18 @@ class AuditEvent(str, enum.Enum):
     # changed -- business contact details only, nothing secret.
     RESTAURANT_PROFILE_CHANGED = "restaurant_profile_changed"
 
+    # Organization membership and branch assignment (O2). user_id is the
+    # acting admin, or NULL for a command-line path with no acting account
+    # (flask create-admin, scripts/seed_demo.py); membership/assignment ids,
+    # the subject account ("target_user_id") and organization/branch ids live
+    # in metadata_json. These record membership only -- they grant nothing.
+    MEMBERSHIP_CREATED = "membership_created"
+    MEMBERSHIP_REVOKED = "membership_revoked"
+    MEMBERSHIP_REINSTATED = "membership_reinstated"
+    BRANCH_ASSIGNMENT_CREATED = "branch_assignment_created"
+    BRANCH_ASSIGNMENT_REVOKED = "branch_assignment_revoked"
+    BRANCH_ASSIGNMENT_REINSTATED = "branch_assignment_reinstated"
+
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"

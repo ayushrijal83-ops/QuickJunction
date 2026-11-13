@@ -145,11 +145,16 @@ def create_admin(data: RegistrationInput) -> User:
 
     The account and its ``admin_created`` audit row are written in **one
     transaction**: either both commit or neither does, so a failure can leave
-    neither a half-created admin nor an orphaned audit row.
+    neither a half-created admin nor an orphaned audit row. Since O2 the same
+    transaction adds the admin's organization membership and branch
+    assignment (and their audit rows); without a valid installation identity
+    nothing is created.
     """
     # Local imports: audit sits beside this module in the service layer.
     from app.models.audit_log import AuditEvent
     from app.services.audit import mirror_to_security_log, record_event
+    from app.services.installation import InstallationIdentityError
+    from app.services.organization import enroll_new_account, local_organization_and_branch, mirror
 
     username, email, errors = identity_errors(data.username, data.email)
     for field, messages in _password_errors(data).items():
@@ -157,11 +162,20 @@ def create_admin(data: RegistrationInput) -> User:
     if errors:
         raise RegistrationError(errors)
 
+    # O2: the admin joins this installation's organization and branch in the
+    # same transaction. Read the identity before writing anything, so a
+    # missing one refuses the command instead of creating a non-member.
+    try:
+        organization, branch = local_organization_and_branch()
+    except InstallationIdentityError as exc:
+        raise RegistrationError({"_general": [str(exc)]}) from exc
+
     user = User(username=username, email=email, password_hash=hash_password(data.password),
                 role=Role.ADMIN, staff_approved=False)
     try:
         db.session.add(user)
         db.session.flush()  # assigns user.id for the audit row
+        membership_audit = enroll_new_account(user, organization, branch)
         entry = record_event(AuditEvent.ADMIN_CREATED, success=True, user_id=user.id,
                              metadata={"source": "cli"}, commit=False)
         db.session.commit()
@@ -173,6 +187,7 @@ def create_admin(data: RegistrationInput) -> User:
         db.session.rollback()
         raise
     mirror_to_security_log(entry)
+    mirror(membership_audit)
     return user
 
 

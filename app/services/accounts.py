@@ -20,6 +20,12 @@ current session), issuing or completing a reset, accepting an invitation,
 and deactivation. Deactivation also voids the account's open codes, so
 reactivating an account never revives an old cookie or an old code.
 
+**Organization membership (O2).** An invited staff account is created
+together with an active membership of this installation's organization and
+an active assignment to its branch, in one transaction
+(``app/services/organization.py``). Membership grants nothing: approval,
+activation and sessions above are unchanged.
+
 Every change and its audit row commit together (``commit_with``, M2).
 """
 
@@ -39,6 +45,8 @@ from app.models.user import Role, User
 from app.services.audit import commit_with
 from app.services.auth import RegistrationInput, _password_errors, identity_errors
 from app.services.errors import ValidationError
+from app.services.installation import InstallationIdentityError
+from app.services.organization import enroll_new_account, local_organization_and_branch, mirror
 from app.utils.clock import db_now
 from app.utils.security import PASSWORD_MAX_LENGTH, hash_password, verify_password
 
@@ -123,16 +131,28 @@ def invite_staff(actor: User, raw_username: str | None, raw_email: str | None, *
     username, email, errors = identity_errors(raw_username, raw_email)
     if errors:
         raise AccountError(errors)
+    # O2: the new account joins this installation's organization and branch
+    # in the same transaction. Read the identity before writing anything, so a
+    # missing one refuses the invitation instead of creating a non-member.
+    try:
+        organization, branch = local_organization_and_branch()
+    except InstallationIdentityError as exc:
+        raise AccountError({"_general": [str(exc)]}) from exc
     user = User(username=username, email=email, password_hash=hash_password(secrets.token_urlsafe(_CODE_BYTES)),
                 role=Role.STAFF, staff_approved=True, is_active=False)
     try:
         db.session.add(user)
         db.session.flush()
         code = _issue_code(user, TokenPurpose.STAFF_INVITE, actor, current_app.config["STAFF_INVITE_TTL_HOURS"])
+        membership_audit = enroll_new_account(user, organization, branch, actor=actor)
         commit_with(audit, user)
     except IntegrityError:
         db.session.rollback()
         raise AccountError({"_general": ["That username or email is already registered."]})
+    except Exception:
+        db.session.rollback()
+        raise
+    mirror(membership_audit)
     return user, code
 
 
