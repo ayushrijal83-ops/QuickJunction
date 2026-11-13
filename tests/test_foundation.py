@@ -78,9 +78,13 @@ def test_database_configuration_loads(app: Flask) -> None:
         # Milestone 10 added restaurant tables and reservations; Milestone 11
         # payments; Milestone 12 pricing settings; Milestone 13 stock movements;
         # M4 one-time account codes; M5 the restaurant profile and menu
-        # translations; M7.5.1 the payment ledger.
+        # translations; M7.5.1 the payment ledger; O1 the local
+        # organization/branch/installation identity.
         assert set(db.metadata.tables) == {
             "account_tokens",
+            "organizations",
+            "branches",
+            "installation",
             "restaurant_profile",
             "category_translations",
             "menu_item_translations",

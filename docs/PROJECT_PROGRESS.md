@@ -4251,3 +4251,101 @@ CI guard requires all 3 to pass); the concurrency wording in
 `docs/SECURITY.md` §22.5/§22.6 and above made precise; a stale type hint.
 
 ---
+
+# O1 — Local Organization & Branch Identity
+
+Implemented 2026-11-13 on top of `2b7e892`; **not yet committed, not yet
+CI-verified.** Each branch keeps its own independent database and
+installation; O1 gives that installation a persistent local identity,
+generated offline, and nothing more.
+
+## What this adds
+
+| Table | Columns | Notes |
+| --- | --- | --- |
+| `organizations` | `id`, `public_id` (UUID, unique), `name`, `hq_id` (nullable, unique), `created_at` | |
+| `branches` | `id`, `organization_id` → `organizations.id` **ON DELETE RESTRICT**, `public_id` (UUID, unique), `name`, `hq_id` (nullable, unique), `created_at` | |
+| `installation` | `id` (**CHECK id = 1**, not AUTO_INCREMENT), `public_id` (UUID), `branch_id` → `branches.id` **ON DELETE RESTRICT**, `created_at` | same singleton pattern as `restaurant_profile` |
+
+- **Models:** `app/models/installation.py` (`Organization`, `Branch`,
+  `Installation`), registered in `app/models/__init__.py`. A `public_id` is
+  a random `uuid4` generated once, when its row is inserted. Changing it
+  afterwards by direct ORM attribute assignment, or through
+  `session.merge()`, raises `ValueError`; bulk ORM updates
+  (`Query.update()`, `session.execute(sa.update(...))`,
+  `bulk_update_mappings()`) and raw SQL bypass that check, and the database
+  does not enforce immutability. `hq_id` is an opaque
+  string (format not decided) left NULL for a future HQ link.
+- **Migration `4c7e2a9f1b38`** (revises `e39e6dffcb5d`): creates the three
+  tables, reads `restaurant_profile.name` (falls back to "Quick Junction"
+  if that row is missing or blank) and inserts exactly one Organization,
+  one Branch of it and the Installation row, all with that name, local
+  UUIDs and NULL `hq_id`s. It reads no other table and changes no existing
+  row. A fresh database gets the same result, since `b1c4e7f9a2d5` seeds
+  the profile earlier in the chain. `downgrade()` drops only the three
+  tables (the identity is lost; re-upgrading mints a new one -- restore a
+  backup to keep the original).
+- **Read-only service:** `app/services/installation.py::get_installation()`
+  returns a frozen `InstallationIdentity` snapshot. It never creates,
+  repairs or replaces anything, and raises `InstallationIdentityError` when
+  the identity is missing, when there is not exactly one installation row
+  (id 1), one organization and one branch, when a link is broken, when a
+  `public_id` is not a canonical lowercase UUID, or when a name is empty.
+  Nothing in the request path calls it yet.
+- **CLI:** `flask installation show` prints the organization and branch
+  names, public UUIDs and HQ ids ("not linked" when NULL), the installation
+  UUID and creation time, and `HQ linked: yes/no`. Read-only; exits 1 with
+  the service's message if the identity is missing or invalid.
+- **Backups:** unchanged. `scripts/backup_database.py` dumps the whole
+  database, so the three tables are included, and a restore brings back the
+  exact UUIDs (proven on MySQL by the new test below).
+
+Not changed: no `branch_id` on any operational table; no route,
+authorization rule, user, role, payment or inventory behaviour; no owner
+chosen; no licensing, cloud registration, HQ platform, organization portal
+or synchronization.
+
+## Verification
+
+| Run | Result |
+| --- | --- |
+| `tests/test_installation.py` (21, SQLite) | relationships; UUID generation at insert only; `public_id` assignment blocked (ORM attribute level); `public_id` and `hq_id` uniqueness (repeated NULL `hq_id` allowed); singleton (second id = 1 by PK, id = 2 by CHECK); RESTRICT on deleting a referenced organization or branch (raw SQL and ORM); repeated reads identical and write nothing; missing / malformed / non-canonical / duplicated identity and missing tables fail clearly and are not repaired; CLI output, HQ-linked output, CLI failure -- **21 passed** |
+| `tests/test_installation_migration.py` (SQLite) | fresh chain → one identity named "Quick Junction"; missing profile row → fallback name; restart (new app), repeated reads, CLI and a no-op re-`upgrade` leave the identity unchanged; populated installation (users, menu, 3 orders, ledger payments and a refund, a legacy payment, table, reservation, ingredient, stock movement, preference, profile renamed "Cafe Himalaya") → one identity with that name, every pre-existing table's rows, row count and highest id identical, payment-ledger audit report identical; downgrade drops only the three tables and leaves everything else identical; re-upgrade works -- **4 passed, 1 skipped** (the MySQL-only test) |
+| `tests/test_installation_backup_restore.py` | MySQL-only: real `mysqldump` contains the three tables and all three UUIDs; real restore returns the identical rows; `get_installation()` reads the same identity after the restore -- **skipped locally** |
+| Existing tests updated | `tests/test_foundation.py` (table set +3), `tests/test_m5_migration.py` (head is now `4c7e2a9f1b38`) |
+| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1429 passed, 51 skipped, 0 failed** (before O1: 1404 / 49) |
+| MySQL 8.0 | **not run** -- no `TEST_DATABASE_URL` on the development machine. CI's `test-mysql` job gains a guard: `tests/test_installation_migration.py` + `tests/test_installation_backup_restore.py` must report exactly `6 passed` (none skipped); confirmed locally that the guard fails on a SQLite-only run (`4 passed, 2 skipped`) |
+| `git diff --check` | clean |
+
+## Known limitations
+
+- MySQL evidence (migration, constraints, backup/restore) exists only once
+  CI runs; nothing here has run against MySQL yet.
+- Downgrading this revision discards the identity; there is no tool to
+  re-create a specific identity other than restoring a backup.
+- `public_id` immutability is partial: only direct ORM attribute assignment
+  and `session.merge()` are blocked. Bulk ORM updates (`Query.update()`,
+  `session.execute(sa.update(...))`, `bulk_update_mappings()`) and raw SQL
+  can change it, and the database does not enforce immutability (verified
+  during the O1 review). `get_installation()` validates only the format,
+  not that it is the "original" value.
+- Downgrading through this revision drops the identity even when an older
+  revision further down the same downgrade (e.g. `e39e6dffcb5d`'s ledger
+  pre-check) then refuses and the command fails (verified during the O1
+  review); see `docs/DATABASE_SETUP_GUIDE.md` §12.1.
+- `get_installation()` insists on exactly one organization and one branch
+  -- correct for O1's one-database-per-branch model; a later milestone that
+  stores more must revisit that check.
+
+## Files changed
+
+New: `app/models/installation.py`, `app/services/installation.py`,
+`migrations/versions/4c7e2a9f1b38_add_local_installation_identity.py`,
+`tests/test_installation.py`, `tests/test_installation_migration.py`,
+`tests/test_installation_backup_restore.py`.
+Changed: `app/models/__init__.py`, `app/cli.py`, `.github/workflows/ci.yml`,
+`tests/test_foundation.py`, `tests/test_m5_migration.py`, `docs/STATUS.md`,
+`docs/PROJECT_PROGRESS.md`, `docs/SECURITY.md`,
+`docs/DATABASE_SETUP_GUIDE.md`.
+
+---

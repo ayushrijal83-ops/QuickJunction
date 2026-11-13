@@ -14,6 +14,10 @@
 #                    its own now-nonexistent business rules (seventeen -> fifteen).
 #                    A second guard requires the 3 tests in
 #                    tests/test_mysql_username_collation.py (S1-B) to pass, not skip.
+#                    A third requires the 6 O1 installation-identity tests
+#                    (tests/test_installation_migration.py: 5, including one
+#                    MySQL-only; tests/test_installation_backup_restore.py: 1,
+#                    MySQL-only) to pass on MySQL, none skipped.
 #   test-redis       the rate-limiter tests on a disposable Redis service, so the
 #                    Lua sliding window in app/utils/ratelimit.py runs against a
 #                    real server (tests/test_ratelimit_redis.py skips without
@@ -119,6 +123,14 @@ jobs:
           python -m pytest tests/test_mysql_username_collation.py -o addopts="" -q -rs | tee collation.txt
           # Exactly "3 passed in <t>s" only when all 3 ran on MySQL and passed.
           grep -Eq "^3 passed in " collation.txt || { echo "::error::expected exactly 3 passed MySQL username-collation tests (none skipped)" >&2; exit 1; }
+      - name: Guard - O1 installation identity MySQL tests must execute, not skip
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_installation_migration.py tests/test_installation_backup_restore.py -o addopts="" -q -rs | tee installation.txt
+          # Exactly "6 passed in <t>s" (optionally ", N warnings") only when all 6
+          # ran and passed: the two MySQL-only tests skip, and change this line,
+          # if TEST_DATABASE_URL does not reach MySQL.
+          grep -Eq "^6 passed(, [0-9]+ warnings?)? in " installation.txt || { echo "::error::expected exactly 6 passed O1 installation-identity tests on MySQL (none skipped)" >&2; exit 1; }
 
   test-redis:
     name: Tests (Redis rate limiter)

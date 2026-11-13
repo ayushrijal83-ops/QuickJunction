@@ -7,6 +7,10 @@ admin on a new installation, or another admin when none can sign in.
 The password is only ever read from an interactive prompt with echo off --
 never from a command-line argument (visible in ``ps`` and shell history) and
 never from piped input -- and it is not printed or logged.
+
+``flask installation show`` (O1) prints this installation's local
+organization, branch and installation identity. It only reads; it never
+creates or repairs an identity (see app/services/installation.py).
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from flask import Flask
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.auth import RegistrationError, RegistrationInput, create_admin
+from app.services.installation import InstallationIdentityError, get_installation
 
 
 def _is_interactive() -> bool:
@@ -64,3 +69,28 @@ def register_cli(app: Flask) -> None:
 
         click.echo("Administrator created successfully.")
         click.echo(f"Username: {user.username}")
+
+    @app.cli.group("installation")
+    def installation_group() -> None:
+        """This installation's local organization and branch identity."""
+
+    @installation_group.command("show")
+    def installation_show_command() -> None:
+        """Show the installation identity (read-only)."""
+        try:
+            identity = get_installation()
+        except InstallationIdentityError as exc:
+            raise click.ClickException(str(exc))
+
+        def hq(value: str | None) -> str:
+            return value if value is not None else "not linked"
+
+        click.echo(f"Organization:       {identity.organization_name}")
+        click.echo(f"  Public ID:        {identity.organization_public_id}")
+        click.echo(f"  HQ ID:            {hq(identity.organization_hq_id)}")
+        click.echo(f"Branch:             {identity.branch_name}")
+        click.echo(f"  Public ID:        {identity.branch_public_id}")
+        click.echo(f"  HQ ID:            {hq(identity.branch_hq_id)}")
+        click.echo(f"Installation ID:    {identity.installation_public_id}")
+        click.echo(f"  Created:          {identity.installation_created_at:%Y-%m-%d %H:%M:%S}")
+        click.echo(f"HQ linked:          {'yes' if identity.hq_linked else 'no'}")

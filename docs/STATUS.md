@@ -145,6 +145,11 @@ a client. CI reports these advisories without failing.
 | MySQL 8.0 after S1-B (CI `test-mysql`) | **1423 passed, 30 skipped, 0 failed**; concurrency guard **15 passed**; username-collation guard **3 passed** (B1 proven on MySQL's own collation). Expected skips, not failures: 23 Redis tests (no Redis service in this job), 5 AI-model tests (`models/` is git-ignored), 1 known issue #32 migration test, 1 privilege-separation drill (needs `QJ_MYSQL_ADMIN_PASSWORD`, not provided in CI) |
 | SQLite after S1-B (CI `test-sqlite`) | **1399 passed, 54 skipped, 0 failed**. Expected skips, not failures: 23 Redis tests, 26 MySQL-only tests (incl. the 3 collation and 15 concurrency tests, which run in the MySQL job), 5 AI-model tests. The local count (1404 / 49) differs only by those 5 model tests, which run where `models/` exists |
 | Dependency audit after S1-B | **passed** (`pip-audit`, blocking for `requirements.txt`) |
+| O1 — local organization & branch identity | **Implemented, not yet committed or CI-verified.** Three additive tables -- `organizations`, `branches`, `installation` (singleton, id = 1) -- in `app/models/installation.py`; migration **`4c7e2a9f1b38`** creates them and inserts exactly one Organization, one Branch and one Installation, named after `restaurant_profile.name`, with locally generated UUIDs and NULL `hq_id`s. Read-only `get_installation()` (`app/services/installation.py`) and `flask installation show`. No operational table, route, role or authorization changed. Details: `docs/PROJECT_PROGRESS.md` "O1" |
+| Migration head after O1 | **`4c7e2a9f1b38`** (revises `e39e6dffcb5d`) |
+| Tests after O1 | +27: `tests/test_installation.py` (21, all backends), `tests/test_installation_migration.py` (5, one MySQL-only), `tests/test_installation_backup_restore.py` (1, MySQL-only); new CI guard in `test-mysql`: exactly 6 O1 tests must pass, none skipped |
+| SQLite after O1 (local, Windows, Python 3.10) | **1429 passed, 51 skipped, 0 failed** (S1-B baseline 1404 / 49: +25 passed, +2 MySQL-only skips) |
+| MySQL 8.0 after O1 | **Not yet run** -- no `TEST_DATABASE_URL` (disposable `*_test` MySQL database) is configured on the development machine; pending the CI `test-mysql` job and its new guard |
 
 ---
 
@@ -193,7 +198,11 @@ the staff order queue, customer history, audit and payment views · server-side
 menu search · order notes · delivery address · receipts · restaurant
 configuration (slots, currency, branding are code constants) · notifications ·
 online payment gateway · multi-restaurant support · load testing / measured
-capacity.
+capacity · HQ registration or activation, any cloud service, branch
+synchronization, an organization portal, multi-branch staff management, an
+Organization Owner role and license enforcement (O1 adds only a *local*
+organization/branch/installation identity; `hq_id` columns exist but nothing
+sets them).
 
 **No capacity claim is made.** Concurrent-user capacity and order throughput
 are UNKNOWN until Phase 5 measures them.

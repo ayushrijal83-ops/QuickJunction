@@ -75,7 +75,7 @@ def test_m5_upgrade_downgrade_upgrade_keeps_existing_menu(tmp_path):
                 assert conn.execute(sa.text("SELECT COUNT(*) FROM restaurant_profile")).scalar() == 1
                 # Tracks whatever the current head is, not literally M5's own
                 # revision -- update this each time a later migration lands.
-                assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == "e39e6dffcb5d"
+                assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == "4c7e2a9f1b38"
         finally:
             # This test's own fixed-id inserts (categories.id=1,
             # menu_items.id=1) are the only rows it can leave behind -- the

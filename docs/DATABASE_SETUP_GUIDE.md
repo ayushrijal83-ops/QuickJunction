@@ -470,6 +470,55 @@ The first `SHOW GRANTS` should list only `SELECT, INSERT, UPDATE, DELETE`; the s
 should additionally list `CREATE, ALTER, DROP, INDEX, REFERENCES`. If `qj_user`'s grants
 also include schema privileges, this installation predates M7.3 — see section 10.1.
 
+### 12.1 Check the installation identity (O1)
+
+Migration `4c7e2a9f1b38` gives every database -- new or upgraded -- one
+Organization, one Branch and one Installation identity, each with a UUID generated
+locally when the migration runs (no internet needed). Both names are copied from
+the restaurant name in the restaurant profile. Nothing extra has to be run: `flask db
+upgrade` (or `scripts\db_setup.py setup`) creates it. To see it:
+
+```powershell
+.\.venv\Scripts\python -m flask --app run.py installation show
+```
+
+Expected (your UUIDs differ):
+
+```text
+Organization:       Quick Junction
+  Public ID:        17daf2d6-2112-4a55-99e4-30919d6209b1
+  HQ ID:            not linked
+Branch:             Quick Junction
+  Public ID:        27062fd3-4dbc-42f5-82aa-37385581f8fa
+  HQ ID:            not linked
+Installation ID:    a7b9a239-0861-4a33-aac2-c0f717c1779b
+  Created:          2026-11-13 01:28:24
+HQ linked:          no
+```
+
+The command only reads. If it reports that no identity was found, the database is
+not fully migrated (run `flask db upgrade`) or was restored from an incomplete copy;
+it never creates or repairs one by itself. Renaming the restaurant later does not
+change the identity, and backups (section 19) preserve its UUIDs exactly.
+
+**Downgrades remove the identity.** Downgrading `4c7e2a9f1b38` drops the
+`organizations`, `branches` and `installation` tables, and with them this
+installation's identity. Upgrading again generates **new** UUIDs; only restoring a
+backup brings the original ones back.
+
+This can happen even when the downgrade command *fails*. Alembic downgrades one
+revision at a time, newest first, so when you downgrade to a revision older than
+`4c7e2a9f1b38`, its downgrade runs -- and removes the identity -- before the older
+revisions'. If one of those older revisions then refuses (for example
+`e39e6dffcb5d` refuses while the payment ledger holds adjustment or correction
+entries), the command reports an error, but the identity tables are already gone
+and the database is left at the revision just below `4c7e2a9f1b38`, without its
+local identity. A later `flask db upgrade` creates a new identity with new UUIDs.
+
+Before attempting **any** downgrade, take a backup and verify it (section 19), so
+the original identity can be restored if needed. Check `flask installation show`
+afterwards.
+
 Optional: the automated test suite (uses its own in-memory SQLite database, never your
 MySQL data):
 
@@ -1003,6 +1052,12 @@ happened.
   related); it has not yet been re-run as part of a fresh live drill.
 - **No disaster-recovery runbook yet** (which scenario gets which response,
   RPO/RTO targets) -- tracked as item P5.
+- **Installation identity (O1).** A backup carries the `organizations`,
+  `branches` and `installation` tables like any other, and a restore brings
+  back the exact same UUIDs (`tests/test_installation_backup_restore.py`).
+  Restoring one branch's backup into another branch's server would give that
+  server the first branch's identity -- restore a backup only onto the branch
+  it came from. Check with `flask installation show` after a restore.
 
 ### Evidence: the 2026-11-01 disposable-MySQL drill
 

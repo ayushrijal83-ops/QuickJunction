@@ -12,6 +12,7 @@ from app.models.audit_log import AuditEvent, AuditLog
 from app.models.category import Category, CategoryTranslation
 from app.models.customer_preference import CustomerPreference
 from app.models.ingredient import Ingredient, StockUnit
+from app.models.installation import Branch, Installation, Organization
 from app.models.menu_item_ingredient import MenuItemIngredient
 from app.models.menu_item import MenuItem, MenuItemTranslation
 from app.models.restaurant_table import RestaurantTable, TableStatus
@@ -28,11 +29,13 @@ __all__ = [
     "AuditEvent",
     "CancellationActor",
     "AuditLog",
+    "Branch",
     "Category",
     "CategoryTranslation",
     "CustomerPreference",
     "DiscountType",
     "Ingredient",
+    "Installation",
     "MenuItem",
     "MenuItemIngredient",
     "MenuItemTranslation",
@@ -41,6 +44,7 @@ __all__ = [
     "OrderItem",
     "OrderSource",
     "OrderStatus",
+    "Organization",
     "Payment",
     "PaymentMethod",
     "PricingSettings",

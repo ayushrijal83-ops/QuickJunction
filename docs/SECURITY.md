@@ -1810,3 +1810,35 @@ Design points:
   flash message); the others use `render_error` (HTML error page, or JSON
   `{"error": {"status": 429, "message": ...}}` for API clients). Handled by
   `with_retry_after` / `render_rate_limited` in `app/utils/errors.py`.
+
+## 23. Local installation identity (O1)
+
+- **What it is.** `organizations`, `branches` and the singleton
+  `installation` table (`app/models/installation.py`, migration
+  `4c7e2a9f1b38`) give this database a persistent local identity: one
+  organization, one branch and one installation, each with a random UUID
+  (`uuid4`) generated locally, once, when the row is inserted. No network
+  call is involved.
+- **Not a secret, not a credential.** The UUIDs and names are identifiers
+  only. Nothing authenticates or authorizes with them, and no request input
+  is compared against them; `flask installation show` prints them freely.
+  A future HQ link must not treat possession of a `public_id` as proof of
+  anything.
+- **No change to access control.** O1 changes no route, role, user or
+  authorization rule and designates no Organization Owner; existing admins
+  and staff keep exactly their current access. No license is enforced.
+- **Integrity.** `get_installation()` (`app/services/installation.py`) and
+  the CLI only read. They never create, repair or replace an identity:
+  missing, duplicated, mislinked or malformed records raise
+  `InstallationIdentityError` for an operator to resolve (normally by
+  restoring a backup). `public_id` protection is partial and ORM-level
+  only: direct ORM attribute assignment and `session.merge()` are blocked,
+  but bulk ORM updates (`Query.update()`, `session.execute(sa.update(...))`,
+  `bulk_update_mappings()`) and raw SQL can change it, and the database
+  does not enforce immutability. Reads validate the format only, so such a
+  change would not be detected. Deleting a referenced organization or
+  branch is refused by `ON DELETE RESTRICT`.
+- **Backups.** The identity is included in every backup and restored
+  exactly; it is as sensitive as the rest of the dump, no more.
+- **`hq_id`** (nullable, unique) is reserved for a future HQ-issued id.
+  Nothing writes it in O1.
