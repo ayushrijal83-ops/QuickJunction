@@ -163,6 +163,16 @@ a client. CI reports these advisories without failing.
 | SQLite after O2 (CI `test-sqlite`) | **1467 passed, 58 skipped, 0 failed** (O1: 1424 / 56 -- +43 passed, +2 skips: the two MySQL-only O2 tests) |
 | Redis and dependency audit after O2 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
 | MySQL 8.0 locally after O2 | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
+| O3.1 — authorization regression baseline (test-only) | **Implemented and CI-verified** (commit `7252adb`, CI run `43434000168`, all four jobs green). The first step of O3 (organization and branch permissions). It pins the **current** authorization behaviour before permission-based checks replace the global-role checks: every one of the 91 served (URL rule, method) pairs against eight account classes (anonymous, customer, staff, admin, inactive staff, inactive admin, pending staff, and an admin with `staff_approved` false), using valid data; sign-in by account class; customer ownership of orders and reservations; and the sensitive service functions called directly. Services that have no authorization check of their own are pinned as `test_gap_*` findings that assert the call *succeeds*; a later O3 milestone that adds the check must change the matching test on purpose. **No production code, model, migration, template, configuration or authorization behaviour changed**, and O3 permission enforcement has **not** started. Details: `docs/PROJECT_PROGRESS.md` "O3.1" |
+| Migration head after O3.1 | **`4f1d8b2c6a90`** -- unchanged (test-only) |
+| Tests after O3.1 | +856: `tests/test_authz_baseline_routes.py` (809), `tests/test_authz_baseline_services.py` (47), and the helper `tests/authz_baseline_world.py` (not a test module). None is backend-specific, so all 856 run on SQLite and MySQL. No new CI guard; no existing test changed |
+| SQLite after O3.1 (local, Windows, Python 3.10) | **2328 passed, 53 skipped, 0 failed** (O2 baseline 1472 / 53: +856 passed, no new skips) |
+| O3.1 CI verification | CI run `43434000168` on commit `7252adbd7dcdfcd7b291cf1a6bfeae6c14139de0` -- **SUCCESS**, all four jobs green, 0 failed anywhere |
+| MySQL 8.0 after O3.1 (CI `test-mysql`) | **2351 passed, 30 skipped, 0 failed** (O2: 1495 / 30 -- +856 passed, no new skips). O2 guard **45 passed**; O1 guard **6 passed**; concurrency guard **15 passed**; username-collation guard **3 passed**. The 30 skips are unchanged. The job took about 27 minutes (O2: about 18) against its 45-minute timeout |
+| SQLite after O3.1 (CI `test-sqlite`) | **2323 passed, 58 skipped, 0 failed** (O2: 1467 / 58 -- +856 passed, no new skips) |
+| Redis and dependency audit after O3.1 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
+| MySQL 8.0 locally after O3.1 | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
+| Open before O3 membership enforcement: pending ADMIN | **Not resolved.** Today `staff_approved = false` blocks only STAFF; an ADMIN with `staff_approved = false` signs in and has full admin access, and `flask create-admin` creates every admin that way. O3.1 pins this as existing behaviour (the `pending_admin` class). The approved O3 policy -- pending accounts get no workforce access, and the O3 migration refuses pending workforce accounts -- would, read literally, refuse or lock out every existing admin. What "pending" means for ADMIN must be decided before membership enforcement |
 
 ---
 
@@ -217,7 +227,9 @@ Organization Owner role and license enforcement (O1 adds only a *local*
 organization/branch/installation identity; `hq_id` columns exist but nothing
 sets them) · organization or branch roles and any permission that depends on
 membership (O2 records organization membership and branch assignment, but
-they grant and revoke no access; there is no UI or write command for them).
+they grant and revoke no access; there is no UI or write command for them) ·
+permission-based authorization (O3.1 only pins today's role-based checks in
+tests; every gate still reads `users.role`, `is_active` and `staff_approved`).
 
 **No capacity claim is made.** Concurrent-user capacity and order throughput
 are UNKNOWN until Phase 5 measures them.
@@ -252,6 +264,15 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 ---
 
 ## Next planned milestone
+
+**O3.2 — Permission Foundation.** Not started; it waits for review and
+explicit approval. O3 replaces the global-role checks with organization and
+branch permissions in steps. O3.1 (above) is the regression baseline those
+steps must keep green, changing a pinned test only on purpose. Before O3
+enforces membership, the pending-ADMIN question above must be settled.
+
+The M7 and S1 paragraphs below are the earlier plan, kept as written. Their
+code has shipped, and their remaining gaps are operational.
 
 **M7 — Production Reliability Foundation.** Addressed the highest-severity
 gaps found in the 2026-11-01 project health audit, in this order: (1)

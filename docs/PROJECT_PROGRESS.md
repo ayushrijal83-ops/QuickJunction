@@ -4537,3 +4537,118 @@ Changed: `app/models/__init__.py`, `app/models/audit_log.py`, `app/cli.py`,
 `docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`, `docs/SECURITY.md`.
 
 ---
+
+# O3.1 — Authorization Regression Baseline (test-only)
+
+Implemented 2026-11-13 on top of `8b815d1` (O2 closed); commit `7252adb`,
+pushed to `origin/main` and verified by CI run `43434000168` (see
+Verification). The first step of O3, which will replace global-role checks
+(`users.role` via `require_role`) with organization and branch permissions.
+O3.1 **records** how authorization behaves today, so a later O3 step that
+widens or drops a check by accident fails a test. It does not prescribe the
+future permission matrix and **changes no production behaviour**: no
+application code, model, migration, template, configuration, decorator or
+permission constant was added or changed. O3 permission enforcement has
+not started.
+
+## What this adds
+
+| File | Tests | Pins |
+| --- | --- | --- |
+| `tests/authz_baseline_world.py` | helper, not a test module | One realistic installation per test, built in the ordinary test database: the O1/O2 identity rows, one account per access class plus a second customer and separate target accounts, a menu item, an ingredient, two tables, orders placed through the real `checkout()` (one paid through `record_ledger_payment`, so it can be refunded) and reservations for two customers. Passwords are hashed once per process. `sign_in()` creates exactly the session `login_user` creates (user id + session version) |
+| `tests/test_authz_baseline_routes.py` | 809 | **Route inventory:** all 91 served (URL rule, method) pairs -- 71 application URL rules plus Flask's static rule -- each with exactly one row, compared with the live URL map, so adding, removing or re-methoding a route fails until the baseline is updated. **Matrix:** every pair against eight account classes (728 cases), each with valid data and its own fresh database; an allowed request must reach the route's own success response, and a denial must be the gate's (302 to `/login?next=...`, an HTML 403, an ownership 404, or a redirect to `/account/` for the signed-out-only pages). An inactive or pending account's session must also be cleared. **Effects:** 17 POST routes redirect the same way whether the operation succeeded or a business rule refused it; for those, the change is read back from the database, so it must have happened when the class is allowed and must not have happened when it is denied. **Complements:** JSON 401 for all 72 protected pairs and JSON 403; the dashboard is chosen by global role (revenue figures on the admin dashboard only); staff reach any order through `/staff/orders/<id>` while the customer routes stay ownership-scoped; a signed-in `POST /login` does not switch accounts; the three role values |
+| `tests/test_authz_baseline_services.py` | 47 | Sign-in through the real login form by account class and portal (10 cases); sessions ending on deactivation and on revoked staff approval; customer ownership of orders and reservations with two customers (including the service-level ownership check on cancellation); the services' own checks, each asserted by its exact refusal message (discount role and staff cap, restaurant profile, stock adjustment, menu availability, the two order-entry wrappers, staff invitation, password-reset rules, activation rules, the last active admin, O2 membership actors); and the `test_gap_*` findings below |
+
+Account classes (`CLASSES`): anonymous, customer, staff, admin, inactive
+staff, inactive admin, pending staff, and **pending admin** (an ADMIN with
+`staff_approved = false`, as `flask create-admin` creates every admin). The
+current gate treats inactive accounts and pending staff as anonymous (their
+session is cleared) and a pending admin as a full admin.
+
+**Gap findings** (`test_gap_*`): the call is asserted to *succeed* for an
+actor the route would refuse. The route is the only gate today. A later O3
+milestone that adds the missing check must change the matching test on
+purpose, never delete it silently:
+
+- `record_ledger_payment` and `refund_ledger_payment` accept any actor
+  (refunds are ADMIN-only at the route);
+- `update_settings` (tax rate, staff discount cap) accepts any actor;
+- `record_movement` checks the role only for adjustments, so any actor can
+  record a purchase;
+- `update_order_status` validates the transition, not the actor;
+- the shared core `checkout()` checks no role (the two wrappers do);
+- `create_table`, `update_table`, `update_reservation_status`,
+  `save_ingredient` and `set_recipe` take no actor at all;
+- any admin may issue a reset code for another admin, or deactivate
+  another admin while one other active admin remains (O3 Task 1, R1 and
+  R2);
+- the account services check the actor's role but not that the actor is
+  active;
+- staff approval and revocation live in the route
+  (`admin_staff._set_approval`), with no service function and no actor.
+
+## Verification
+
+**CI — the verification of record.** Commit
+`7252adbd7dcdfcd7b291cf1a6bfeae6c14139de0`, CI run `43434000168`:
+**SUCCESS**, all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **2351 passed, 30 skipped, 0 failed** (O2: 1495 / 30). The +856 is exactly the O3.1 test count and the skip count is unchanged, so **all 856 O3.1 tests executed on MySQL** |
+| O2 organization-membership guard | **45 passed** |
+| O1 installation-identity guard | **6 passed** |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **2323 passed, 58 skipped, 0 failed** (O2: 1467 / 58) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** |
+
+The expected skips are unchanged from O2 (MySQL job 30, SQLite job 58).
+
+**Local runs before CI:**
+
+| Run | Result |
+| --- | --- |
+| The two O3.1 test files (SQLite) | **856 passed** (809 + 47), re-run immediately before the commit |
+| Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **2328 passed, 53 skipped, 0 failed** (before O3.1: 1472 / 53) |
+| Mutation checks (in memory, scratch plugins outside the repository) | Removing the `/admin/audit` gate, widening refunds to STAFF, and dropping customer order ownership failed **12** cases, exactly the expected ones. A simulated service-level refusal of the order-status and refund services for allowed roles failed **5** cases, exactly the allowed classes; before the review's effect checks it would have passed unnoticed |
+| MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` locally; MySQL evidence is the CI run above |
+| `git diff --check` | clean |
+
+## Known limitations
+
+- **Pending ADMIN semantics are not resolved.** `staff_approved = false`
+  blocks only STAFF. An ADMIN in that state, which includes every admin
+  `flask create-admin` creates, has full admin access, and O3.1 pins that as
+  existing behaviour. The approved O3 policy says pending accounts get no
+  workforce access and the O3 migration refuses pending workforce accounts.
+  Read literally for ADMIN, that would refuse or lock out every existing
+  admin. The meaning of "pending" for ADMIN must be decided before O3
+  enforces membership.
+- The gap tests record missing service-level checks; O3.1 fixes none of
+  them.
+- The mutation plugins live outside the repository, so that evidence can't
+  be reproduced from the repository.
+- The route matrix shares one app context per test (known issue #29). Only
+  the cart's preparatory request runs before the measured one, and it does
+  not cache the current user; if that changed, signed-in classes would fail
+  loudly rather than pass wrongly.
+- The 856 tests lengthen CI: the MySQL job took about 27 minutes (O2: about
+  18) against its 45-minute timeout.
+- MySQL evidence comes from CI only; nothing was run against a local MySQL
+  server or a real installation.
+
+## Files changed
+
+New: `tests/authz_baseline_world.py`, `tests/test_authz_baseline_routes.py`,
+`tests/test_authz_baseline_services.py`. No existing file changed in the
+O3.1 commit. Documentation closure: `docs/STATUS.md`,
+`docs/PROJECT_PROGRESS.md`.
+
+## Next
+
+**O3.2 — Permission Foundation.** Not started; it waits for review and
+explicit approval.
+
+---
