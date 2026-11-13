@@ -4375,8 +4375,9 @@ Changed: `app/models/__init__.py`, `app/cli.py`, `.github/workflows/ci.yml`,
 
 # O2 — Organization Membership & Branch Assignment
 
-Implemented 2026-11-13 on top of `ad2b34e` (O1 closed); **not yet
-committed, not yet CI-verified.** Records which staff and administrator
+Implemented 2026-11-13 on top of `ad2b34e` (O1 closed); commit `080fd5b`,
+pushed to `origin/main` and verified by CI run `43356441796` (see
+Verification). Records which staff and administrator
 accounts belong to this installation's organization and which branch each
 is assigned to. **It grants and revokes no access** -- that is O3.
 
@@ -4450,18 +4451,42 @@ is assigned to. **It grants and revokes no access** -- that is O3.
 
 ## Verification
 
+**CI — the verification of record.** Commit
+`080fd5b7b6b3cef7a4744cd9c57a4f87719cbd2b`, CI run `43356441796`:
+**SUCCESS**, all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **1495 passed, 30 skipped, 0 failed** (O1: 1450 / 30). The +45 is exactly the O2 test count and the skip count is unchanged, so **all 45 O2 tests executed on MySQL**: the migration (fresh, populated backfill with existing data identical, refusal on an unexpected identity, downgrade and re-upgrade), the database constraints and the service |
+| O2 organization-membership guard | **45 passed, 0 skipped** -- including both MySQL-only tests: the concurrent `add_member` race (exactly one membership; the loser gets `OrganizationError`) and MySQL's own enforcement of the composite foreign keys, unique keys, CHECKs and RESTRICT |
+| O1 installation-identity guard | **6 passed** (unaffected by pinning O1's migration tests to O1's revision) |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **1467 passed, 58 skipped, 0 failed** (O1: 1424 / 56; +2 skips are the two MySQL-only O2 tests) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** |
+
+Expected skips, none a test a guard requires: MySQL job (30) -- 23 Redis
+tests, 5 AI-model tests, 1 known issue #32 migration test, 1
+privilege-separation drill (needs `QJ_MYSQL_ADMIN_PASSWORD`); SQLite job
+(58) -- 23 Redis tests, 30 MySQL-only tests (including the 2 O2 ones), 5
+AI-model tests.
+
+**Local runs before CI:**
+
 | Run | Result |
 | --- | --- |
 | `tests/test_organization.py` (40; SQLite) | DB constraints (both uniques, cross-organization composite-FK rejection in both directions, status and revoked-consistency CHECKs, RESTRICT on user/membership/branch/organization); add/assign incl. pending and inactive staff, customer refused, duplicates refused, revoked membership refused, other-organization branch refused, non-admin actor refused, missing identity; revoke cascade, reinstate without assignments, assignment revoke/reinstate, reinstate under revoked membership refused, no-op repeats, failed audit write rolls back everything; `invite_staff`/`create_admin` enroll atomically, refuse without identity, leave nothing on failure; customer registration enrolls nobody; **revoked membership leaves staff and admin sign-in and role checks unchanged**; list/consistency/CLI; seed_demo enrolls staff and admin only, is idempotent, refuses without identity -- **39 passed, 1 skipped** (MySQL-only concurrent `add_member` race) |
 | `tests/test_organization_migration.py` (5; SQLite) | fresh DB → zero memberships; populated installation (O1's seeded trading data plus admin, inactive admin, approved/pending/deactivated/invited staff, customers) → exactly the 6 staff/admin accounts, all active, one local-branch assignment each, every pre-existing table identical, ledger audit identical, no audit rows; downgrade drops only O2 objects and events, restores the allow-list, leaves everything identical; re-upgrade works; an extra branch or organization refuses the upgrade and changes nothing -- **4 passed, 1 skipped** (MySQL-only constraint test) |
 | Existing tests adjusted | `test_foundation.py` (+2 tables); `test_m5_migration.py` (head); `test_installation_migration.py` (each `upgrade()` pinned to O1's own revision so it keeps testing O1 alone -- test-only, no O1 behaviour change); opt-in `installation_identity` fixture (new in `tests/conftest.py`, not autouse) on the account-creation tests in `test_create_admin.py`, `test_m4_account_security.py`, `test_demo_flow.py`, `test_ratelimit_routes.py` |
 | Full suite, SQLite (local, Windows, Python 3.10, `.venv_new`) | **1472 passed, 53 skipped, 0 failed** (before O2: 1429 / 51) |
-| MySQL 8.0 | **not run** -- no `TEST_DATABASE_URL` locally. CI's `test-mysql` job gains a guard: both O2 files must report exactly `45 passed` (none skipped); confirmed locally that it fails on a SQLite-only run (`43 passed, 2 skipped`) |
+| MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` locally; MySQL evidence is the CI run above. CI's `test-mysql` job gains a guard: both O2 files must report exactly `45 passed` (none skipped); confirmed locally that it fails on a SQLite-only run (`43 passed, 2 skipped`) |
 | `git diff --check` | clean |
 
 ## Known limitations
 
-- MySQL evidence exists only once CI runs.
+- MySQL evidence comes from CI (run `43356441796`) only; nothing has been
+  run against a local MySQL server or a real installation.
 - Membership grants nothing: a revoked member signs in and works exactly as
   before until O3 makes permissions consult membership. There is no UI or
   write command, so revocation is reachable only from code.
@@ -4484,6 +4509,19 @@ is assigned to. **It grants and revokes no access** -- that is O3.
   in code yet (a dirty-session guard can be added before O3 introduces
   callers). `enroll_new_account()`, used by the account-creation paths,
   never commits or rolls back.
+- Only the duplicate-membership race is exercised on real MySQL. The
+  duplicate-assignment race and concurrent revoke/reinstate rely on the
+  unique keys and on `SELECT ... FOR UPDATE` (taken membership first, then
+  assignment, everywhere), which SQLite ignores, so that locking has not
+  been run under real concurrency (O2 review F3).
+- `revoke_membership()` on a membership that is already revoked is a no-op
+  even if an assignment under it is still active -- a state only raw SQL
+  can produce. `flask organization members` reports it and
+  `revoke_assignment()` fixes it (O2 review F4).
+- `flask create-admin` handles `RegistrationError` and database errors
+  only; an `OrganizationError` from enrollment would print a traceback. It
+  cannot occur for a new admin account (the role is allowed and the
+  account cannot already be a member) (O2 review F5).
 
 ## Files changed
 
