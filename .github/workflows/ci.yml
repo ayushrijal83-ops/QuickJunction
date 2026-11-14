@@ -22,6 +22,11 @@
 #                    (tests/test_organization.py: 40, one MySQL-only concurrency
 #                    race; tests/test_organization_migration.py: 5, one
 #                    MySQL-only constraint test) to pass on MySQL, none skipped.
+#                    A fifth requires all 75 O3.3 membership-role tests
+#                    (tests/test_membership_roles.py: 36;
+#                    tests/test_membership_roles_migration.py: 39, three
+#                    MySQL-only) to pass on MySQL, none skipped -- including the
+#                    partial-DDL recovery and atomic-downgrade evidence.
 #   test-redis       the rate-limiter tests on a disposable Redis service, so the
 #                    Lua sliding window in app/utils/ratelimit.py runs against a
 #                    real server (tests/test_ratelimit_redis.py skips without
@@ -144,6 +149,18 @@ jobs:
           # add_member race and the migrated-constraint test) skip, and change
           # this line, if TEST_DATABASE_URL does not reach MySQL.
           grep -Eq "^45 passed(, [0-9]+ warnings?)? in " organization.txt || { echo "::error::expected exactly 45 passed O2 organization-membership tests on MySQL (none skipped)" >&2; exit 1; }
+      - name: Guard - O3.3 membership-role MySQL tests must execute, not skip
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_membership_roles.py tests/test_membership_roles_migration.py -o addopts="" -q -rs | tee membership_roles.txt
+          # Exactly "75 passed in <t>s" (optionally ", N warnings") only when all
+          # 75 ran and passed: the three MySQL-only tests (CHECK enforcement and
+          # atomic DROP CHECK + DROP COLUMN, a schema-wide leftover CHECK name,
+          # a column without its CHECK on downgrade) skip, and change this line,
+          # if TEST_DATABASE_URL does not reach MySQL. The rest -- orphan rows
+          # written with FOREIGN_KEY_CHECKS=0, the partial-DDL states X and Y
+          # with their recovery and retry -- also run on MySQL here.
+          grep -Eq "^75 passed(, [0-9]+ warnings?)? in " membership_roles.txt || { echo "::error::expected exactly 75 passed O3.3 membership-role tests on MySQL (none skipped)" >&2; exit 1; }
 
   test-redis:
     name: Tests (Redis rate limiter)

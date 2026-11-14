@@ -172,7 +172,7 @@ a client. CI reports these advisories without failing.
 | SQLite after O3.1 (CI `test-sqlite`) | **2323 passed, 58 skipped, 0 failed** (O2: 1467 / 58 -- +856 passed, no new skips) |
 | Redis and dependency audit after O3.1 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
 | MySQL 8.0 locally after O3.1 | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
-| Open before O3 membership enforcement: pending ADMIN | **Not resolved.** Today `staff_approved = false` blocks only STAFF; an ADMIN with `staff_approved = false` signs in and has full admin access, and `flask create-admin` creates every admin that way. O3.1 pins this as existing behaviour (the `pending_admin` class). The approved O3 policy -- pending accounts get no workforce access, and the O3 migration refuses pending workforce accounts -- would, read literally, refuse or lock out every existing admin. What "pending" means for ADMIN must be decided before membership enforcement |
+| Pending STAFF and ADMIN eligibility | **Resolved (approved 2026-11-14).** `staff_approved` applies to STAFF only. Active STAFF with `staff_approved = false` (pending) are not eligible for workforce access until approved; approved active STAFF are eligible subject to permissions and membership. ADMIN eligibility does not depend on `staff_approved`: an active ADMIN is eligible even when it is false, as `flask create-admin` creates every admin. Inactive STAFF and ADMIN are always blocked. Customers remain outside organization membership and workforce permissions. **The O3 migration does not refuse pending, inactive or invited workforce accounts**: it backfills their roles and leaves eligibility and lifecycle state unchanged; it refuses only inconsistent organization data (for example a staff or admin account without a membership, or a membership without a branch assignment row). This supersedes the earlier wording that the O3 migration refuses pending workforce accounts. It matches the existing behaviour (`AuthContext.is_eligible`, `get_current_user`); no account changes |
 | O3.2 — permission foundation | **Implemented and CI-verified** (commit `f477f1a`, CI run `43450199986`, all four jobs green). New module `app/utils/permissions.py`: a catalog of **26** unique permission identifiers (`Permission`, each tagged organization- or branch-scoped); an immutable `AuthContext` built from the `User` row (never stored in the session, nothing taken from request data); evaluation helpers (`has_permission` / `permissions_for`); and reusable helpers -- `require_permission` (services; raises `PermissionDenied`) and `@permission_required` (routes; the same 401/302/403 responses as `require_role`). **Compatibility grants** state what each global role holds today: STAFF 10 permissions, ADMIN those 10 plus 14 more, CUSTOMER none; `organization.view` and `organization.owner.manage` are granted to nobody. Organization and branch role types (owner/admin, manager/staff) exist, but their grant maps are **empty**, so they grant nothing. `settings.pricing.manage` (the tax rate and staff discount cap at `/admin/settings`) is **branch-scoped**, because the `pricing_settings` row is local to each branch's database. **Nothing uses the module yet**: no route or service has been moved onto it, so authorization behaviour is unchanged. No membership enforcement, schema change, migration or production behaviour change. Details: `docs/PROJECT_PROGRESS.md` "O3.2" |
 | Migration head after O3.2 | **`4f1d8b2c6a90`** -- unchanged |
 | Tests after O3.2 | +548: `tests/test_permissions.py` (catalog, context, grants, denial cases, helpers, and compatibility with the O3.1 route gates and today's service role checks). None is backend-specific. No new CI guard; no existing test changed |
@@ -182,7 +182,12 @@ a client. CI reports these advisories without failing.
 | SQLite after O3.2 (CI `test-sqlite`) | **2871 passed, 58 skipped, 0 failed** (O3.1: 2323 / 58 -- +548 passed, no new skips) |
 | Redis and dependency audit after O3.2 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
 | MySQL 8.0 locally after O3.2 | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
-| Pending ADMIN after O3.2 | **Still not resolved.** O3.2's compatibility grants preserve today's behaviour: `staff_approved` decides eligibility for STAFF only, and an ADMIN with `staff_approved = false` keeps the full ADMIN grants (pinned by a test). The decision recorded above for O3.1 remains open |
+| Pending ADMIN after O3.2 | **Resolved** -- see "Pending STAFF and ADMIN eligibility" above. O3.2's eligibility rule (`staff_approved` decides eligibility for STAFF only; an active ADMIN with it false keeps the full ADMIN grants, pinned by a test) is the approved policy |
+| O3.3 — membership roles (storage and backfill) | **Implemented, not yet committed or CI-verified.** Two nullable columns, each with a named CHECK: `organization_memberships.organization_role` (`owner` / `admin`, `ck_organization_memberships_organization_role`) and `branch_assignments.branch_role` (`manager` / `staff`, `ck_branch_assignments_branch_role`). Migration **`9a3e6c1d7b54`** validates the O2 data before any DDL (R1--R9: identity, every admin/staff account has a membership, every membership belongs to an existing admin/staff account in the local organization, no orphan or mismatched assignment, every membership -- any status, either role -- has an assignment row to the local branch, no active assignment under a revoked membership, no leftover role column or CHECK), reporting every problem at once and changing nothing on refusal; then adds each column with one `ALTER TABLE` (no table rebuild) and backfills by a fixed rule: ADMIN memberships `admin` with NULL branch roles, STAFF assignments `staff` with a NULL organization role -- on rows of every status, pending, inactive and invited accounts included. UPDATEs only: no row inserted, deleted or reactivated, no lifecycle value or audit row written, no owner or manager. Enrollment and the O2 services write the same roles; `check_consistency` and `flask organization members` report them. **Stored roles grant nothing**: the role grant maps stay empty and no route, service, eligibility or permission check changed. Recovery: `docs/DATABASE_SETUP_GUIDE.md` §11.1. Details: `docs/PROJECT_PROGRESS.md` "O3.3" |
+| Migration head after O3.3 | **`9a3e6c1d7b54`** (revises `4f1d8b2c6a90`) |
+| Tests after O3.3 | +75: `tests/test_membership_roles.py` (36) and `tests/test_membership_roles_migration.py` (39, three MySQL-only). New CI guard: exactly **75 passed** on MySQL. Deliberately changed: `tests/test_organization_migration.py` (pinned to O2's revision; its post-upgrade checks moved to SQL; still 5 tests, O2 guard still 45) and `tests/test_m5_migration.py` (head) |
+| SQLite after O3.3 (local, Windows, Python 3.10) | **2948 passed, 56 skipped, 0 failed** (O3.2: 2876 / 53 -- +72 passed, +3 MySQL-only skips). Partial-DDL states X and Y recorded on SQLite through the real `migrations/env.py` |
+| MySQL 8.0 after O3.3 | **not yet verified** -- no `TEST_DATABASE_URL` locally; the CI `test-mysql` job and its O3.3 guard are the MySQL evidence, still to run |
 
 ---
 
@@ -235,9 +240,10 @@ capacity · HQ registration or activation, any cloud service, branch
 synchronization, an organization portal, multi-branch staff management, an
 Organization Owner role and license enforcement (O1 adds only a *local*
 organization/branch/installation identity; `hq_id` columns exist but nothing
-sets them) · organization or branch roles and any permission that depends on
-membership (O2 records organization membership and branch assignment, but
-they grant and revoke no access; there is no UI or write command for them) ·
+sets them) · any permission that depends on membership or on an
+organization or branch role (O2 records organization membership and branch
+assignment and O3.3 stores the roles on them, but they grant and revoke no
+access; there is no UI or write command for them, and no owner exists) ·
 permission-based authorization enforcement (O3.1 pins today's role-based
 checks in tests; O3.2 adds the permission layer, `app/utils/permissions.py`,
 but no route or service uses it yet; every gate still reads `users.role`,
@@ -277,13 +283,14 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 
 ## Next planned milestone
 
-**O3.3 — the next step of the approved O3 implementation sequence.** Not
-started; it waits for review and explicit approval. O3 replaces the
-global-role checks with organization and branch permissions in steps. O3.1
-(the regression baseline) and O3.2 (the permission foundation) are done; O3
-as a whole is not. O3.1 is the baseline later steps must keep green,
-changing a pinned test only on purpose. Before O3 enforces membership, the
-pending-ADMIN question above must be settled.
+**O3.3 — membership roles (storage and backfill).** Implemented; awaiting
+review, commit and CI verification. O3 replaces the global-role checks with
+organization and branch permissions in steps. O3.1 (the regression
+baseline) and O3.2 (the permission foundation) are done; O3.3 stores the
+roles without enforcing them; O3 as a whole is not done. O3.1 is the
+baseline later steps must keep green, changing a pinned test only on
+purpose. The pending STAFF and ADMIN eligibility policy is settled (see
+above).
 
 The M7 and S1 paragraphs below are the earlier plan, kept as written. Their
 code has shipped, and their remaining gaps are operational.

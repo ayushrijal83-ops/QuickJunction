@@ -1891,3 +1891,25 @@ Design points:
   identity, account creation and the service refuse instead of creating an
   account outside the organization.
 - **Offline.** Everything is local; no network call, no HQ id.
+- **Workforce eligibility (approved policy, 2026-11-14).** `staff_approved`
+  applies to STAFF only: an active STAFF account is eligible once approved
+  and never while pending; an active ADMIN is eligible whatever
+  `staff_approved` says (`flask create-admin` leaves it false for every
+  admin); an inactive STAFF or ADMIN account never is; customers are never
+  members and hold no workforce permission. This is the rule
+  `get_current_user` and `AuthContext.is_eligible` already apply.
+- **Stored roles grant nothing (O3.3).** `organization_memberships.organization_role`
+  (`owner`/`admin`) and `branch_assignments.branch_role` (`manager`/`staff`)
+  record the approved O3 roles, derived from `users.role` by a fixed rule.
+  The role grant maps are empty and no check reads the columns, so neither
+  storing a role nor changing one by hand changes anyone's access;
+  eligibility is always computed from the live account. Nothing writes
+  `owner` or `manager`; `check_consistency` reports an owner or a role that
+  does not match the account.
+- **Every membership requires a branch assignment row,** whatever its
+  status or role. The O3.3 migration validates the O2 data before any DDL
+  -- with LEFT JOINs, so orphan rows cannot drop out of a join -- and
+  refuses inconsistent or orphaned records instead of repairing them; it
+  inserts, deletes and reactivates nothing. Recovery is a documented manual
+  procedure (`docs/DATABASE_SETUP_GUIDE.md` §11.1), never an automatic
+  repair.

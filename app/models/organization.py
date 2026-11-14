@@ -30,6 +30,22 @@ declared at the bottom of this module (O1's model file is unchanged).
 
 Only ADMIN and STAFF accounts are members; customers never are (enforced in
 the service layer -- a CHECK cannot look at ``users.role``).
+
+**Membership roles (O3.3).** ``organization_memberships.organization_role``
+and ``branch_assignments.branch_role`` store the approved O3 roles
+(``OrganizationRole``, ``BranchRole``), derived from the account's global
+role by a fixed rule: an ADMIN's membership is ``admin`` and its assignments
+carry no branch role; a STAFF member's membership carries no organization
+role and its assignments are ``staff``. Nothing writes ``owner`` or
+``manager`` yet. **Stored roles grant nothing** in O3.3: the grant maps in
+``app/utils/permissions.py`` are empty and no permission check reads these
+columns. Eligibility is always computed from the live account
+(``is_active``, and ``staff_approved`` for STAFF only).
+
+Every membership, of any status and either role, has at least one
+assignment row to the local branch: every creation path writes both
+(``enroll_new_account``, the O2 backfill), revocation never deletes rows,
+and ``check_consistency`` reports a membership without one.
 """
 
 from __future__ import annotations
@@ -49,6 +65,21 @@ from app.models.user import User
 class LifecycleStatus(str, enum.Enum):
     ACTIVE = "active"
     REVOKED = "revoked"
+
+
+class OrganizationRole(str, enum.Enum):
+    """The approved O3 organization roles. Defined here, beside the column
+    that stores them; ``app/utils/permissions.py`` re-exports it."""
+
+    OWNER = "owner"   # ORGANIZATION_OWNER -- never written in O3.3 (a later, CLI-only milestone)
+    ADMIN = "admin"   # ORGANIZATION_ADMIN
+
+
+class BranchRole(str, enum.Enum):
+    """The approved O3 branch roles; re-exported by ``app/utils/permissions.py``."""
+
+    MANAGER = "manager"   # BRANCH_MANAGER -- never written in O3.3
+    STAFF = "staff"       # BRANCH_STAFF
 
 
 # The same text in the migration (4f1d8b2c6a90); tests/test_migrations.py
@@ -75,6 +106,13 @@ class OrganizationMembership(db.Model):
     status: Mapped[LifecycleStatus] = mapped_column(
         enum_column(LifecycleStatus, 16, name="ck_organization_memberships_status"),
         nullable=False, default=LifecycleStatus.ACTIVE,
+    )
+    # O3.3. ``admin`` for an ADMIN account, NULL for STAFF. Added by migration
+    # 9a3e6c1d7b54 as a plain ADD COLUMN with a column-level CHECK of exactly
+    # this text (tests/test_migrations.py compares the two).
+    organization_role: Mapped[OrganizationRole | None] = mapped_column(
+        enum_column(OrganizationRole, 16, name="ck_organization_memberships_organization_role"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     # NULL: created by the migration or a command-line path with no acting account.
@@ -122,6 +160,13 @@ class BranchAssignment(db.Model):
     status: Mapped[LifecycleStatus] = mapped_column(
         enum_column(LifecycleStatus, 16, name="ck_branch_assignments_status"),
         nullable=False, default=LifecycleStatus.ACTIVE,
+    )
+    # O3.3. ``staff`` when the member is a STAFF account, NULL for ADMIN (an
+    # ADMIN's authority is organization-wide; no branch-manager role is
+    # inferred). Added by migration 9a3e6c1d7b54, like organization_role.
+    branch_role: Mapped[BranchRole | None] = mapped_column(
+        enum_column(BranchRole, 16, name="ck_branch_assignments_branch_role"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     created_by_id: Mapped[int | None] = mapped_column(

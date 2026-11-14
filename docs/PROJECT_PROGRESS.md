@@ -4626,6 +4626,10 @@ The expected skips are unchanged from O2 (MySQL job 30, SQLite job 58).
   Read literally for ADMIN, that would refuse or lock out every existing
   admin. The meaning of "pending" for ADMIN must be decided before O3
   enforces membership.
+  *Resolved 2026-11-14:* pending applies to STAFF only; an active ADMIN is
+  eligible whatever `staff_approved` says. The O3 migration does not refuse
+  pending workforce accounts (this supersedes the wording above). See
+  `docs/STATUS.md` "Pending STAFF and ADMIN eligibility".
 - The gap tests record missing service-level checks; O3.1 fixes none of
   them.
 - The mutation plugins live outside the repository, so that evidence can't
@@ -4747,6 +4751,10 @@ The expected skips are unchanged from O3.1 (MySQL job 30, SQLite job 58).
   preserves today's behaviour: `staff_approved` decides eligibility for
   STAFF only. What "pending" means for ADMIN must be decided before O3
   enforces membership.
+  *Resolved 2026-11-14:* pending applies to STAFF only; an active ADMIN is
+  eligible whatever `staff_approved` says, which is exactly O3.2's rule. The
+  O3 migration does not refuse pending workforce accounts (this supersedes
+  the wording in O3.1). See `docs/STATUS.md`.
 - The organization and branch roles grant nothing and have no storage; the
   role policy is not implemented.
 - `AuthContext` does not resolve the organization and branch ids itself.
@@ -4775,6 +4783,171 @@ file changed in the O3.2 commit. Documentation closure: `docs/STATUS.md`,
 
 **O3.3 — the next step of the approved O3 implementation sequence.** Not
 started; it waits for review and explicit approval. O3 as a whole is not
+complete.
+
+---
+
+# O3.3 — Membership Roles (storage and backfill)
+
+Implemented 2026-11-14 on top of `98ea31e` (O3.2 closed). **Not yet
+committed, pushed or CI-verified**; this section records the local
+evidence. Stores the approved O3 membership roles on the O2 rows and
+backfills them, **without enforcing anything**: no route, service,
+eligibility rule or permission check changed, and the role grant maps stay
+empty, so a stored role grants nothing.
+
+## Approved decisions
+
+- **Eligibility policy (2026-11-14):** `staff_approved` applies to STAFF
+  only; pending STAFF are ineligible until approved; an active ADMIN is
+  eligible whatever `staff_approved` says; inactive accounts never are;
+  customers are never members. Unchanged in code (it is O3.2's rule).
+- **D1** pending, inactive and invited STAFF are backfilled
+  (`branch_role = 'staff'`) and never make the migration refuse.
+- **D2** an ADMIN or STAFF account without a membership refuses the
+  migration; none is created.
+- **D3** ADMIN assignments get `branch_role = NULL`; no manager is inferred.
+- **D4** the CHECK allows `'owner'`; nothing writes it (owner designation is
+  a later, CLI-only milestone).
+- **D5/D6** every membership -- any status, ADMIN or STAFF -- needs an
+  assignment row to the local branch. Evidence for ADMIN: every creation
+  path writes both rows (`enroll_new_account`, the O2 backfill),
+  `check_consistency()` already reported an ADMIN's missing assignment
+  (`tests/test_organization.py::test_consistency_check_reports_each_kind_of_gap`),
+  and revocation never deletes rows.
+- **D7** an active assignment under a revoked membership refuses.
+- **D8** no repair command; refusal messages name the problem, the ids and
+  the fix; recovery is documented (`docs/DATABASE_SETUP_GUIDE.md` §11.1).
+
+## What this adds
+
+| Part | What it is |
+| --- | --- |
+| Schema | `organization_memberships.organization_role` VARCHAR(16) NULL, `ck_organization_memberships_organization_role`: `organization_role IN ('owner', 'admin')`; `branch_assignments.branch_role` VARCHAR(16) NULL, `ck_branch_assignments_branch_role`: `branch_role IN ('manager', 'staff')`. No index, foreign key or audit event |
+| Enums | `OrganizationRole` and `BranchRole` now live in `app/models/organization.py`; `app/utils/permissions.py` imports them, so its existing imports name the same classes |
+| Migration `9a3e6c1d7b54` | Validates (R1--R9, read-only, LEFT JOINs) before any DDL; adds each column with one `ALTER TABLE` carrying its CHECK; backfills with two UPDATEs; verifies the result and that no id, row or lifecycle value changed, in the transaction Alembic stamps the version in |
+| Services | `enroll_new_account`, `add_member` and `assign_branch` write the role the account's global role implies (`organization_role_for` / `branch_role_for`); reinstating keeps it. Signatures and transaction ownership unchanged |
+| Consistency / CLI | New `check_consistency` kinds: `role_mismatch`, `unexpected_owner`, `membership_without_assignment` (a revoked membership with no assignment row; `missing_assignment` still covers active ones). `flask organization members` prints each membership's organization role and each assignment's branch role, and still exits 1 on a problem |
+
+**Refusals (R1--R9),** all reported at once, nothing changed: R1 not
+exactly one organization with one branch of it; R2 an ADMIN/STAFF account
+without a membership (any state); R3 a membership whose user is missing or
+not ADMIN/STAFF; R4 a membership outside the local organization; R5 an
+orphan assignment; R6 an assignment whose organization or branch does not
+match its membership or the installation; R7 a membership with no
+assignment row to the local branch; R8 an active assignment under a revoked
+membership; R9 a role column or CHECK name already present.
+
+**Why one `ALTER TABLE` per column, no batch mode.** SQLite's `ALTER TABLE`
+cannot add a standalone, table-level CHECK constraint to an existing table
+(there is no `ADD CONSTRAINT`); Alembic does that by rebuilding the table
+(batch mode), and rebuilding `organization_memberships` fails once
+`branch_assignments` rows reference it (the app enables SQLite foreign keys
+on every connection, migrations included). SQLite *can*, however, add a new
+column together with a column-level CHECK in a plain `ALTER TABLE ... ADD
+COLUMN ... CONSTRAINT ... CHECK (...)`, with no rebuild -- which is what
+this migration does. On MySQL the column and its CHECK are one atomic
+`ALTER TABLE ... ADD COLUMN ..., ADD CONSTRAINT ...`.
+
+**Partial DDL.** Each `ALTER TABLE` commits on its own on both backends
+(MySQL implicitly; SQLite because pysqlite opens no transaction for DDL),
+while the backfill, its verification and the version stamp roll back
+together. A failure after the first ALTER leaves state X
+(`organization_role` only, all NULL, version `4f1d8b2c6a90`); a failure in
+the backfill or its verification leaves state Y (both columns, all NULL,
+same version). On SQLite both were recorded through the real Flask-Migrate
+`env.py` (see Verification). R9 refuses a retry; the migration never drops
+a column it finds. Recovery: `docs/DATABASE_SETUP_GUIDE.md` §11.1.
+
+**Downgrade** removes the two columns and CHECKs -- one `ALTER TABLE` per
+table, `DROP CHECK` + `DROP COLUMN` on MySQL, `DROP COLUMN` on SQLite
+(the column-level CHECK goes with it) -- skipping a table already fully
+downgraded so an interrupted downgrade can be re-run. It refuses, dropping
+nothing, if a column and its CHECK disagree or an `owner`/`manager` value
+exists. Memberships, assignments and lifecycle data are untouched;
+re-upgrading recomputes identical roles.
+
+## Verification
+
+**CI: not yet run.** The O3.3 change is uncommitted; MySQL evidence will
+come from the CI `test-mysql` job and its new O3.3 guard (exactly 75
+passed). Nothing below is MySQL evidence.
+
+**Local runs (Windows, Python 3.10.11, SQLite 3.40.1, `.venv_new`):**
+
+| Run | Result |
+| --- | --- |
+| `tests/test_membership_roles.py` | **36 passed**: role enums defined once and re-exported; the fixed rule; roles written by `create_admin` (a pending admin), `invite_staff`, `seed_demo`, `add_member` / `assign_branch` for six account states; reinstating keeps roles; no path writes `owner` / `manager`; both CHECKs reject 8 bad values and accept their values and NULL; the new consistency kinds; CLI output and exit 1; empty grant maps; stored roles change no permission or eligibility for any account state |
+| `tests/test_membership_roles_migration.py` | **36 passed, 3 skipped** (the three MySQL-only tests): fresh; populated (13 workforce accounts in every state, every lifecycle variant, trading data) -- exact roles, ids and lifecycle identical, every other table and the ledger audit identical, no audit row, **no table rebuilt** (unchanged `sqlite_master` root pages), foreign keys valid, eligibility per the approved policy; R1--R9 each refused with ids and fix, nothing changed, through the real Flask-Migrate command as well as directly -- including orphans written with SQLite foreign keys off (missing user, missing organization, deleted membership, mismatched or missing branch); all problems reported at once; the documented service repairs with `actor`; the backfill verification catching wrong roles, changed rows and an orphan; one `ALTER TABLE` per table each way with nothing unrelated changed; downgrade/re-upgrade recomputing identical rows; downgrade refusing `owner`/`manager`; an interrupted downgrade completing on re-run |
+| Partial DDL on SQLite, through `migrations/env.py` | **Recorded:** a failure at the second `ALTER TABLE` leaves state X (`organization_role` with its CHECK, `branch_role` absent, all NULL, version `4f1d8b2c6a90`); a failure in the backfill verification leaves state Y (both columns, all NULL, same version). In both, a retry is refused by R9 and drops nothing; restoring the pre-upgrade file copy returns the identical O2 schema and data; the retry then succeeds |
+| Mutation checks (temporary edits to the migration file, restored and SHA-256-verified) | Each caught: staff backfill skipped (9 failures), R5 with an inner join (2), R7 ignoring revoked memberships (4), downgrade not skipping a finished table (1), R9 removed (4) |
+| O3.1 baseline (both files, unchanged) | **856 passed** |
+| O1 guard files / O2 guard files | 6 collected (4 passed, 2 MySQL-only skipped) / 45 collected (43 passed, 2 MySQL-only skipped) -- both guard counts unchanged |
+| O3.3 guard on a SQLite-only run | `72 passed, 3 skipped` -- the guard's `^75 passed` fails, as intended |
+| `tests/test_migrations.py` (chain, model/migration schema comparison, full round trip) | **4 passed** |
+| Full suite, SQLite | **2948 passed, 56 skipped, 0 failed** (3004 tests; O3.2: 2876 / 53 -- +72 passed, +3 MySQL-only skips) |
+| MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` locally |
+| `git diff --check` | clean |
+
+## Known limitations
+
+- **No MySQL evidence yet.** MySQL's acceptance of `ADD CONSTRAINT ...
+  CHECK` with `ADD COLUMN` and `DROP CHECK` with `DROP COLUMN` in one
+  statement, the MySQL partial states, the orphan refusals with
+  `FOREIGN_KEY_CHECKS=0` and the three MySQL-only tests have not run; the
+  CI O3.3 guard (exactly 75 passed) is that evidence, still to come.
+- **The documented repairs were verified on the previous release (SQLite
+  only).** In the final O3.3 review, the exact O3.2 commit `98ea31e` was
+  extracted to an isolated directory (`git archive`; the working tree was not
+  touched) and migrated a temporary SQLite database to its own head
+  `4f1d8b2c6a90`. Using that release's actual O2 services and the guide's own
+  import line (`docs/DATABASE_SETUP_GUIDE.md` §11.1), the R2, R7 (active), R7
+  (revoked: reinstate, assign, revoke) and R8 repairs were applied with
+  `actor=`: **all 24 recovery checks passed** -- the O3.3 pre-DDL checks
+  refused exactly R2, R7, R7 and R8 beforehand and found nothing afterwards;
+  every call returned the documented value; the session was clean before
+  each call, and a no-op call was confirmed to discard an unrelated pending
+  change (the transaction-ownership warning); the expected eight audit
+  events were written in order, all naming the actor; the previous
+  release's `check_consistency()` was clean. The repaired database then
+  **upgraded successfully to O3.3** (`9a3e6c1d7b54`) with the O3.3 code:
+  correct roles, revoked rows still revoked, lifecycle unchanged,
+  `check_consistency()` clean. The O3.3 test suite separately exercises the
+  same calls on the head schema. **MySQL remains unverified** for the
+  recovery procedure, as for everything else in O3.3, until CI runs.
+- **`flask organization members` is not a sufficient pre-check.** The same
+  review found that the previous release's command reports OK for R6 (an
+  assignment to a missing branch) and for R7 (a revoked membership with no
+  assignment row), and crashes on R3 (a membership whose user row is
+  missing; `check_consistency` reads the missing user -- the same code in
+  O3.3). The guide (§11.1) treats it as a diagnostic only; the migration's
+  R1--R9 checks are the authoritative gate.
+- **The R7 revoked-membership repair** (reinstate, assign, revoke) replaces
+  the membership's `revoked_at` / `revoked_by_id` with the repair's; the
+  original revocation stays in the audit log only if it went through the
+  service. Restoring a backup is the alternative.
+- R1 and R3--R6 have no service fix; they need a verified backup restore.
+- `check_consistency` does not look for orphan rows (an assignment whose
+  membership is gone); the migration's R5 does.
+- `tests/test_organization_migration.py` can no longer call the O2 services
+  after its O2-only upgrade (the models map the new columns); it now checks
+  O2's four consistency rules and writes its revocation in SQL.
+- Stored roles grant nothing; enforcement is a later O3 milestone.
+
+## Files changed
+
+New: `migrations/versions/9a3e6c1d7b54_add_membership_roles.py`,
+`tests/test_membership_roles.py`, `tests/test_membership_roles_migration.py`.
+Changed: `app/models/organization.py`, `app/models/user.py` (comment),
+`app/utils/permissions.py` (enums imported; docstrings),
+`app/services/organization.py`, `app/cli.py`, `.github/workflows/ci.yml`,
+`tests/test_organization_migration.py`, `tests/test_m5_migration.py`,
+`docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`, `docs/SECURITY.md`,
+`docs/DATABASE_SETUP_GUIDE.md`.
+
+## Next
+
+Review, then commit, push and CI verification of O3.3. O3 as a whole is not
 complete.
 
 ---

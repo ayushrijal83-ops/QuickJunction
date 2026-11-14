@@ -433,6 +433,157 @@ f3a6d9b2e8c5  kitchen preparation timestamps        ◄ head
 > Never delete or edit files in `migrations\`. Never create Quick Junction tables by
 > hand — Alembic would not know about them.
 
+### 11.1 O3.3 membership-role migration: refusals and recovery
+
+Migration `9a3e6c1d7b54` (O3.3) adds `organization_memberships.organization_role`
+and `branch_assignments.branch_role` and fills them from each account's role.
+It **checks the organization data first and refuses, changing nothing**, if
+anything is inconsistent. It never repairs, inserts, deletes or reactivates a
+membership or assignment, and it never drops a column it finds already there.
+
+**Before the upgrade (every time):**
+
+1. Stop Quick Junction.
+2. Take a backup and verify it -- MySQL: `scripts/backup_database.py` (§19);
+   SQLite (development only): copy the database file while the app is stopped.
+3. On the **current** release, run `flask organization members` as a
+   diagnostic and fix anything it reports. **It is not enough to establish
+   that the migration is safe.** The previous release's check does not see
+   every state the migration refuses: it reports `Consistency:  OK` for an
+   assignment to a missing branch (R6) and for a revoked membership with no
+   assignment row (R7), and it **crashes** (a Python traceback, e.g.
+   `AttributeError`) on a membership whose user account no longer exists
+   (R3). If it crashes, **stop**: treat it as possible orphaned data,
+   investigate, and restore a verified backup where necessary -- do not
+   upgrade. Never proceed only because it reports OK. The authoritative gate
+   is the O3.3 migration itself: its R1--R9 checks run before any schema
+   change and refuse, changing nothing, if anything is wrong.
+4. Save a snapshot of the two tables for comparison later:
+
+   ```sql
+   SELECT id, organization_id, user_id, status, created_at, created_by_id, revoked_at, revoked_by_id
+     FROM organization_memberships ORDER BY id;
+   SELECT id, organization_id, membership_id, branch_id, status, created_at, created_by_id, revoked_at, revoked_by_id
+     FROM branch_assignments ORDER BY id;
+   SELECT COUNT(*), MAX(id) FROM users;
+   SELECT COUNT(*), MAX(id) FROM audit_logs;
+   ```
+
+#### If the migration refuses
+
+The message lists every problem with a code (R1--R9), the ids involved and
+the fix, and ends "Nothing was changed". The database is still at revision
+`4f1d8b2c6a90`.
+
+**Do not start the new release against this database**: the O3.3 code reads
+the new columns and cannot run until the upgrade succeeds. Go back to the
+previous release (the code you were running before), and repair there:
+
+1. Keep the app stopped. Open `flask shell` (a fresh one; do nothing else in it).
+2. Load what the calls need:
+
+   ```python
+   from app.extensions import db
+   from app.models.user import User
+   from app.models.organization import OrganizationMembership, BranchAssignment
+   from app.services.organization import (local_organization_and_branch, add_member, assign_branch,
+       reinstate_membership, revoke_membership, revoke_assignment)
+   _, branch = local_organization_and_branch()
+   a = db.session.get(User, <id of an active administrator>)   # recorded as the actor in the audit log
+   ```
+
+3. **Transaction ownership.** Each of these functions commits or rolls back
+   the *whole* session, not just its own rows. Before every call, check that
+   nothing else is pending: `db.session.new`, `db.session.dirty` and
+   `db.session.deleted` must all be empty. If a call refuses, load the
+   objects again before the next call.
+4. Apply the fix for each problem (always pass `actor=a`):
+
+   | Code | Problem | Fix |
+   | --- | --- | --- |
+   | R2 | staff/admin account without a membership | `m = add_member(user, actor=a)` then `assign_branch(m, branch, actor=a)` |
+   | R7 (active) | membership without a branch assignment row | `assign_branch(m, branch, actor=a)` |
+   | R7 (revoked) | revoked membership without an assignment row | `reinstate_membership(m, actor=a)` (must return `True`), `assign_branch(m, branch, actor=a)`, `revoke_membership(m, actor=a)` (must return `True`; it also revokes the new assignment). The membership's `revoked_at` / `revoked_by_id` become this repair's; the audit log keeps both revocations. Membership grants no access at this revision, so the brief reinstatement grants nothing. If the original revocation details must be kept on the row, restore a backup instead |
+   | R8 | active assignment under a revoked membership | `revoke_assignment(assignment, actor=a)` |
+   | R1, R3, R4, R5, R6 | wrong identity; membership of a missing or customer account; orphan or mismatched rows | **No service can fix these** -- they come from data changed outside the application. Restore the most recent verified backup taken before the problem (MySQL: §19; the restore tool refuses a non-empty target). If that is not acceptable, stop: a reviewed one-off data fix is outside this procedure. Do not edit rows by hand |
+   | R9 | a role column or CHECK is already there | an earlier attempt stopped part-way: see "If the upgrade stopped part-way" below |
+
+5. Run `flask organization members` again as a diagnostic (with the limits
+   described in "Before the upgrade", step 3: an OK there does not prove the
+   repair is complete, and a crash means stop and investigate). Then take a
+   new backup, deploy the O3.3 release and run `flask db upgrade`. Its R1--R9
+   checks are the authoritative confirmation: they run again before any
+   schema change, and if anything is still wrong the migration refuses and
+   changes nothing.
+
+#### If the upgrade stopped part-way (error after a DDL statement)
+
+Each `ALTER TABLE` commits on its own, so a failure can leave a role column
+behind while the version is still `4f1d8b2c6a90`. **Never drop a column
+before you have identified the state.**
+
+**Step 1 -- identify the state (read-only).**
+
+MySQL:
+
+```sql
+SELECT version_num FROM alembic_version;
+SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND ((TABLE_NAME = 'organization_memberships' AND COLUMN_NAME = 'organization_role')
+     OR (TABLE_NAME = 'branch_assignments' AND COLUMN_NAME = 'branch_role'));
+SELECT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+ WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_TYPE = 'CHECK'
+   AND CONSTRAINT_NAME IN ('ck_organization_memberships_organization_role', 'ck_branch_assignments_branch_role');
+```
+
+SQLite: `SELECT version_num FROM alembic_version;`,
+`PRAGMA table_info(organization_memberships);`,
+`PRAGMA table_info(branch_assignments);`.
+
+**Step 2 -- confirm nothing else changed.** For each role column present,
+`SELECT COUNT(*) FROM <table> WHERE <column> IS NOT NULL` must be `0`, and the
+snapshot queries from "Before the upgrade" must return exactly what you saved.
+
+**Step 3 -- classify and act.**
+
+| State | Version | Role columns | Values | Action |
+| --- | --- | --- | --- | --- |
+| Clean O2 | `4f1d8b2c6a90` | none | -- | Fix the cause of the error and run `flask db upgrade` again |
+| X (second ALTER failed) | `4f1d8b2c6a90` | `organization_role` only | all NULL | See below |
+| Y (backfill or its check failed) | `4f1d8b2c6a90` | both | all NULL | See below |
+| **Done** | `9a3e6c1d7b54` | both | filled | The migration finished. **Never drop anything by hand.** To go back, use `flask db downgrade 4f1d8b2c6a90` |
+| Anything else (a value is not NULL at the old version, a CHECK without its column, the snapshot differs) | -- | -- | -- | **Do not drop anything.** Restore the verified backup |
+
+For **X or Y**:
+
+- **SQLite:** restore the file copy you made before the upgrade.
+- **MySQL:** restoring the verified backup (§19) is preferred. Only if Steps 1
+  and 2 match X or Y exactly (old version, every value NULL, snapshot
+  identical, each present column with its CHECK), you may instead remove the
+  leftover column(s), one statement per table, `branch_assignments` first:
+
+  ```sql
+  ALTER TABLE branch_assignments DROP CHECK ck_branch_assignments_branch_role, DROP COLUMN branch_role;  -- state Y only
+  ALTER TABLE organization_memberships DROP CHECK ck_organization_memberships_organization_role, DROP COLUMN organization_role;
+  ```
+
+  Each statement is atomic and removes nothing else. Then repeat Step 1: it
+  must show the clean O2 state.
+
+**Step 4 -- retry.** Fix the cause (privileges, a lock, a timeout), take a new
+backup and run `flask db upgrade`.
+
+#### If a downgrade stopped part-way
+
+`flask db downgrade 4f1d8b2c6a90` removes `branch_role` and then
+`organization_role`. If it fails after the first, the version is still
+`9a3e6c1d7b54` with one column gone, and the O3.3 release cannot run. Run the
+same downgrade again: it skips the table that is already done and finishes
+the other. It refuses, dropping nothing, if a column and its CHECK disagree
+or if an `owner` or `manager` role is stored (those cannot be recomputed) --
+restore a backup in that case.
+
 ---
 
 ## 12. Verify the database
@@ -592,6 +743,10 @@ leaves no audit record.
 ---
 
 ## 15. Troubleshooting
+
+> **`flask db upgrade` stops with "O3.3 membership-role migration refused" or an
+> R9 message, or fails part-way through `9a3e6c1d7b54`:** follow §11.1. Do not
+> drop columns or edit membership rows by hand.
 
 **A. "mysql is not recognized as the name of a cmdlet…"**
 *Meaning:* the MySQL client is not on PATH (MySQL may still be installed).

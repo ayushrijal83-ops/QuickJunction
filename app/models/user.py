@@ -66,7 +66,9 @@ class User(db.Model):
     # Admin approval for STAFF accounts. A staff account with this false
     # cannot sign in and holds no session (see get_current_user), so it has
     # no staff access -- and no customer access either. Meaningless for other
-    # roles. Defaults false so an account can only become working staff
+    # roles: by the approved eligibility policy (2026-11-14) an active ADMIN
+    # is eligible whatever this says, and ``flask create-admin`` leaves it
+    # false. Defaults false so an account can only become working staff
     # through an explicit admin action (app/routes/admin_staff.py).
     staff_approved: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=False, server_default=sa.false()

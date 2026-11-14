@@ -7,6 +7,13 @@ not end anyone's session or change what they can do. Sign-in and
 permissions still depend only on ``users.role``, ``is_active`` and
 ``staff_approved``. O3 is where roles and permissions consult these rows.
 
+**Membership roles (O3.3).** Every row written here carries the role the
+account's global role implies (``organization_role_for`` /
+``branch_role_for``): an ADMIN membership is ``admin`` with NULL branch
+roles on its assignments; a STAFF membership has no organization role and
+its assignments are ``staff``. Reinstating keeps the stored role. Nothing
+here writes ``owner`` or ``manager``, and the stored roles grant nothing.
+
 Every change commits together with its audit rows (``membership_*`` /
 ``branch_assignment_*``), or not at all. Repeating a revoke or a reinstate
 is a no-op that writes nothing. Revoking a membership also revokes its
@@ -56,7 +63,8 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models.audit_log import AuditEvent, AuditLog
 from app.models.installation import Branch, Organization
-from app.models.organization import BranchAssignment, LifecycleStatus, OrganizationMembership
+from app.models.organization import (
+    BranchAssignment, BranchRole, LifecycleStatus, OrganizationMembership, OrganizationRole)
 from app.models.user import Role, User
 from app.services import audit as audit_service
 from app.services.errors import ValidationError
@@ -69,6 +77,20 @@ ACTIVE, REVOKED = LifecycleStatus.ACTIVE, LifecycleStatus.REVOKED
 
 class OrganizationError(ValidationError):
     pass
+
+
+def organization_role_for(role: Role) -> OrganizationRole | None:
+    """The organization role a membership of an account with global role
+    ``role`` carries (O3.3): ``admin`` for ADMIN, none for STAFF. The same
+    rule migration 9a3e6c1d7b54 backfilled with."""
+    return OrganizationRole.ADMIN if role == Role.ADMIN else None
+
+
+def branch_role_for(role: Role) -> BranchRole | None:
+    """The branch role an assignment of an account with global role
+    ``role`` carries (O3.3): ``staff`` for STAFF, none for ADMIN -- no
+    branch-manager role is inferred for administrators."""
+    return BranchRole.STAFF if role == Role.STAFF else None
 
 
 # --- helpers ------------------------------------------------------------------------------
@@ -153,6 +175,7 @@ def _new_membership(organization: Organization, user: User, actor: User | None,
         raise OrganizationError({"user": [
             f"{user.username} already has a {existing.status.value} membership; reinstate it instead."]})
     membership = OrganizationMembership(organization_id=organization.id, user_id=user.id, status=ACTIVE,
+                                        organization_role=organization_role_for(user.role),
                                         created_by_id=actor.id if actor else None)
     db.session.add(membership)
     db.session.flush()
@@ -172,8 +195,10 @@ def _new_assignment(membership: OrganizationMembership, branch: Branch, actor: U
     if existing is not None:
         raise OrganizationError({"branch": [
             f"This member already has a {existing.status.value} assignment to that branch; reinstate it instead."]})
+    member = db.session.get(User, membership.user_id)
     assignment = BranchAssignment(organization_id=membership.organization_id, membership_id=membership.id,
-                                  branch_id=branch.id, status=ACTIVE, created_by_id=actor.id if actor else None)
+                                  branch_id=branch.id, status=ACTIVE, branch_role=branch_role_for(member.role),
+                                  created_by_id=actor.id if actor else None)
     db.session.add(assignment)
     db.session.flush()
     entries.append(_audit(AuditEvent.BRANCH_ASSIGNMENT_CREATED, actor, assignment_id=assignment.id,
@@ -334,6 +359,7 @@ class AssignmentView:
     branch_id: int
     branch_name: str
     status: LifecycleStatus
+    branch_role: BranchRole | None = None
 
 
 @dataclass(frozen=True)
@@ -346,6 +372,7 @@ class MemberView:
     staff_approved: bool
     status: LifecycleStatus
     assignments: tuple[AssignmentView, ...]
+    organization_role: OrganizationRole | None = None
 
 
 @dataclass(frozen=True)
@@ -366,11 +393,11 @@ def list_members() -> list[MemberView]:
     for m in memberships:
         user = db.session.get(User, m.user_id)
         assignments = tuple(
-            AssignmentView(a.id, a.branch_id, branch_names.get(a.branch_id, "?"), a.status)
+            AssignmentView(a.id, a.branch_id, branch_names.get(a.branch_id, "?"), a.status, a.branch_role)
             for a in db.session.execute(sa.select(BranchAssignment).where(
                 BranchAssignment.membership_id == m.id).order_by(BranchAssignment.id)).scalars())
         views.append(MemberView(m.id, user.id, user.username, user.role, user.is_active, user.staff_approved,
-                                m.status, assignments))
+                                m.status, assignments, m.organization_role))
     return views
 
 
@@ -380,8 +407,14 @@ def check_consistency() -> list[ConsistencyIssue]:
     - a staff or administrator account with no membership (e.g. inserted
       directly, bypassing the account-creation paths);
     - a membership held by a customer account;
-    - an active membership with no branch assignment at all;
-    - an active assignment under a revoked membership.
+    - an active membership with no branch assignment at all
+      (``missing_assignment``), and -- since O3.3 -- a *revoked* membership
+      with no assignment row either (``membership_without_assignment``):
+      every creation path writes both rows and revocation deletes none;
+    - an active assignment under a revoked membership;
+    - (O3.3) a stored role that does not match the account's global role
+      (``role_mismatch``), or an ``owner`` role, which nothing can create
+      yet (``unexpected_owner``).
 
     An active membership whose assignments are all revoked is a legitimate
     state (they were revoked explicitly) and is not reported."""
@@ -400,12 +433,42 @@ def check_consistency() -> list[ConsistencyIssue]:
         if user.role not in MEMBER_ROLES:
             issues.append(ConsistencyIssue("customer_member",
                                            f"{user.username} is a {user.role.value} account but holds membership {m.id}."))
-        statuses = list(db.session.scalars(sa.select(BranchAssignment.status).where(
-            BranchAssignment.membership_id == m.id)))
+        assignments = list(db.session.execute(sa.select(BranchAssignment).where(
+            BranchAssignment.membership_id == m.id).order_by(BranchAssignment.id)).scalars())
+        statuses = [a.status for a in assignments]
         if m.status == ACTIVE and not statuses:
             issues.append(ConsistencyIssue("missing_assignment",
                                            f"{user.username}'s active membership has no branch assignment."))
+        if m.status == REVOKED and not statuses:
+            issues.append(ConsistencyIssue("membership_without_assignment",
+                                           f"{user.username}'s revoked membership {m.id} has no branch assignment row."))
         if m.status == REVOKED and ACTIVE in statuses:
             issues.append(ConsistencyIssue("active_assignment_under_revoked_membership",
                                            f"{user.username}'s membership is revoked but an assignment is active."))
+        if user.role in MEMBER_ROLES:
+            issues.extend(_role_issues(user, m, assignments))
     return issues
+
+
+def _role_issues(user: User, membership: OrganizationMembership,
+                 assignments: list[BranchAssignment]) -> list[ConsistencyIssue]:
+    issues = []
+    if membership.organization_role == OrganizationRole.OWNER:
+        issues.append(ConsistencyIssue("unexpected_owner",
+                                       f"{user.username}'s membership {membership.id} holds the owner role, "
+                                       "which nothing can assign yet."))
+    elif membership.organization_role != organization_role_for(user.role):
+        issues.append(ConsistencyIssue("role_mismatch",
+                                       f"{user.username} ({user.role.value}): membership {membership.id} has "
+                                       f"organization role {_label(membership.organization_role)}, expected "
+                                       f"{_label(organization_role_for(user.role))}."))
+    for a in assignments:
+        if a.branch_role != branch_role_for(user.role):
+            issues.append(ConsistencyIssue("role_mismatch",
+                                           f"{user.username} ({user.role.value}): assignment {a.id} has branch role "
+                                           f"{_label(a.branch_role)}, expected {_label(branch_role_for(user.role))}."))
+    return issues
+
+
+def _label(role) -> str:
+    return "none" if role is None else role.value

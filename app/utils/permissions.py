@@ -18,10 +18,18 @@ Three ideas are kept apart:
   policy; they exist so a check written with a permission behaves exactly
   like the role check it replaces.
 - **Membership roles** (``OrganizationRole``, ``BranchRole``) are the
-  approved O3 roles. They have no storage yet, ``auth_context_for_user``
-  never sets them, and they grant **nothing** in O3.2
-  (``ORGANIZATION_ROLE_GRANTS`` / ``BRANCH_ROLE_GRANTS`` are empty), so a
-  value placed in a context by hand can never raise anyone's access.
+  approved O3 roles. Since O3.3 they are stored on the membership and
+  assignment rows (``app/models/organization.py``, which defines both enums;
+  this module re-exports them), but ``auth_context_for_user`` still never
+  sets them and they grant **nothing** (``ORGANIZATION_ROLE_GRANTS`` /
+  ``BRANCH_ROLE_GRANTS`` are empty), so neither a stored role nor a value
+  placed in a context by hand can raise anyone's access.
+
+**Eligibility (approved policy, 2026-11-14).** ``staff_approved`` applies to
+STAFF only: an active STAFF account is eligible once approved; an active
+ADMIN is eligible whatever ``staff_approved`` says (``flask create-admin``
+creates every admin with it false); an inactive account never is; customers
+hold no workforce permission.
 
 The context is built from the server-side ``User`` row on every use. It is
 never stored in the session, and no role, organization or branch is ever
@@ -36,6 +44,7 @@ from functools import wraps
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
+from app.models.organization import BranchRole, OrganizationRole  # re-exported: defined beside their columns
 from app.models.user import Role, User
 from app.utils.authorization import _forbidden, _unauthorized, get_current_user
 
@@ -134,22 +143,17 @@ PERMISSION_SCOPES: Mapping[Permission, PermissionScope] = MappingProxyType({
 })
 
 
-# --- membership roles (approved O3 roles; no storage and no grants in O3.2) ---------------------
+# --- membership roles (approved O3 roles; stored since O3.3, still no grants) --------------------
 
+# OrganizationRole and BranchRole are defined in app/models/organization.py
+# (beside the columns that store them, O3.3) and imported above, so
+# ``from app.utils.permissions import OrganizationRole`` keeps working and
+# names the very same class.
 
-class OrganizationRole(str, enum.Enum):
-    OWNER = "owner"   # ORGANIZATION_OWNER
-    ADMIN = "admin"   # ORGANIZATION_ADMIN
-
-
-class BranchRole(str, enum.Enum):
-    MANAGER = "manager"   # BRANCH_MANAGER
-    STAFF = "staff"       # BRANCH_STAFF
-
-
-# Deliberately empty: the membership-role policy is not enforced until a
-# later O3 milestone stores and backfills these roles. Until then a role in
-# a context must not widen access, so each maps to no permission at all.
+# Deliberately empty: storing the roles (O3.3) enforces nothing. Until a
+# later O3 milestone defines and enables the membership-role policy, a role
+# -- stored or placed in a context -- must not widen access, so each maps to
+# no permission at all.
 ORGANIZATION_ROLE_GRANTS: Mapping[OrganizationRole, frozenset[Permission]] = MappingProxyType(
     {role: frozenset() for role in OrganizationRole})
 BRANCH_ROLE_GRANTS: Mapping[BranchRole, frozenset[Permission]] = MappingProxyType(
@@ -211,7 +215,8 @@ class AuthContext:
     ``organization_id`` / ``branch_id`` / ``organization_role`` /
     ``branch_role`` are placeholders for later O3 milestones: they are
     ``None`` unless a caller passes them, and no permission depends on them
-    in O3.2."""
+    (O3.2; still true in O3.3, which stores roles but does not read them
+    here)."""
 
     user_id: int
     global_role: Role
@@ -243,9 +248,10 @@ class AuthContext:
     @property
     def is_eligible(self) -> bool:
         """Whether this account may act at all -- exactly the rule
-        ``get_current_user`` applies today: active, and not a STAFF account
-        awaiting approval. ``staff_approved`` is not consulted for ADMIN
-        (the open pending-ADMIN question; O3.1 pins this behaviour)."""
+        ``get_current_user`` applies: active, and not a STAFF account
+        awaiting approval. ``staff_approved`` is not consulted for ADMIN:
+        by the approved policy (2026-11-14) an active ADMIN is eligible even
+        when it is false, as every ``flask create-admin`` admin is."""
         return self.is_active and not (self.global_role == Role.STAFF and not self.staff_approved)
 
 
@@ -257,8 +263,10 @@ def auth_context_for_user(user: User, *, organization_id: int | None = None,
                           branch_id: int | None = None) -> AuthContext:
     """The context for ``user``, from its database row. Organization and
     branch ids are taken only from the caller (server-side code), never
-    looked up from request data; O3.2 does not resolve them itself, and no
-    membership role is read because none is stored yet."""
+    looked up from request data; this function does not resolve them itself.
+    It reads no membership role either: O3.3 stores the roles, but no
+    permission may depend on them until a later O3 milestone enables the
+    role policy."""
     return AuthContext(
         user_id=user.id,
         global_role=user.role,
@@ -287,7 +295,7 @@ def permissions_for(context: AuthContext | None) -> frozenset[Permission]:
         return frozenset()
     granted = COMPATIBILITY_GRANTS.get(context.global_role, frozenset())
     # Membership roles: kept separate from the compatibility mapping, and
-    # empty in O3.2 (see ORGANIZATION_ROLE_GRANTS).
+    # still empty in O3.3 (see ORGANIZATION_ROLE_GRANTS).
     if context.organization_role is not None:
         granted = granted | ORGANIZATION_ROLE_GRANTS[context.organization_role]
     if context.branch_role is not None:

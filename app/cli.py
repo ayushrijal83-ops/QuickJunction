@@ -134,14 +134,17 @@ def register_cli(app: Flask) -> None:
         click.echo(f"Branch:       {identity.branch_name}")
         click.echo(f"Members:      {len(members)}")
         click.echo("Membership does not grant access: sign-in and permissions follow the account role and status.")
+        click.echo("Stored organization and branch roles grant nothing yet.")
         for m in members:
             click.echo("")
             click.echo(f"  {m.username}  (account: {m.role.value}, {account_state(m)})")
-            click.echo(f"    Membership:  {m.status.value}")
+            org_role = m.organization_role.value if m.organization_role else "none"
+            click.echo(f"    Membership:  {m.status.value} (organization role: {org_role})")
             if not m.assignments:
                 click.echo("    Branches:    none")
             for a in m.assignments:
-                click.echo(f"    Branch:      {a.branch_name} -- {a.status.value}")
+                branch_role = a.branch_role.value if a.branch_role else "none"
+                click.echo(f"    Branch:      {a.branch_name} -- {a.status.value} (branch role: {branch_role})")
         click.echo("")
         if not issues:
             click.echo("Consistency:  OK")

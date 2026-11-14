@@ -8,6 +8,14 @@ it before each test because this module's name contains "migration"; the
 fixture below wipes it again afterwards), otherwise on a scratch SQLite
 file. Only O2's own revision is downgraded, so known issue #32 does not
 apply. The last test runs only on MySQL; CI's O2 guard requires it to pass.
+
+Every ``upgrade()`` here stops at O2's own revision, so these tests keep
+exercising O2 alone now that O3.3 (9a3e6c1d7b54) exists -- the same pinning
+O2 applied to O1's tests. At that revision the ORM models (which since O3.3
+map the role columns) and the services built on them cannot run, so the
+checks after an upgrade read and write with plain SQL: ``_o2_problems``
+applies ``check_consistency``'s four O2 rules, and the revocation is written
+as ``revoke_membership`` would write it.
 """
 
 from __future__ import annotations
@@ -23,9 +31,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models.account_token import AccountToken, TokenPurpose
-from app.models.organization import OrganizationMembership
 from app.models.user import Role, User
-from app.services import organization as org
 from app.utils.clock import db_now
 from app.utils.security import hash_password
 from tests.conftest import rejected_by_check_constraint, wipe_mysql_schema
@@ -54,6 +60,23 @@ def _scalar(sql, **params):
 def _rows(sql, **params):
     with db.engine.connect() as conn:
         return conn.execute(sa.text(sql), params).all()
+
+
+def _o2_problems():
+    """check_consistency()'s four O2 rules, in SQL (see the module docstring)."""
+    problems = [f"missing_membership {r[0]}" for r in _rows(
+        "SELECT u.id FROM users u LEFT JOIN organization_memberships m ON m.user_id = u.id "
+        "WHERE u.role IN ('admin', 'staff') AND m.id IS NULL")]
+    problems += [f"customer_member {r[0]}" for r in _rows(
+        "SELECT m.id FROM organization_memberships m JOIN users u ON u.id = m.user_id "
+        "WHERE u.role NOT IN ('admin', 'staff')")]
+    problems += [f"missing_assignment {r[0]}" for r in _rows(
+        "SELECT m.id FROM organization_memberships m LEFT JOIN branch_assignments a ON a.membership_id = m.id "
+        "WHERE m.status = 'active' AND a.id IS NULL")]
+    problems += [f"active_assignment_under_revoked_membership {r[0]}" for r in _rows(
+        "SELECT a.id FROM branch_assignments a JOIN organization_memberships m ON m.id = a.membership_id "
+        "WHERE m.status = 'revoked' AND a.status = 'active'")]
+    return problems
 
 
 def _has_branch_index():
@@ -89,12 +112,12 @@ def test_fresh_database_has_no_memberships_until_accounts_exist(tmp_path):
     application = _app(tmp_path)
     with application.app_context():
         try:
-            upgrade()
+            upgrade(revision=O2)
             assert _scalar("SELECT version_num FROM alembic_version") == O2
             assert O2_TABLES <= _tables() and _has_branch_index()
             assert _scalar("SELECT COUNT(*) FROM organization_memberships") == 0
             assert _scalar("SELECT COUNT(*) FROM branch_assignments") == 0
-            assert org.check_consistency() == []
+            assert _o2_problems() == []
         finally:
             db.session.remove()
             db.engine.dispose()
@@ -123,7 +146,7 @@ def test_existing_installation_backfill_downgrade_and_reupgrade(tmp_path):
             branch_id = _scalar("SELECT id FROM branches")
 
             # --- upgrade: every admin/staff account, never a customer, nothing else touched ---
-            upgrade()
+            upgrade(revision=O2)
             memberships = _rows("SELECT id, organization_id, user_id, status, created_by_id, revoked_at, "
                                 "revoked_by_id FROM organization_memberships ORDER BY id")
             assert {m.user_id for m in memberships} == members_expected
@@ -140,15 +163,21 @@ def test_existing_installation_backfill_downgrade_and_reupgrade(tmp_path):
             assert _ledger_audit() == ledger_before
             assert _scalar("SELECT COUNT(*) FROM audit_logs WHERE event_type LIKE 'membership_%' "
                            "OR event_type LIKE 'branch_assignment_%'") == 0  # the backfill writes no audit rows
-            assert org.check_consistency() == []
+            assert _o2_problems() == []
             _release()
 
-            # --- use it: an O2 audit row and a revocation the downgrade must remove ---
-            membership = db.session.execute(sa.select(OrganizationMembership).order_by(
-                OrganizationMembership.id)).scalars().first()
-            org.revoke_membership(membership)
+            # --- use it: an O2 audit row and a revocation the downgrade must remove (written as
+            # revoke_membership writes them; the service needs the head models -- see module docstring) ---
+            membership_id = _scalar("SELECT MIN(id) FROM organization_memberships")
+            with db.engine.begin() as conn:
+                conn.execute(sa.text("UPDATE branch_assignments SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP "
+                                     "WHERE membership_id = :m"), {"m": membership_id})
+                conn.execute(sa.text("UPDATE organization_memberships SET status = 'revoked', "
+                                     "revoked_at = CURRENT_TIMESTAMP WHERE id = :m"), {"m": membership_id})
+                conn.execute(sa.text("INSERT INTO audit_logs (event_type, success, created_at) "
+                                     "VALUES ('membership_revoked', 1, CURRENT_TIMESTAMP)"))
+            assert _o2_problems() == []
             assert _scalar("SELECT COUNT(*) FROM audit_logs WHERE event_type = 'membership_revoked'") == 1
-            _release()
 
             # --- downgrade: only O2's objects and audit events go ---
             downgrade(revision=O1)
@@ -163,7 +192,7 @@ def test_existing_installation_backfill_downgrade_and_reupgrade(tmp_path):
                                          "VALUES ('membership_created', 1, CURRENT_TIMESTAMP)"))
 
             # --- re-upgrade: backfilled afresh, all active (the revocation is gone) ---
-            upgrade()
+            upgrade(revision=O2)
             assert {r[0] for r in _rows("SELECT user_id FROM organization_memberships")} == members_expected
             assert {r[0] for r in _rows("SELECT status FROM organization_memberships")} == {"active"}
             assert _snapshot(existing) == before
@@ -196,7 +225,7 @@ def test_unexpected_identity_refuses_the_upgrade_before_changing_anything(tmp_pa
                 _MIGRATION._local_organization_and_branch(conn)
             # ... and through Alembic, which Flask-Migrate reports as SystemExit.
             with pytest.raises(SystemExit):
-                upgrade()
+                upgrade(revision=O2)
             assert _tables() == existing and not _has_branch_index()
             assert _scalar("SELECT version_num FROM alembic_version") == O1
             assert _snapshot(existing - {"alembic_version"}) == before
@@ -219,7 +248,7 @@ def test_mysql_migrated_constraints_are_enforced(tmp_path):
                 conn.execute(sa.text("INSERT INTO users (username, email, password_hash, role, is_active, "
                                      "session_version, staff_approved, created_at, updated_at) VALUES "
                                      "('mcook', 'mcook@example.com', 'x', 'staff', 1, 0, 1, NOW(), NOW())"))
-            upgrade()
+            upgrade(revision=O2)
             assert db.engine.dialect.name == "mysql" and _has_branch_index()
             membership_id, organization_id, user_id = _rows(
                 "SELECT id, organization_id, user_id FROM organization_memberships")[0]
