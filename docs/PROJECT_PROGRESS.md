@@ -4789,14 +4789,13 @@ complete.
 
 # O3.3 — Membership Roles (storage and backfill)
 
-Implemented 2026-11-14 on top of `98ea31e` (O3.2 closed); committed as
-`add6005` and pushed. **Its CI run `43596369223` failed on MySQL** (see
-"First CI run" below); the corrections are implemented but **not yet
-committed or CI-verified**, and O3.3 is not closed. This section records the
-local evidence. Stores the approved O3 membership roles on the O2 rows and
-backfills them, **without enforcing anything**: no route, service,
-eligibility rule or permission check changed, and the role grant maps stay
-empty, so a stored role grants nothing.
+Implemented 2026-11-14 on top of `98ea31e` (O3.2 closed); commit `add6005`,
+whose first CI run (`43596369223`) failed on MySQL (see "First CI run"
+below); corrected in commit `025ed55`, pushed to `origin/main` and verified
+by CI run `43602384705` (see Verification). **O3.3 is closed.** Stores the
+approved O3 membership roles on the O2 rows and backfills them, **without
+enforcing anything**: no route, service, eligibility rule or permission check
+changed, and the role grant maps stay empty, so a stored role grants nothing.
 
 ## Approved decisions
 
@@ -4871,14 +4870,37 @@ re-upgrading recomputes identical roles.
 
 ## Verification
 
+**CI — the verification of record.** Commit
+`025ed55d2526e9fb898b5bf8c0712a04f4cb0b24`, CI run `43602384705`:
+**SUCCESS**, all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **2983 passed, 30 skipped, 0 failed** (O3.2: 2899 / 30). The +84 is exactly the O3.3 test count and the skip count is unchanged, so **all 84 O3.3 tests executed on MySQL** |
+| O3.3 membership-role guard | **84 passed, 0 skipped** (the guard requires exactly 84): the four MySQL-only tests -- exact-value CHECK enforcement with the atomic `DROP CHECK` + `DROP COLUMN` downgrade, migrated vs model-created CHECKs stored identically, a schema-wide leftover CHECK name, a column without its CHECK on downgrade -- and, on MySQL, the exact-value rejections (case, accent, trailing space), R1--R9 with orphan rows written under `FOREIGN_KEY_CHECKS=0`, the populated backfill, partial-failure states X and Y with their recovery and retry, downgrade with its refusals and retry, and the repair service calls on a migrated database |
+| O2 organization-membership guard | **45 passed** |
+| O1 installation-identity guard | **6 passed** |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **2951 passed, 62 skipped, 0 failed** (O3.2: 2871 / 58) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** |
+
+The full-suite skips are expected and unrelated to O3.3's own coverage:
+MySQL job 30, unchanged from O3.2 (23 Redis tests, 5 AI-model tests, 1 known
+issue #32 migration test, 1 privilege-separation drill); SQLite job 62 =
+O3.2's 58 plus the four MySQL-only O3.3 tests. The O3.3 guard is separate
+and requires **zero** skips: it ran all 84 O3.3 tests on MySQL and every one
+passed. The MySQL job took about 27 minutes against its 45-minute timeout.
+
 **First CI run (commit `add6005`, run `43596369223`): failed on MySQL.**
 SQLite, Redis and the dependency audit passed; `test-mysql` reported
 `4 failed, 2965 passed, 30 skipped, 10 errors`, so its guard steps did not
 run. All other O3.3 tests passed on MySQL -- R1--R9 (orphans written with
 `FOREIGN_KEY_CHECKS=0` included), the populated backfill, states X and Y
 with recovery and retry, downgrade and its refusals -- and every O1/O2 test
-passed within the suite. Three causes, all corrected (not yet re-run on
-MySQL):
+passed within the suite. Three causes, corrected in commit `025ed55` and
+verified by CI run `43602384705` (above):
 
 1. **The five repair tests errored at setup** (`Table ... organizations
    doesn't exist`): they used the shared `app` fixture (`create_all`), but
@@ -4898,7 +4920,8 @@ MySQL):
    plus a MySQL-only check that the migrated and model-created CHECKs are
    stored identically. O3.3 tests 75 -> 84; CI guard 84.
 
-Nothing below is MySQL evidence.
+The local runs below are SQLite only; the MySQL evidence is the CI run of
+record above.
 
 **Local runs (Windows, Python 3.10.11, SQLite 3.40.1, `.venv_new`):**
 
@@ -4918,12 +4941,10 @@ Nothing below is MySQL evidence.
 
 ## Known limitations
 
-- **MySQL evidence is incomplete.** The first CI run passed most O3.3
-  tests on MySQL (above) but failed three causes; the corrected exact-value
-  CHECKs (`CAST(col AS BINARY) IN (...)`), the repair tests on a migrated
-  database, the fixed leftover-name test and the new migrated-vs-model
-  CHECK comparison have not run on MySQL yet. The CI O3.3 guard (exactly 84
-  passed) is that evidence, still to come.
+- **MySQL evidence comes from CI only** (run `43602384705`, MySQL 8.0);
+  nothing has been run against a local MySQL server or a real installation.
+- The MySQL CI job took about 27 minutes (O3.2: about 28) against its
+  45-minute timeout.
 - **The documented repairs were verified on the previous release (SQLite
   only).** In the final O3.3 review, the exact O3.2 commit `98ea31e` was
   extracted to an isolated directory (`git archive`; the working tree was not
@@ -4941,8 +4962,10 @@ Nothing below is MySQL evidence.
   **upgraded successfully to O3.3** (`9a3e6c1d7b54`) with the O3.3 code:
   correct roles, revoked rows still revoked, lifecycle unchanged,
   `check_consistency()` clean. The O3.3 test suite separately exercises the
-  same calls on the head schema. **MySQL remains unverified** for the
-  recovery procedure, as for everything else in O3.3, until CI runs.
+  same calls on the head schema. The previous-release run was SQLite
+  only; on MySQL, CI run `43602384705` verified the partial-failure states
+  and their recovery, and the same repair service calls on the O3.3 code
+  against a migrated database, but not the previous release itself.
 - **`flask organization members` is not a sufficient pre-check.** The same
   review found that the previous release's command reports OK for R6 (an
   assignment to a missing branch) and for R7 (a revoked membership with no
@@ -4971,11 +4994,17 @@ Changed: `app/models/organization.py`, `app/models/user.py` (comment),
 `app/services/organization.py`, `app/cli.py`, `.github/workflows/ci.yml`,
 `tests/test_organization_migration.py`, `tests/test_m5_migration.py`,
 `docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`, `docs/SECURITY.md`,
-`docs/DATABASE_SETUP_GUIDE.md`.
+`docs/DATABASE_SETUP_GUIDE.md`. Correction commit `025ed55` (after the first
+CI run): `app/models/organization.py`,
+`migrations/versions/9a3e6c1d7b54_add_membership_roles.py`,
+`tests/test_membership_roles.py`, `tests/test_membership_roles_migration.py`,
+`.github/workflows/ci.yml`, `docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`.
+Documentation closure: `docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`.
 
 ## Next
 
-Review, then commit, push and CI verification of O3.3. O3 as a whole is not
+**O3.4 — the next step of the approved O3 implementation sequence.** Not
+started; it waits for review and explicit approval. O3 as a whole is not
 complete.
 
 ---
