@@ -531,10 +531,13 @@ def test_every_problem_is_reported_at_once(scratch, capfd):
 
 # --- M14: the documented repairs, with the O2 service calls and their actor ----------------------------
 #
-# Run on the O3.3 code (a head-schema database): the repairs are the same O2
-# service functions the previous release ships, but that release itself is not
-# exercised here. Each repaired state must pass every pre-DDL check (R9 aside,
-# as the head schema has the columns) and check_consistency().
+# Run on the O3.3 code against a database migrated to head (the module's
+# scratch database -- not the shared ``app`` fixture's create_all(), whose
+# tables this "migration" module's MySQL schema wipe would drop): the repairs
+# are the same O2 service functions the previous release ships, but that
+# release itself is not exercised here. Each repaired state must pass every
+# pre-DDL check (R9 aside, as the head schema has the columns) and
+# check_consistency().
 
 
 def _problems_except_r9():
@@ -543,8 +546,11 @@ def _problems_except_r9():
 
 
 @pytest.fixture
-def repair_world(installation_identity):
-    _, branch = installation_identity
+def repair_world(scratch):
+    """The real migrations to head (O1 creates the local organization and
+    branch), then an enrolled repair actor in that database."""
+    upgrade()
+    _, branch = org.local_organization_and_branch()
     actor = make_user(username="fixer", email="fixer@example.com", role=Role.ADMIN, staff_approved=False)
     membership = org.add_member(actor)
     org.assign_branch(membership, branch)
@@ -656,6 +662,8 @@ def test_one_alter_table_per_table_each_way_and_nothing_else_changes(scratch):
     assert ups[0].startswith("ALTER TABLE organization_memberships ADD COLUMN organization_role VARCHAR(16)")
     assert ups[1].startswith("ALTER TABLE branch_assignments ADD COLUMN branch_role VARCHAR(16)")
     assert all(("ADD CONSTRAINT ck_" if mysql else "CONSTRAINT ck_") in s for s in ups)
+    for statement, rc in zip(ups, MIG.ROLE_COLUMNS):   # the dialect's exact-value expression
+        assert f"CHECK ({rc.check_sql('mysql' if mysql else 'sqlite')})" in statement
     _release()
     with _statements("ALTER TABLE") as downs:
         downgrade(revision=O2)
@@ -823,18 +831,56 @@ def test_mysql_role_checks_are_enforced_and_removed_atomically(scratch):
     assert db.engine.dialect.name == "mysql"
     assert _mysql_checks() == [("branch_assignments", "ck_branch_assignments_branch_role"),
                                ("organization_memberships", "ck_organization_memberships_organization_role")]
+    # The stored expressions compare bytes (MySQL normalises the text, e.g.
+    # "cast(`organization_role` as char charset binary) in (...)").
+    clauses = dict(_rows("SELECT CONSTRAINT_NAME, CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS "
+                         "WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME IN "
+                         "('ck_organization_memberships_organization_role', 'ck_branch_assignments_branch_role')"))
+    assert len(clauses) == 2 and all("binary" in clause.lower() for clause in clauses.values()), clauses
+    rejected = {"organization_memberships.organization_role": ("manager", "staff", "Admin", "ADMIN", "aDmin",
+                                                               "admin ", "ádmin", "Owner", ""),
+                "branch_assignments.branch_role": ("owner", "admin", "Staff", "STAFF", "staff ", "stáff",
+                                                   "Manager", "")}
+    accepted = {"organization_memberships.organization_role": ("owner", "admin", None),
+                "branch_assignments.branch_role": ("manager", "staff", None)}
     with db.engine.connect() as conn:
-        for sql in ("UPDATE organization_memberships SET organization_role = 'manager'",
-                    "UPDATE organization_memberships SET organization_role = 'Admin'",
-                    "UPDATE branch_assignments SET branch_role = 'owner'",
-                    "UPDATE branch_assignments SET branch_role = ''"):
-            with rejected_by_check_constraint():
-                conn.execute(sa.text(sql))
-            conn.rollback()
+        for target, values in rejected.items():
+            table, column = target.split(".")
+            for value in values:   # exact canonical values only: case, accent and padding all refused
+                with rejected_by_check_constraint():
+                    conn.execute(sa.text(f"UPDATE {table} SET {column} = :v"), {"v": value})
+                conn.rollback()
+        for target, values in accepted.items():
+            table, column = target.split(".")
+            for value in values:
+                conn.execute(sa.text(f"UPDATE {table} SET {column} = :v"), {"v": value})
+                assert conn.execute(sa.text(f"SELECT DISTINCT {column} FROM {table}")).scalars().all() == [value]
+                conn.rollback()
     downgrade(revision=O2)
     assert _mysql_checks() == []
     assert _rows("SELECT TABLE_NAME, CONSTRAINT_NAME, CONSTRAINT_TYPE FROM information_schema.TABLE_CONSTRAINTS "
                  "WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY 1, 2") == constraints_o2
+
+
+def test_mysql_migrated_and_model_checks_are_identical(scratch):
+    """On MySQL the migrated CHECKs and the ones the models emit
+    (create_all) are stored identically -- the same server-normalised
+    CHECK_CLAUSE under the same names -- so both paths enforce the same
+    exact-value rule."""
+    _mysql_only()
+    _small_o2()
+    upgrade()
+    query = ("SELECT CONSTRAINT_NAME, CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS "
+             "WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME IN "
+             "('ck_organization_memberships_organization_role', 'ck_branch_assignments_branch_role') "
+             "ORDER BY CONSTRAINT_NAME")
+    migrated = _rows(query)
+    db.session.remove()
+    db.engine.dispose()
+    wipe_mysql_schema(MYSQL_URL)
+    db.create_all()
+    from_models = _rows(query)
+    assert len(migrated) == 2 and migrated == from_models
 
 
 def test_mysql_leftover_check_name_elsewhere_is_refused(scratch, capfd):
@@ -842,7 +888,8 @@ def test_mysql_leftover_check_name_elsewhere_is_refused(scratch, capfd):
     would break the ADD CONSTRAINT; R9 refuses first."""
     _mysql_only()
     _small_o2()
-    _exec("ALTER TABLE organizations ADD CONSTRAINT ck_branch_assignments_branch_role CHECK (id > 0)")
+    # Not on ``id``: MySQL refuses a CHECK on an AUTO_INCREMENT column (3818).
+    _exec("ALTER TABLE organizations ADD CONSTRAINT ck_branch_assignments_branch_role CHECK (name <> '')")
     _assert_refused(capfd, "R9 branch_assignments.branch_role: CHECK constraint already present")
 
 

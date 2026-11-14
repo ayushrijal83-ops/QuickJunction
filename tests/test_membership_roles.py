@@ -10,8 +10,13 @@ Migration 9a3e6c1d7b54 is covered by tests/test_membership_roles_migration.py.
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql as mysql_dialect
+from sqlalchemy.dialects import sqlite as sqlite_dialect
+from sqlalchemy.schema import CreateTable
 
 from app.extensions import db as _db
 from app.models import organization as org_models
@@ -27,6 +32,7 @@ from app.utils.permissions import (
 from tests.conftest import make_user, rejected_by_check_constraint
 
 PASSWORD = "correct-horse-1"
+_MIGRATION = importlib.import_module("migrations.versions.9a3e6c1d7b54_add_membership_roles")
 
 
 @pytest.fixture
@@ -140,13 +146,21 @@ def test_no_path_writes_owner_or_manager(boss):
     ("organization_memberships", "organization_role", "manager"),
     ("organization_memberships", "organization_role", "staff"),
     ("organization_memberships", "organization_role", "Admin"),
+    ("organization_memberships", "organization_role", "ADMIN"),
+    ("organization_memberships", "organization_role", "admin "),       # trailing space (PAD SPACE collations)
+    ("organization_memberships", "organization_role", "ádmin"),   # accent (accent-insensitive collations)
     ("organization_memberships", "organization_role", ""),
     ("branch_assignments", "branch_role", "admin"),
     ("branch_assignments", "branch_role", "owner"),
     ("branch_assignments", "branch_role", "Staff"),
+    ("branch_assignments", "branch_role", "STAFF"),
+    ("branch_assignments", "branch_role", "staff "),
+    ("branch_assignments", "branch_role", "stáff"),
     ("branch_assignments", "branch_role", ""),
 ])
 def test_role_checks_reject_values_outside_their_allow_list(boss, table, column, value):
+    """The same exact-value policy on SQLite and on MySQL (whose collations
+    would otherwise accept case, accent and trailing-space variants)."""
     _enroll(boss)
     with rejected_by_check_constraint():
         _db.session.execute(sa.text(f"UPDATE {table} SET {column} = :v"), {"v": value})
@@ -165,6 +179,22 @@ def test_role_checks_accept_their_values_and_null(boss, table, column, values):
         _db.session.execute(sa.text(f"UPDATE {table} SET {column} = :v"), {"v": value})
         assert _db.session.execute(sa.text(f"SELECT {column} FROM {table}")).scalar() == value
         _db.session.rollback()
+
+
+@pytest.mark.parametrize("dialect", [sqlite_dialect.dialect(), mysql_dialect.dialect()], ids=["sqlite", "mysql"])
+def test_model_and_migration_emit_the_same_exact_value_check_per_dialect(dialect):
+    """Each dialect gets exactly one CHECK per role column, with the same
+    text the migration adds for that dialect: ``col IN (...)`` on SQLite,
+    ``CAST(col AS BINARY) IN (...)`` on MySQL. Compiled offline, so both
+    dialects are checked on every backend."""
+    for model, rc in ((OrganizationMembership, _MIGRATION.ORGANIZATION_ROLE),
+                      (BranchAssignment, _MIGRATION.BRANCH_ROLE)):
+        ddl = str(CreateTable(model.__table__).compile(dialect=dialect))
+        lines = [line.strip().rstrip(",") for line in ddl.splitlines() if rc.check in line]
+        assert lines == [f"CONSTRAINT {rc.check} CHECK ({rc.check_sql(dialect.name)})"]
+        assert lines[0] == f"CONSTRAINT {rc.check} CHECK ({org_models.role_check_sql(rc.column, rc.values, dialect.name)})"
+    assert "AS BINARY" in _MIGRATION.ORGANIZATION_ROLE.check_sql("mysql")
+    assert "AS BINARY" not in _MIGRATION.ORGANIZATION_ROLE.check_sql("sqlite")
 
 
 # --- consistency check and CLI ----------------------------------------------------------------------

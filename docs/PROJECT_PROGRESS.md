@@ -4789,9 +4789,11 @@ complete.
 
 # O3.3 — Membership Roles (storage and backfill)
 
-Implemented 2026-11-14 on top of `98ea31e` (O3.2 closed). **Not yet
-committed, pushed or CI-verified**; this section records the local
-evidence. Stores the approved O3 membership roles on the O2 rows and
+Implemented 2026-11-14 on top of `98ea31e` (O3.2 closed); committed as
+`add6005` and pushed. **Its CI run `43596369223` failed on MySQL** (see
+"First CI run" below); the corrections are implemented but **not yet
+committed or CI-verified**, and O3.3 is not closed. This section records the
+local evidence. Stores the approved O3 membership roles on the O2 rows and
 backfills them, **without enforcing anything**: no route, service,
 eligibility rule or permission check changed, and the role grant maps stay
 empty, so a stored role grants nothing.
@@ -4823,7 +4825,7 @@ empty, so a stored role grants nothing.
 
 | Part | What it is |
 | --- | --- |
-| Schema | `organization_memberships.organization_role` VARCHAR(16) NULL, `ck_organization_memberships_organization_role`: `organization_role IN ('owner', 'admin')`; `branch_assignments.branch_role` VARCHAR(16) NULL, `ck_branch_assignments_branch_role`: `branch_role IN ('manager', 'staff')`. No index, foreign key or audit event |
+| Schema | `organization_memberships.organization_role` VARCHAR(16) NULL with `ck_organization_memberships_organization_role`, and `branch_assignments.branch_role` VARCHAR(16) NULL with `ck_branch_assignments_branch_role`. Each CHECK accepts only the exact lowercase values (`owner`/`admin`; `manager`/`staff`) or NULL, with **dialect-specific text**: SQLite `organization_role IN ('owner', 'admin')` (SQLite compares bytes by default); MySQL `CAST(organization_role AS BINARY) IN ('owner', 'admin')` (likewise for `branch_role`), because MySQL compares with the column's collation -- `utf8mb4_unicode_ci` in production, `utf8mb4_0900_ai_ci` on a default server -- which is case- and accent-insensitive (and PAD SPACE for `unicode_ci`). The model declares both (`role_check_sql`, `ddl_if(dialect=...)`), so `create_all` emits the same text as the migration for each dialect. No index, foreign key or audit event |
 | Enums | `OrganizationRole` and `BranchRole` now live in `app/models/organization.py`; `app/utils/permissions.py` imports them, so its existing imports name the same classes |
 | Migration `9a3e6c1d7b54` | Validates (R1--R9, read-only, LEFT JOINs) before any DDL; adds each column with one `ALTER TABLE` carrying its CHECK; backfills with two UPDATEs; verifies the result and that no id, row or lifecycle value changed, in the transaction Alembic stamps the version in |
 | Services | `enroll_new_account`, `add_member` and `assign_branch` write the role the account's global role implies (`organization_role_for` / `branch_role_for`); reinstating keeps it. Signatures and transaction ownership unchanged |
@@ -4869,33 +4871,59 @@ re-upgrading recomputes identical roles.
 
 ## Verification
 
-**CI: not yet run.** The O3.3 change is uncommitted; MySQL evidence will
-come from the CI `test-mysql` job and its new O3.3 guard (exactly 75
-passed). Nothing below is MySQL evidence.
+**First CI run (commit `add6005`, run `43596369223`): failed on MySQL.**
+SQLite, Redis and the dependency audit passed; `test-mysql` reported
+`4 failed, 2965 passed, 30 skipped, 10 errors`, so its guard steps did not
+run. All other O3.3 tests passed on MySQL -- R1--R9 (orphans written with
+`FOREIGN_KEY_CHECKS=0` included), the populated backfill, states X and Y
+with recovery and retry, downgrade and its refusals -- and every O1/O2 test
+passed within the suite. Three causes, all corrected (not yet re-run on
+MySQL):
+
+1. **The five repair tests errored at setup** (`Table ... organizations
+   doesn't exist`): they used the shared `app` fixture (`create_all`), but
+   on MySQL conftest also wipes the shared schema before each test of a
+   "migration" module, and the wipe ran after `create_all`. They now build
+   their database through the real migrations, on the module's scratch
+   database.
+2. **The leftover-CHECK-name test's own setup failed**: MySQL refuses a
+   CHECK on an AUTO_INCREMENT column (3818). It now plants
+   `CHECK (name <> '')`.
+3. **MySQL accepted `'Admin'` and `'Staff'`**: the CHECKs were the generic
+   `col IN (...)`, which MySQL evaluates with the column's case-insensitive
+   collation. Approved fix (option B, exact canonical values only): the
+   MySQL CHECKs compare bytes, `CAST(col AS BINARY) IN (...)`, while
+   SQLite keeps `col IN (...)`; both reject case, accent and trailing-space
+   variants. Tests now assert the same exact-value rules on both backends,
+   plus a MySQL-only check that the migrated and model-created CHECKs are
+   stored identically. O3.3 tests 75 -> 84; CI guard 84.
+
+Nothing below is MySQL evidence.
 
 **Local runs (Windows, Python 3.10.11, SQLite 3.40.1, `.venv_new`):**
 
 | Run | Result |
 | --- | --- |
-| `tests/test_membership_roles.py` | **36 passed**: role enums defined once and re-exported; the fixed rule; roles written by `create_admin` (a pending admin), `invite_staff`, `seed_demo`, `add_member` / `assign_branch` for six account states; reinstating keeps roles; no path writes `owner` / `manager`; both CHECKs reject 8 bad values and accept their values and NULL; the new consistency kinds; CLI output and exit 1; empty grant maps; stored roles change no permission or eligibility for any account state |
-| `tests/test_membership_roles_migration.py` | **36 passed, 3 skipped** (the three MySQL-only tests): fresh; populated (13 workforce accounts in every state, every lifecycle variant, trading data) -- exact roles, ids and lifecycle identical, every other table and the ledger audit identical, no audit row, **no table rebuilt** (unchanged `sqlite_master` root pages), foreign keys valid, eligibility per the approved policy; R1--R9 each refused with ids and fix, nothing changed, through the real Flask-Migrate command as well as directly -- including orphans written with SQLite foreign keys off (missing user, missing organization, deleted membership, mismatched or missing branch); all problems reported at once; the documented service repairs with `actor`; the backfill verification catching wrong roles, changed rows and an orphan; one `ALTER TABLE` per table each way with nothing unrelated changed; downgrade/re-upgrade recomputing identical rows; downgrade refusing `owner`/`manager`; an interrupted downgrade completing on re-run |
+| `tests/test_membership_roles.py` | **44 passed**: role enums defined once and re-exported; the fixed rule; roles written by `create_admin` (a pending admin), `invite_staff`, `seed_demo`, `add_member` / `assign_branch` for six account states; reinstating keeps roles; no path writes `owner` / `manager`; both CHECKs reject 14 bad values -- other roles, case variants (`Admin`, `ADMIN`, `Staff`, `STAFF`), accented and trailing-space variants, `''` -- and accept their exact values and NULL; the model and the migration emit the same CHECK text for SQLite and for MySQL (compiled offline, both dialects); the new consistency kinds; CLI output and exit 1; empty grant maps; stored roles change no permission or eligibility for any account state |
+| `tests/test_membership_roles_migration.py` | **36 passed, 4 skipped** (the four MySQL-only tests): fresh; populated (13 workforce accounts in every state, every lifecycle variant, trading data) -- exact roles, ids and lifecycle identical, every other table and the ledger audit identical, no audit row, **no table rebuilt** (unchanged `sqlite_master` root pages), foreign keys valid, eligibility per the approved policy; R1--R9 each refused with ids and fix, nothing changed, through the real Flask-Migrate command as well as directly -- including orphans written with SQLite foreign keys off (missing user, missing organization, deleted membership, mismatched or missing branch); all problems reported at once; the documented service repairs with `actor`; the backfill verification catching wrong roles, changed rows and an orphan; one `ALTER TABLE` per table each way with nothing unrelated changed; downgrade/re-upgrade recomputing identical rows; downgrade refusing `owner`/`manager`; an interrupted downgrade completing on re-run |
 | Partial DDL on SQLite, through `migrations/env.py` | **Recorded:** a failure at the second `ALTER TABLE` leaves state X (`organization_role` with its CHECK, `branch_role` absent, all NULL, version `4f1d8b2c6a90`); a failure in the backfill verification leaves state Y (both columns, all NULL, same version). In both, a retry is refused by R9 and drops nothing; restoring the pre-upgrade file copy returns the identical O2 schema and data; the retry then succeeds |
 | Mutation checks (temporary edits to the migration file, restored and SHA-256-verified) | Each caught: staff backfill skipped (9 failures), R5 with an inner join (2), R7 ignoring revoked memberships (4), downgrade not skipping a finished table (1), R9 removed (4) |
 | O3.1 baseline (both files, unchanged) | **856 passed** |
 | O1 guard files / O2 guard files | 6 collected (4 passed, 2 MySQL-only skipped) / 45 collected (43 passed, 2 MySQL-only skipped) -- both guard counts unchanged |
-| O3.3 guard on a SQLite-only run | `72 passed, 3 skipped` -- the guard's `^75 passed` fails, as intended |
+| O3.3 guard on a SQLite-only run | `80 passed, 4 skipped` -- the guard's `^84 passed` fails, as intended |
 | `tests/test_migrations.py` (chain, model/migration schema comparison, full round trip) | **4 passed** |
-| Full suite, SQLite | **2948 passed, 56 skipped, 0 failed** (3004 tests; O3.2: 2876 / 53 -- +72 passed, +3 MySQL-only skips) |
+| Full suite, SQLite | **2956 passed, 57 skipped, 0 failed** (3013 tests; O3.2: 2876 / 53 -- +80 passed, +4 MySQL-only skips) |
 | MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` locally |
 | `git diff --check` | clean |
 
 ## Known limitations
 
-- **No MySQL evidence yet.** MySQL's acceptance of `ADD CONSTRAINT ...
-  CHECK` with `ADD COLUMN` and `DROP CHECK` with `DROP COLUMN` in one
-  statement, the MySQL partial states, the orphan refusals with
-  `FOREIGN_KEY_CHECKS=0` and the three MySQL-only tests have not run; the
-  CI O3.3 guard (exactly 75 passed) is that evidence, still to come.
+- **MySQL evidence is incomplete.** The first CI run passed most O3.3
+  tests on MySQL (above) but failed three causes; the corrected exact-value
+  CHECKs (`CAST(col AS BINARY) IN (...)`), the repair tests on a migrated
+  database, the fixed leftover-name test and the new migrated-vs-model
+  CHECK comparison have not run on MySQL yet. The CI O3.3 guard (exactly 84
+  passed) is that evidence, still to come.
 - **The documented repairs were verified on the previous release (SQLite
   only).** In the final O3.3 review, the exact O3.2 commit `98ea31e` was
   extracted to an isolated directory (`git archive`; the working tree was not

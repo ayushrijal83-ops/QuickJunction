@@ -89,6 +89,54 @@ _REVOKED_CONSISTENT = (
 )
 
 
+# --- exact-value role CHECKs (O3.3) -------------------------------------------------------------
+#
+# The role columns accept only the exact canonical lowercase values. A plain
+# ``col IN ('owner', 'admin')`` is exact on SQLite (its default BINARY
+# collation compares bytes), but on MySQL it compares with the column's
+# collation -- utf8mb4_unicode_ci in production (scripts/db_setup.py),
+# utf8mb4_0900_ai_ci on a default MySQL 8 server -- which is case- and
+# accent-insensitive (and PAD SPACE for unicode_ci), so 'Admin', 'ADMIN',
+# 'ádmin' and 'admin ' would pass. On MySQL the CHECK therefore compares the
+# value's bytes: ``CAST(col AS BINARY)`` is a binary string, and a comparison
+# with a binary string is byte by byte -- case-, accent- and trailing-space-
+# sensitive -- whatever the column's character set or collation.
+#
+# The two texts are dialect-specific on purpose. Each CheckConstraint below
+# carries ``ddl_if(dialect=...)``, so ``create_all`` emits exactly one of them
+# per database, under the same name, and migration 9a3e6c1d7b54 adds the same
+# text for the same dialect (tests/test_membership_roles.py and
+# tests/test_migrations.py compare the two). Only SQLite and MySQL are
+# supported, as everywhere else in the schema.
+
+ROLE_CHECK_DIALECTS = ("sqlite", "mysql")
+
+
+def role_check_sql(column: str, values, dialect: str) -> str:
+    """The exact-value CHECK text for a role column on ``dialect``."""
+    listed = ", ".join(f"'{value}'" for value in values)
+    if dialect == "mysql":
+        return f"CAST({column} AS BINARY) IN ({listed})"
+    if dialect == "sqlite":
+        return f"{column} IN ({listed})"
+    raise ValueError(f"unsupported dialect for role CHECKs: {dialect!r}")
+
+
+def _role_checks(column: str, enum_cls: type[enum.Enum], name: str) -> tuple[sa.CheckConstraint, ...]:
+    values = [member.value for member in enum_cls]
+    return tuple(
+        sa.CheckConstraint(role_check_sql(column, values, dialect), name=name).ddl_if(dialect=dialect)
+        for dialect in ROLE_CHECK_DIALECTS
+    )
+
+
+def _role_type(enum_cls: type[enum.Enum]) -> sa.Enum:
+    """Same storage and value mapping as ``enum_column``, but without its
+    generic CHECK: the exact-value CHECKs above replace it."""
+    return sa.Enum(enum_cls, native_enum=False, create_constraint=False, length=16, validate_strings=True,
+                   values_callable=lambda cls: [member.value for member in cls])
+
+
 class OrganizationMembership(db.Model):
     __tablename__ = "organization_memberships"
     __table_args__ = (
@@ -96,6 +144,7 @@ class OrganizationMembership(db.Model):
         # Target of branch_assignments' composite foreign key.
         sa.UniqueConstraint("id", "organization_id", name="uq_organization_memberships_id_org"),
         sa.CheckConstraint(_REVOKED_CONSISTENT, name="ck_organization_memberships_revoked_consistent"),
+        *_role_checks("organization_role", OrganizationRole, "ck_organization_memberships_organization_role"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -108,12 +157,9 @@ class OrganizationMembership(db.Model):
         nullable=False, default=LifecycleStatus.ACTIVE,
     )
     # O3.3. ``admin`` for an ADMIN account, NULL for STAFF. Added by migration
-    # 9a3e6c1d7b54 as a plain ADD COLUMN with a column-level CHECK of exactly
-    # this text (tests/test_migrations.py compares the two).
-    organization_role: Mapped[OrganizationRole | None] = mapped_column(
-        enum_column(OrganizationRole, 16, name="ck_organization_memberships_organization_role"),
-        nullable=True,
-    )
+    # 9a3e6c1d7b54 as a plain ADD COLUMN with the exact-value CHECK declared in
+    # __table_args__ (dialect-specific text; see role_check_sql).
+    organization_role: Mapped[OrganizationRole | None] = mapped_column(_role_type(OrganizationRole), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     # NULL: created by the migration or a command-line path with no acting account.
     created_by_id: Mapped[int | None] = mapped_column(
@@ -149,6 +195,7 @@ class BranchAssignment(db.Model):
         ),
         sa.UniqueConstraint("membership_id", "branch_id", name="uq_branch_assignments_membership_branch"),
         sa.CheckConstraint(_REVOKED_CONSISTENT, name="ck_branch_assignments_revoked_consistent"),
+        *_role_checks("branch_role", BranchRole, "ck_branch_assignments_branch_role"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -163,11 +210,9 @@ class BranchAssignment(db.Model):
     )
     # O3.3. ``staff`` when the member is a STAFF account, NULL for ADMIN (an
     # ADMIN's authority is organization-wide; no branch-manager role is
-    # inferred). Added by migration 9a3e6c1d7b54, like organization_role.
-    branch_role: Mapped[BranchRole | None] = mapped_column(
-        enum_column(BranchRole, 16, name="ck_branch_assignments_branch_role"),
-        nullable=True,
-    )
+    # inferred). Added by migration 9a3e6c1d7b54, like organization_role, with
+    # the exact-value CHECK declared in __table_args__.
+    branch_role: Mapped[BranchRole | None] = mapped_column(_role_type(BranchRole), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, server_default=sa.func.now(), nullable=False)
     created_by_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True

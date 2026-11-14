@@ -12,6 +12,11 @@ enforcing anything**. Two nullable columns, each with a named CHECK:
 - ``branch_assignments.branch_role`` -- ``manager`` | ``staff``
   (``ck_branch_assignments_branch_role``).
 
+The CHECKs accept only those exact lowercase values (or NULL). Their text is
+dialect-specific: ``col IN (...)`` on SQLite, whose default comparison is
+already byte-exact, and ``CAST(col AS BINARY) IN (...)`` on MySQL, whose
+collations are case- and accent-insensitive -- see ``RoleColumn.check_sql``.
+
 Backfill, by a fixed rule from ``users.role`` and nothing else, on rows of
 every status (revoked ones stay revoked): an ADMIN's membership becomes
 ``admin`` and its assignments keep a NULL branch role; a STAFF member's
@@ -96,11 +101,24 @@ class RoleColumn:
     def __repr__(self) -> str:
         return f"RoleColumn({self.table}.{self.column})"
 
-    @property
-    def check_sql(self) -> str:
-        # Exactly the text the model's enum_column CHECK renders
-        # (tests/test_migrations.py compares the two).
-        return f"{self.column} IN (" + ", ".join(f"'{v}'" for v in self.values) + ")"
+    def check_sql(self, dialect: str) -> str:
+        """The exact-value CHECK text for ``dialect`` -- the same text the
+        model emits for that dialect (app/models/organization.py
+        ``role_check_sql``; tests/test_membership_roles.py and
+        tests/test_migrations.py compare them). Written out here rather than
+        imported, so this revision never changes with the application code.
+
+        SQLite compares strings byte by byte by default, so a plain ``IN`` is
+        exact there. MySQL compares with the column's collation
+        (utf8mb4_unicode_ci in production, utf8mb4_0900_ai_ci on a default
+        MySQL 8 server: case- and accent-insensitive), so the value is cast
+        to a binary string first and compared byte by byte -- 'Admin',
+        'ADMIN', 'ádmin' and 'admin ' are all rejected, whatever the column's
+        character set or collation."""
+        listed = ", ".join(f"'{v}'" for v in self.values)
+        if dialect == "mysql":
+            return f"CAST({self.column} AS BINARY) IN ({listed})"
+        return f"{self.column} IN ({listed})"
 
 
 ORGANIZATION_ROLE = RoleColumn("organization_memberships", "organization_role",
@@ -274,10 +292,10 @@ def add_role_column(conn, rc: RoleColumn) -> None:
     MySQL; no table rebuild on SQLite."""
     if conn.dialect.name == "mysql":
         conn.execute(sa.text(f"ALTER TABLE {rc.table} ADD COLUMN {rc.column} VARCHAR(16) NULL, "
-                             f"ADD CONSTRAINT {rc.check} CHECK ({rc.check_sql})"))
+                             f"ADD CONSTRAINT {rc.check} CHECK ({rc.check_sql('mysql')})"))
     else:
         conn.execute(sa.text(f"ALTER TABLE {rc.table} ADD COLUMN {rc.column} VARCHAR(16) "
-                             f"CONSTRAINT {rc.check} CHECK ({rc.check_sql})"))
+                             f"CONSTRAINT {rc.check} CHECK ({rc.check_sql('sqlite')})"))
 
 
 def drop_role_column(conn, rc: RoleColumn) -> None:
