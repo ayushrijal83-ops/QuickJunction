@@ -120,6 +120,11 @@ def _foreign_keys_off():
             if not restored:
                 connection.invalidate()       # never back into the pool with checks off
     assert restored, "foreign-key checks could not be restored; the connection was discarded"
+    # Reached only when the body succeeded. The session was committed on entry,
+    # so an open session transaction now was started by the body -- and on
+    # MySQL (REPEATABLE READ, a separate pooled connection) its snapshot would
+    # predate the writes above, so later reads through the session miss them.
+    assert not _db.session().in_transaction(), "the body used the session; write through the yielded connection"
 
 
 def _refused(user, code):
@@ -268,9 +273,10 @@ def test_a_stored_role_that_does_not_match_the_account_fails_closed(local, role,
 @pytest.mark.parametrize("role", [Role.ADMIN, Role.STAFF])
 def test_a_membership_in_another_organization_fails_closed(local, role):
     user = _enrolled(local, "member1", role)
+    user_id = user.id                       # load before the helper: its body must not touch the session
     with _foreign_keys_off() as connection:
         connection.execute(sa.text("UPDATE organization_memberships SET organization_id = 999 WHERE user_id = :u"),
-                           {"u": user.id})
+                           {"u": user_id})
     _refused(user, "wrong_organization")
 
 
@@ -327,10 +333,11 @@ def test_the_foreign_key_helper_rolls_back_and_restores_checks_when_the_body_rai
     closed. The exception must reach the caller, and the write must not
     survive."""
     user = _account("member1", Role.STAFF)
+    user_id = user.id                       # load before the helper: its body must not touch the session
     with pytest.raises(ZeroDivisionError):
         with _foreign_keys_off() as connection:
             physical = connection.connection.dbapi_connection
-            connection.execute(sa.text(_ORPHAN_MEMBERSHIP), {"u": user.id})     # accepted: checks are off
+            connection.execute(sa.text(_ORPHAN_MEMBERSHIP), {"u": user_id})     # accepted: checks are off
             assert connection.execute(sa.text(_ORPHANS)).scalar() == 1
             if _db.engine.dialect.name == "sqlite":
                 assert physical.in_transaction                                  # the PRAGMA-ignoring state
