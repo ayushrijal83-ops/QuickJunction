@@ -5011,9 +5011,12 @@ complete.
 
 # O3.4 — Membership-aware Authorization Context
 
-Implemented 2026-11-14 on top of `272da9b` (O3.3 closed). **Not yet
-committed, pushed or CI-verified**; this section records the local
-evidence. Adds a resolver that builds the `AuthContext` from the account's
+Implemented 2026-11-14 on top of `272da9b` (O3.3 closed); commit `616af27`,
+whose first CI run (`43847697588`) failed two MySQL tests (see "First CI
+run" below -- a transaction-ordering defect in the test, not in the
+resolver); corrected in commit `13c0589`, pushed to `origin/main` and
+verified by CI run `43855550400` (see Verification). **O3.4 is closed**
+(2026-11-16). Adds a resolver that builds the `AuthContext` from the account's
 real organization membership and branch assignment. **Context resolution
 only**: nothing calls it yet, and no grant, decorator, route, service,
 login, session or customer rule changed, so no one's access changed.
@@ -5097,19 +5100,62 @@ reflects the current database state.
 
 ## Verification
 
-**CI: not yet run.** MySQL evidence will come from the full `test-mysql`
-suite, where all 63 new tests run (none is backend-specific). Nothing below
-is MySQL evidence.
+**CI — the verification of record.** Commit
+`13c0589262603b2ae66e03ca2bfae69a8531b6a5`, CI run `43855550400`
+(https://github.com/ayushrijal83-ops/QuickJunction/actions/runs/43855550400):
+**SUCCESS**, all four jobs green, **0 failed** in every job.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **3046 passed, 30 skipped, 0 failed** (O3.3: 2983 / 30). The +63 is exactly the O3.4 test count and the skip count is unchanged, so **all 63 O3.4 tests executed on MySQL** -- including the five integrity tests whose invalid rows are written under `FOREIGN_KEY_CHECKS=0` and the two foreign-key helper tests |
+| O3.3 membership-role guard | **84 passed** |
+| O2 organization-membership guard | **45 passed** |
+| O1 installation-identity guard | **6 passed** |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **3014 passed, 62 skipped, 0 failed** (O3.3: 2951 / 62 -- +63 passed, no new skips) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** |
+
+The full-suite skip counts are unchanged from O3.3 in both jobs (MySQL 30,
+SQLite 62), so no O3.4 test was skipped on either backend. O3.4 adds no CI
+guard; the full-suite counts are its evidence.
+
+**First CI run (commit `616af27`, run `43847697588`): failed on MySQL.**
+SQLite, Redis and the dependency audit passed; `test-mysql` reported
+`2 failed, 3044 passed, 30 skipped`: both cases of
+`test_a_membership_in_another_organization_fails_closed`
+(`DID NOT RAISE WorkforceContextError`). **The defect was in the test, not
+in the resolver.** The test read `user.id` inside the `_foreign_keys_off()`
+body; the preceding commit had expired `user`, so that read reloaded it
+through the session, opening a session transaction on a second pooled
+connection *before* the helper's UPDATE. Under MySQL's REPEATABLE READ that
+transaction's snapshot predated the committed UPDATE, and the resolver --
+which reads through the caller's session by design (see "Session and
+transaction safety") -- saw the original, valid organization. Under the
+tests' in-memory SQLite (`StaticPool`) the session and the helper share one
+connection, so the same ordering passed locally. The other three tests that
+write with foreign keys off do not touch the session in the helper body and
+passed on MySQL. Corrected in commit `13c0589` (`tests/test_auth_context.py`
+only): the id is read before the helper (also in the raising-body helper
+test), and the helper now asserts, after a successful body, that the body
+opened no session transaction -- so the same mistake now fails on SQLite
+too (checked locally against the unfixed test before the fix). The resolver
+was not changed. Verified by CI run `43855550400` (above).
+
+The local runs below are SQLite only; the MySQL evidence is the CI run of
+record above.
 
 **Local runs (Windows, Python 3.10.11, SQLite 3.40.1, `.venv_new`; the
 focused and full-suite counts were re-verified locally on 2026-11-16 after
-the foreign-key test-helper correction):**
+the foreign-key test-helper correction, and again after the
+transaction-ordering correction in `13c0589`, with the same counts):**
 
 | Run | Result |
 | --- | --- |
 | `tests/test_auth_context.py` | **63 passed, 0 skipped, 0 failed**: active ADMIN (approved and pending) and approved STAFF resolve with the local ids and their roles, holding exactly their compatibility grants; pending STAFF, inactive STAFF and ADMIN and customers keep the global-only context with **no query** (even with broken or customer membership rows present); missing, revoked (and reinstated), missing-assignment and revoked-assignment states fail closed for ADMIN and STAFF; stored `owner` rejected; six role mismatches (ADMIN without `admin`, ADMIN with `manager` / `staff`, STAFF with `admin`, STAFF with `manager` / none); membership in another organization, assignment to another branch or organization (written with foreign keys off); the foreign-key test helper turns checks back on on the same physical connection it turned them off on, after a successful body and after a body that writes and then raises (the write is rolled back, the exception reaches the caller, and an orphan insert is rejected afterwards); missing and invalid identity; pure-rule cases for ambiguous memberships and assignments, unexpected statuses and values, and every identity rule; a simulated database failure fails closed without the driver message, without flushing or rolling back the caller's work; resolution writes nothing and flushes nothing even when the account row must be reloaded; exactly two queries; query, body, header and session values cannot change the result and nothing is stored; a revocation between two requests is seen; the existing session gate still decides who is signed in; `auth_context_for_user()` / `current_auth_context()` and all grant maps unchanged |
 | Mutation checks (temporary edits to the resolver, restored and SHA-256-verified) | Each caught: reading the account outside `no_autoflush` (2 failures), owner accepted (2), revoked assignment accepted (5), wrong branch accepted (3) |
-| Mutation checks (temporary edits to the test helper, restored and SHA-256-verified) | Each caught by the raising-body test: no rollback before restoring checks (SQLite ignores the PRAGMA inside a transaction; the connection is invalidated and the test fails), the helper swallowing the body's exception (`DID NOT RAISE`) |
+| Mutation checks (temporary edits to the test helper, restored and SHA-256-verified) | Each caught by the raising-body test: no rollback before restoring checks (SQLite ignores the PRAGMA inside a transaction; the connection is invalidated and the test fails), the helper swallowing the body's exception (`DID NOT RAISE`); both re-checked after `13c0589`. The session guard added in `13c0589` failed both wrong-organization membership cases while their bodies still read `user.id` |
 | O3.1 baseline (both files, unchanged) | **856 passed** |
 | `tests/test_permissions.py` (O3.2, unchanged) | **548 passed** |
 | O3.3 files (unchanged) | **80 passed, 4 skipped** (the four MySQL-only tests) |
@@ -5127,17 +5173,25 @@ the foreign-key test-helper correction):**
   response here), is a later milestone.
 - One installation holds one organization and one branch (O1), so the
   resolver requires exactly that; a multi-branch model must revisit it.
-- MySQL evidence will come from CI only.
+- **MySQL evidence comes from CI only** (run `43855550400`, MySQL 8.0);
+  nothing has been run against a local MySQL server or a real installation.
+- The MySQL CI job took about 38.5 minutes (full suite about 33; O3.3:
+  about 27 for the whole job) against its 45-minute timeout. The first
+  O3.4 run's MySQL suite took about 18 minutes, so runner speed varies, but
+  the headroom is narrowing and should be watched.
 
 ## Files changed
 
 New: `app/services/auth_context.py`, `tests/test_auth_context.py`. Changed:
 `docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`. No existing code or test
-changed; no migration.
+changed; no migration. Correction commit `13c0589` (after the first CI run):
+`tests/test_auth_context.py`. Documentation closure: `docs/STATUS.md`,
+`docs/PROJECT_PROGRESS.md`.
 
 ## Next
 
-Review, then commit, push and CI verification of O3.4. O3 as a whole is not
+**O3.5 — the next step of the approved O3 implementation sequence.** Not
+started; it waits for review and explicit approval. O3 as a whole is not
 complete.
 
 ---
