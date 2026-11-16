@@ -192,6 +192,11 @@ a client. CI reports these advisories without failing.
 | SQLite after O3.3 (CI `test-sqlite`) | **2951 passed, 62 skipped, 0 failed** (O3.2: 2871 / 58 -- +80 passed, +4 skips: the four MySQL-only O3.3 tests) |
 | Redis and dependency audit after O3.3 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
 | MySQL 8.0 locally after O3.3 | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
+| O3.4 — membership-aware authorization context | **Implemented, not yet committed or CI-verified.** New `app/services/auth_context.py`: `resolve_auth_context(user)` and `current_resolved_auth_context()` build the `AuthContext` from the database as it is -- the local organization and branch (O1), the account's membership and branch assignment and their stored roles (O2, O3.3) -- and fill in `organization_id`, `branch_id`, `organization_role` and `branch_role`. Customers and ineligible accounts (inactive; STAFF awaiting approval) keep the existing global-only context, with no workforce lookup. An eligible workforce account (active ADMIN whatever `staff_approved` says; active approved STAFF) needs exactly one active membership in the local organization with the role its account implies (`admin` / none; `owner` rejected) and exactly one active assignment to the local branch (none / `staff`); anything else -- missing, revoked, wrong organization or branch, mismatched role, ambiguous rows, invalid installation identity, unreadable data -- **fails closed** with `WorkforceContextError` (no silent fallback to global-role grants). Read-only: two column-only queries through the caller's session inside `no_autoflush`; never flushes, writes, commits or rolls back; never stored in `g` or the session; nothing from the request is trusted. **Nothing uses it yet**: `auth_context_for_user()` / `current_auth_context()`, `COMPATIBILITY_GRANTS`, `permissions_for()`, `has_permission()`, the empty role grant maps, every decorator, route, service and session rule are unchanged, so no access changes. No migration. Details: `docs/PROJECT_PROGRESS.md` "O3.4" |
+| Migration head after O3.4 | **`9a3e6c1d7b54`** -- unchanged (no migration) |
+| Tests after O3.4 | +63: `tests/test_auth_context.py` (none backend-specific, so all run on SQLite and MySQL). No new CI guard; no existing test changed |
+| SQLite after O3.4 (local, Windows, Python 3.10; verified locally, not CI) | **3019 passed, 57 skipped, 0 failed** (O3.3: 2956 / 57 -- +63 passed, no new skips); `tests/test_auth_context.py` alone **63 passed** |
+| MySQL 8.0 after O3.4 | **not yet verified** -- no `TEST_DATABASE_URL` locally; the CI `test-mysql` job is the MySQL evidence, still to run |
 
 ---
 
@@ -287,12 +292,13 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 
 ## Next planned milestone
 
-**O3.4 — the next step of the approved O3 implementation sequence.** Not
-started; it waits for review and explicit approval. O3 replaces the
-global-role checks with organization and branch permissions in steps. O3.1
-(the regression baseline), O3.2 (the permission foundation) and O3.3 (the
-membership roles, stored and backfilled without enforcement) are done and
-CI-verified; O3 as a whole is not. O3.1 is the baseline later steps must
+**O3.4 — membership-aware authorization context.** Implemented; awaiting
+review, commit and CI verification. O3 replaces the global-role checks with
+organization and branch permissions in steps. O3.1 (the regression
+baseline), O3.2 (the permission foundation) and O3.3 (the membership roles,
+stored and backfilled without enforcement) are done and CI-verified; O3.4
+resolves the context from membership without using it for any decision; O3
+as a whole is not done. O3.1 is the baseline later steps must
 keep green, changing a pinned test only on purpose. The pending STAFF and
 ADMIN eligibility policy is settled (see above).
 

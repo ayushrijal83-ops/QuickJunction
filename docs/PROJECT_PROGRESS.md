@@ -5008,3 +5008,136 @@ started; it waits for review and explicit approval. O3 as a whole is not
 complete.
 
 ---
+
+# O3.4 — Membership-aware Authorization Context
+
+Implemented 2026-11-14 on top of `272da9b` (O3.3 closed). **Not yet
+committed, pushed or CI-verified**; this section records the local
+evidence. Adds a resolver that builds the `AuthContext` from the account's
+real organization membership and branch assignment. **Context resolution
+only**: nothing calls it yet, and no grant, decorator, route, service,
+login, session or customer rule changed, so no one's access changed.
+
+## Approved decisions
+
+- **D1** a new resolver in `app/services/auth_context.py`;
+  `auth_context_for_user()` and `current_auth_context()` stay as they are
+  (membership-blind, as `tests/test_permissions.py` pins them). Which
+  checks move onto the resolved context is a later, enforcement milestone.
+- **D2** an eligible workforce account whose organization context cannot be
+  trusted raises `WorkforceContextError` -- never a context, because any
+  context for an eligible account still carries its global-role
+  compatibility grants (a silent fallback), and never `None`, which would
+  read as "signed out".
+- **D3** customers and ineligible accounts get the existing global-only
+  context, with no workforce lookup.
+- **D4** no membership or assignment status fields on `AuthContext`: a
+  resolved workforce context implies both are active.
+- **D5** a stored `owner` role is rejected; owner designation is a later
+  milestone.
+
+## What this adds
+
+| Part | What it is |
+| --- | --- |
+| `resolve_auth_context(user)` | The account's context from the current database state |
+| `current_resolved_auth_context()` | The same for the signed-in user, through `get_current_user()` unchanged; `None` when that returns `None` |
+| `WorkforceContextError` | Raised to fail closed; `code` names the reason, the message carries ids only |
+| `local_organization_and_branch_ids()`, `workforce_context()` | The rules as pure functions over the two queries' rows (so states the database constraints prevent can be tested too) |
+
+**Who is resolved.** Customers and ineligible accounts (inactive; STAFF with
+`staff_approved = false`) keep `auth_context_for_user(user)`, which holds no
+permission, and no query is made. An eligible ADMIN (active, whatever
+`staff_approved` says) or eligible STAFF (active and approved) is resolved
+in full.
+
+**Queries (two per resolution, bounded).** Q1 reads the installation
+identity's structure in one statement: the installation row joined to its
+branch and organization, plus the counts of installation rows,
+organizations and branches. Q2 reads every membership the account holds, in
+any organization, left-joined to every assignment under it, so duplicates
+and wrong organizations or branches are seen rather than filtered out. Both
+select plain columns: no ORM object enters the session. The lookups use
+existing keys (MySQL's foreign-key index on `organization_memberships.user_id`;
+the `(membership_id, branch_id)` unique key). No index or migration added.
+
+**A workforce context requires all of:** a valid identity (exactly one
+installation row with id 1, one organization, one branch, correctly linked);
+exactly one membership, in the local organization, `active`, with organization
+role `admin` for ADMIN and none for STAFF; exactly one assignment, in the
+membership's organization, to the local branch, `active`, with branch role
+none for ADMIN and `staff` for STAFF. It then returns the `AuthContext` with
+`organization_id`, `branch_id`, `organization_role` and `branch_role` set.
+Permissions are unchanged by those fields: the role grant maps are empty.
+
+**Fail-closed codes:** `missing_identity`, `invalid_identity`,
+`missing_membership`, `ambiguous_membership`, `wrong_organization`,
+`revoked_membership`, `unexpected_owner`, `role_mismatch`,
+`missing_assignment`, `wrong_branch`, `ambiguous_assignment`,
+`revoked_assignment`, `database_error`. Nothing is created, repaired,
+reactivated or defaulted.
+
+**Session and transaction safety.** The resolver reads through the
+caller's session (consistent with the snapshot `get_current_user()` used)
+inside `no_autoflush`, including the read of the account row itself: an
+expired attribute is reloaded from the database, and that reload would
+otherwise flush the caller's pending changes first. Testing found exactly
+that case, and the fix covers it. It never writes, flushes, commits or
+rolls back. It does not use `get_installation()`, which rolls the session
+back on a database error. A database error becomes `WorkforceContextError`
+(`database_error`) naming only the exception class, never the driver
+message. A separate connection was rejected: under the tests' in-memory
+SQLite (`StaticPool`) it would be the session's own connection, and
+releasing it could roll back the caller's work.
+
+**Trust boundary.** Organization, branch and roles come only from rows
+found by the account id. Request parameters, bodies, headers and session
+keys are never read, and the result is never cached or stored, so each call
+reflects the current database state.
+
+## Verification
+
+**CI: not yet run.** MySQL evidence will come from the full `test-mysql`
+suite, where all 63 new tests run (none is backend-specific). Nothing below
+is MySQL evidence.
+
+**Local runs (Windows, Python 3.10.11, SQLite 3.40.1, `.venv_new`; the
+focused and full-suite counts were re-verified locally on 2026-11-16 after
+the foreign-key test-helper correction):**
+
+| Run | Result |
+| --- | --- |
+| `tests/test_auth_context.py` | **63 passed, 0 skipped, 0 failed**: active ADMIN (approved and pending) and approved STAFF resolve with the local ids and their roles, holding exactly their compatibility grants; pending STAFF, inactive STAFF and ADMIN and customers keep the global-only context with **no query** (even with broken or customer membership rows present); missing, revoked (and reinstated), missing-assignment and revoked-assignment states fail closed for ADMIN and STAFF; stored `owner` rejected; six role mismatches (ADMIN without `admin`, ADMIN with `manager` / `staff`, STAFF with `admin`, STAFF with `manager` / none); membership in another organization, assignment to another branch or organization (written with foreign keys off); the foreign-key test helper turns checks back on on the same physical connection it turned them off on, after a successful body and after a body that writes and then raises (the write is rolled back, the exception reaches the caller, and an orphan insert is rejected afterwards); missing and invalid identity; pure-rule cases for ambiguous memberships and assignments, unexpected statuses and values, and every identity rule; a simulated database failure fails closed without the driver message, without flushing or rolling back the caller's work; resolution writes nothing and flushes nothing even when the account row must be reloaded; exactly two queries; query, body, header and session values cannot change the result and nothing is stored; a revocation between two requests is seen; the existing session gate still decides who is signed in; `auth_context_for_user()` / `current_auth_context()` and all grant maps unchanged |
+| Mutation checks (temporary edits to the resolver, restored and SHA-256-verified) | Each caught: reading the account outside `no_autoflush` (2 failures), owner accepted (2), revoked assignment accepted (5), wrong branch accepted (3) |
+| Mutation checks (temporary edits to the test helper, restored and SHA-256-verified) | Each caught by the raising-body test: no rollback before restoring checks (SQLite ignores the PRAGMA inside a transaction; the connection is invalidated and the test fails), the helper swallowing the body's exception (`DID NOT RAISE`) |
+| O3.1 baseline (both files, unchanged) | **856 passed** |
+| `tests/test_permissions.py` (O3.2, unchanged) | **548 passed** |
+| O3.3 files (unchanged) | **80 passed, 4 skipped** (the four MySQL-only tests) |
+| O2 files (unchanged) | **43 passed, 2 skipped** (the two MySQL-only tests) |
+| Full suite, SQLite (local) | **3019 passed, 57 skipped, 0 failed** (O3.3: 2956 / 57 -- +63 passed, no new skips) |
+| MySQL 8.0 (local) | **not run** -- no `TEST_DATABASE_URL` locally |
+| `git diff --check` | clean |
+
+## Known limitations
+
+- **Nothing uses the resolver yet.** It reports the membership-aware
+  context; no decision depends on it. Moving `current_auth_context()`,
+  `@permission_required` or any check onto it, and deciding how a
+  `WorkforceContextError` is answered (it is not translated into an HTTP
+  response here), is a later milestone.
+- One installation holds one organization and one branch (O1), so the
+  resolver requires exactly that; a multi-branch model must revisit it.
+- MySQL evidence will come from CI only.
+
+## Files changed
+
+New: `app/services/auth_context.py`, `tests/test_auth_context.py`. Changed:
+`docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`. No existing code or test
+changed; no migration.
+
+## Next
+
+Review, then commit, push and CI verification of O3.4. O3 as a whole is not
+complete.
+
+---
