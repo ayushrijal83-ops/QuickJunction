@@ -5198,9 +5198,11 @@ complete.
 
 # O3.5 — Workforce Permission Policy (defined and pinned, inert)
 
-Implemented 2026-11-17 on top of `9631be6` (O3.4 closed). **Not yet
-committed or CI-verified**: it waits for the product owner's review of the
-implementation. Defines what each approved O3 membership role is *meant* to
+Implemented 2026-11-17 on top of `9631be6` (O3.4 closed); commit
+`fa4249c` (`fa4249cc633c62ace97991ca43fada205d5a5fde`), pushed to
+`origin/main` and verified by CI run `44011403083` (see Verification) --
+all four jobs green on the first run. **O3.5 is closed** (2026-11-17).
+Defines what each approved O3 membership role is *meant* to
 hold, as an immutable, fully classified policy with recorded restrictions --
 and **activates none of it**: no grant, evaluation function, decorator,
 route, service, resolver, session or customer rule changed, so no one's
@@ -5380,10 +5382,45 @@ migrations; UI or CLI.
 
 ## Verification
 
-**CI: not yet run.** O3.5 is uncommitted, pending the product owner's
-review. The runs below are local, on SQLite only (Windows, Python 3.10.11,
-SQLite 3.40.1, `.venv_new`, 2026-11-17). Nothing in O3.5 is
-backend-specific; the MySQL evidence will be the CI run of record.
+**CI -- the verification of record.** Commit
+`fa4249cc633c62ace97991ca43fada205d5a5fde`, CI run `44011403083`
+(https://github.com/ayushrijal83-ops/QuickJunction/actions/runs/44011403083):
+**SUCCESS**, all four jobs green, **0 failed** in every job. The first run
+on the commit; no correction was needed.
+
+| Job | Result |
+| --- | --- |
+| Tests (MySQL 8.0), full suite | **3314 passed, 30 skipped, 0 failed** (O3.4: 3046 / 30). The +268 is exactly the O3.5 test count and the skip count is unchanged, so **all 268 O3.5 tests executed on MySQL**. The suite took about 28 minutes and the whole job about 33, against its 45-minute timeout (O3.4: about 38.5 for the job) |
+| O3.3 membership-role guard | **84 passed** |
+| O2 organization-membership guard | **45 passed** |
+| O1 installation-identity guard | **6 passed** |
+| MySQL concurrency guard | **15 passed** |
+| MySQL username-collation guard | **3 passed** |
+| Tests (SQLite), full suite | **3282 passed, 62 skipped, 0 failed** (O3.4: 3014 / 62 -- +268 passed, no new skips) |
+| Tests (Redis rate limiter) | **passed** -- 23 Redis tests passed (guard requires exactly 23); in-memory limiter 60 and route 41 passed |
+| Dependency audit (pip-audit) | **passed** -- runtime audit (`requirements.txt`, blocking): **no known vulnerabilities** |
+
+The full-suite skip counts are unchanged from O3.4 in both jobs (MySQL 30,
+SQLite 62), so no O3.5 test was skipped on either backend. O3.5 adds no CI
+guard; the full-suite counts are its evidence. CI's SQLite job skips 5 more
+tests than a local run (62 against 57) because it has no git-ignored
+`models/` directory; its passed count is 5 lower for the same reason.
+
+**Optional AI-stack audit (report-only).** The same job's second step,
+`pip-audit -r requirements-ai.txt`, reported **13 known vulnerabilities in
+3 packages** -- `torch` 2.10.0 (2), `transformers` 4.57.1 (10) and
+`accelerate` 1.14.0 (1) -- and exited with code 1. That step is
+`continue-on-error: true` by design (`.github/workflows/ci.yml`), so the
+job and the run succeeded. These are the same 13 advisories against the
+same pins that `docs/STATUS.md` has recorded since M0 ("record, do not
+upgrade"; the optional AI stack is not part of the pilot deployment and is
+to be disabled by default in production). Nothing new appeared, O3.5
+changed no dependency, and the advisories remain a known
+security-hardening item, deferred to the revisit of the AI stack. The
+blocking runtime audit found nothing.
+
+The local runs below are SQLite only (Windows, Python 3.10.11, SQLite
+3.40.1, `.venv_new`, 2026-11-17); the MySQL evidence is the CI run above.
 
 | Run | Result |
 | --- | --- |
@@ -5536,12 +5573,14 @@ Not decided in O3.5; each needs product-owner approval in a later milestone:
 New: `app/utils/role_matrix.py`, `tests/test_role_matrix.py`. Changed:
 `docs/PROJECT_PROGRESS.md`, `docs/STATUS.md`. No existing code or test
 changed; no migration; no CI workflow change (no backend-specific test, so
-no new guard).
+no new guard). Documentation closure (after CI run `44011403083`):
+`docs/STATUS.md`, `docs/PROJECT_PROGRESS.md`.
 
 ## Next
 
-O3.5 waits for the product owner's review of the implementation, then
-commit and CI verification. **O3.6 has not started** and needs its own
-approval. O3 as a whole is not complete.
+**O3.6 -- the next step of the approved O3 implementation sequence.** Not
+started; it waits for review and explicit approval. Its open decisions are
+listed above under "O3.6 dependencies and open architectural decisions". O3
+as a whole is not complete.
 
 ---
