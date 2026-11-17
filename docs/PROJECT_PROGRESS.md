@@ -5195,3 +5195,353 @@ started; it waits for review and explicit approval. O3 as a whole is not
 complete.
 
 ---
+
+# O3.5 — Workforce Permission Policy (defined and pinned, inert)
+
+Implemented 2026-11-17 on top of `9631be6` (O3.4 closed). **Not yet
+committed or CI-verified**: it waits for the product owner's review of the
+implementation. Defines what each approved O3 membership role is *meant* to
+hold, as an immutable, fully classified policy with recorded restrictions --
+and **activates none of it**: no grant, evaluation function, decorator,
+route, service, resolver, session or customer rule changed, so no one's
+access changed.
+
+## Approved decisions
+
+The O3.5 investigation (2026-11-17) proposed the matrix; the product owner
+approved the model, the milestone boundaries and the implementation plan,
+and confirmed the five open points the same day:
+
+- **Branch Manager** holds the Branch Staff set plus `tables.manage`,
+  `payments.view`, `reports.view` and `inventory.adjust`; `discounts.apply`
+  is capped at the existing staff cap. Denied: `refunds.create`,
+  `organization.view`, `organization.owner.manage`,
+  `organization.admins.manage`, `organization.members.manage`,
+  `accounts.manage`, `menu.manage`, `inventory.manage`, `audit.view`,
+  `branch.members.manage`, `branch.profile.manage`,
+  `settings.pricing.manage`. (Branch Managers cannot refund, invite members
+  or change the customer-facing branch profile; they manage physical tables;
+  they cannot change the pricing settings, which hold the staff cap that
+  limits them.)
+- **Organization Admin** holds today's ADMIN set (24) plus
+  `organization.view`; denied `organization.owner.manage`; 100 % discount
+  maximum (today's ADMIN rule). Cannot act against the Owner; may manage
+  other Admins only while the organization has no Owner -- approved in the
+  O3.5 brief (2026-11-17); it was an open question in the investigation,
+  not an earlier recorded decision.
+- **Organization Owner** holds all 26, including `refunds.create` and the
+  reserved `organization.owner.manage`; 100 % discount maximum. Owner
+  designation and transfer remain CLI-only (O3.3 D4).
+- **Branch Staff** holds exactly today's 10 STAFF compatibility
+  permissions.
+- **Scope:** branch roles hold only branch-scoped permissions; organization
+  roles hold their organization-scoped permissions and every branch
+  permission. No customer role.
+- **Target-sensitive permissions** (`accounts.manage`,
+  `organization.admins.manage`, `organization.members.manage`,
+  `branch.members.manage`) are all covered by R1, R2 and R3.
+- **R3 correction (2026-11-17, from the review of the first handoff).** R3
+  first covered only `organization.admins.manage` and was attached to the
+  Owner role, so once an Owner existed an Admin could still have reached an
+  Admin target through `accounts.manage`, `organization.members.manage` or
+  `branch.members.manage`. Corrected before any commit: R3 now covers all
+  four, and states its actors and target as data -- Organization Admin is
+  the affected actor, Organization Owner the permitted actor, Organization
+  Admin the protected target, on the condition that an Owner exists.
+- **The O3.4 resolver is unchanged:** a stored `owner` still fails with
+  `unexpected_owner`, a stored `manager` with the existing `role_mismatch`
+  (no new code).
+- Earlier decisions preserved: ADMIN assignments keep a NULL `branch_role`
+  (O3.3 D3); customers stay outside the workforce permission system.
+
+## The matrix
+
+✔ allowed · ✖ denied · † allowed, but the role's use of it is limited by
+the restrictions named (below; not enforced)
+
+| # | Permission | Scope | Owner | Org Admin | Branch Manager | Branch Staff |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `organization.view` | org | ✔ | ✔ | ✖ | ✖ |
+| 2 | `organization.owner.manage` | org | ✔ † R4 | ✖ | ✖ | ✖ |
+| 3 | `organization.admins.manage` | org | ✔ | ✔ † R1 R2 R3 | ✖ | ✖ |
+| 4 | `organization.members.manage` | org | ✔ | ✔ † R1 R2 R3 | ✖ | ✖ |
+| 5 | `menu.manage` | org | ✔ | ✔ | ✖ | ✖ |
+| 6 | `inventory.manage` | org | ✔ | ✔ | ✖ | ✖ |
+| 7 | `audit.view` | org | ✔ | ✔ | ✖ | ✖ |
+| 8 | `accounts.manage` | org | ✔ | ✔ † R1 R2 R3 | ✖ | ✖ |
+| 9 | `branch.members.manage` | branch | ✔ | ✔ † R1 R2 R3 | ✖ | ✖ |
+| 10 | `branch.profile.manage` | branch | ✔ | ✔ | ✖ | ✖ |
+| 11 | `tables.manage` | branch | ✔ | ✔ | ✔ | ✖ |
+| 12 | `tables.operate` | branch | ✔ | ✔ | ✔ | ✔ |
+| 13 | `orders.view` | branch | ✔ | ✔ | ✔ | ✔ |
+| 14 | `orders.manage` | branch | ✔ | ✔ | ✔ | ✔ |
+| 15 | `payments.record` | branch | ✔ | ✔ | ✔ | ✔ |
+| 16 | `payments.view` | branch | ✔ | ✔ | ✔ | ✖ |
+| 17 | `refunds.create` | branch | ✔ | ✔ | ✖ | ✖ |
+| 18 | `discounts.apply` | branch | ✔ (100 %) | ✔ (100 %) | ✔ † R5 (staff cap) | ✔ (staff cap) |
+| 19 | `settings.pricing.manage` | branch | ✔ | ✔ | ✖ | ✖ |
+| 20 | `menu.view` | branch | ✔ | ✔ | ✔ | ✔ |
+| 21 | `menu.availability` | branch | ✔ | ✔ | ✔ | ✔ |
+| 22 | `inventory.view` | branch | ✔ | ✔ | ✔ | ✔ |
+| 23 | `inventory.record` | branch | ✔ | ✔ | ✔ | ✔ |
+| 24 | `inventory.adjust` | branch | ✔ | ✔ | ✔ | ✖ |
+| 25 | `reservations.manage` | branch | ✔ | ✔ | ✔ | ✔ |
+| 26 | `reports.view` | branch | ✔ | ✔ | ✔ | ✖ |
+| | **allowed / denied** | | **26 / 0** | **25 / 1** | **14 / 12** | **10 / 16** |
+
+Staff ⊂ Manager ⊂ Admin ⊂ Owner (strict). Against `COMPATIBILITY_GRANTS`:
+Branch Staff = STAFF; Branch Manager = STAFF + 4 (a strict subset of ADMIN);
+Organization Admin = ADMIN + `organization.view`; Owner = ADMIN +
+`organization.view` + `organization.owner.manage`. No policy drops a
+permission its global role holds today.
+
+## Restrictions (recorded, **not enforced**)
+
+A static grant cannot express these. Each is `PolicyRestriction` metadata
+with `enforcement = NOT_ENFORCED`; nothing in the application applies them,
+and an ADMIN still holds every target-sensitive permission unconditionally
+(tested).
+
+Each restriction states, as data and not only in prose:
+
+- **affected actors** -- the roles whose use of the permissions is limited
+  (they hold those permissions in the matrix; the rule says when that is
+  not enough);
+- **protected targets** -- the roles of the account being acted on;
+- **permitted actors** -- the roles that keep the authority over those
+  targets;
+- **condition** -- the organization state the rule depends on (`always`,
+  `no_owner_exists`, `owner_exists`);
+- **effect** -- how those combine: `actor_denied`,
+  `actor_allowed_only_while`, `exclusive_to_permitted_actors` (the three
+  target-aware effects), `cli_only`, `discount_cap`.
+
+"The four" below are the target-sensitive permissions: `accounts.manage`,
+`organization.admins.manage`, `organization.members.manage`,
+`branch.members.manage`.
+
+| Code | Effect | Affected actor | Protected target | Permitted actor | Condition | Permissions |
+| --- | --- | --- | --- | --- | --- | --- |
+| R1 `admin_cannot_act_on_owner` | `actor_denied` | Organization Admin | Organization Owner | -- | always | the four |
+| R2 `admins_manage_admins_only_without_owner` | `actor_allowed_only_while` | Organization Admin | Organization Admin | -- | no Owner exists | the four |
+| R3 `only_owner_manages_admins_when_owner_exists` | `exclusive_to_permitted_actors` | Organization Admin | Organization Admin | Organization Owner | an Owner exists | the four |
+| R4 `owner_designation_cli_only` | `cli_only` | Organization Owner | -- | -- | always | `organization.owner.manage` |
+| R5 `manager_discount_cap_equals_staff_cap` | `discount_cap` | Branch Manager | -- | -- | always | `discounts.apply` |
+
+In words:
+
+- **R1** An Organization Admin may not manage, reset, deactivate, revoke,
+  transfer, remove or otherwise act against the Organization Owner through
+  any of the four.
+- **R2** An Organization Admin may act on another Organization Admin
+  through the four only while the organization has no Owner.
+- **R3** Once the organization has an Owner, only the Organization Owner
+  may manage Organization Admin targets through the four; an Organization
+  Admin may not, through any of them. R2 and R3 are the two sides of one
+  rule: same actor, same target, same four permissions, opposite
+  conditions.
+- **R4** `organization.owner.manage` is reserved Owner-only authority;
+  designation and transfer are CLI-only, and holding the permission implies
+  no web workflow.
+- **R5** A Branch Manager's discounts are capped at the staff cap.
+
+**A target-aware restriction must cover all four permissions.** One that
+named fewer could be bypassed through the others -- the defect the R3
+correction removed -- so such a restriction cannot be constructed
+(`PolicyDefinitionError`), and the module would refuse to import.
+
+Discount caps are also structured data on each policy (`DiscountCap`):
+`ADMIN_MAXIMUM` (100 %) for Owner and Admin, `STAFF_CAP` for Manager and
+Staff. A `discount_cap` restriction must concern `discounts.apply` only and
+name roles whose policy carries `STAFF_CAP`.
+
+## What this adds
+
+| Part | What it is |
+| --- | --- |
+| `app/utils/role_matrix.py` | `RolePolicy` (frozen, slotted: explicit `allowed` and `denied` frozensets plus `discount_cap`; refuses non-`Permission` members, mutable sets, overlap and any unclassified permission); `PolicyRestriction` (frozen, slotted, keyword-only: `code`, `effect`, `permissions`, `affected_actors`, `protected_targets`, `permitted_actors`, `condition`, `rule`, `enforcement`; refuses empty or loosely typed fields, global or customer roles, any enforcement other than `NOT_ENFORCED`, and every ambiguous shape -- a target-aware restriction without a target or without all four target-sensitive permissions, an exclusive one without a permitted actor or with an actor both permitted and affected, permitted actors on any other effect, "allowed only while" with no real condition, a target or condition on a rule that is not target-aware); `RestrictionEffect`, `RestrictionCondition`, `TARGET_AWARE_EFFECTS`; `ORGANIZATION_ROLE_POLICY` (OWNER, ADMIN) and `BRANCH_ROLE_POLICY` (MANAGER, STAFF) as `MappingProxyType`; `POLICY_RESTRICTIONS` (tuple, R1--R5); `TARGET_SENSITIVE_PERMISSIONS`. Every role lists all 26 permissions in full, as literals. **Import-time validation** with explicit `raise PolicyDefinitionError` (not `assert`, so it holds under `python -O`): both maps cover exactly their role enums; every permission has a scope; no branch role is allowed an organization-scoped permission; restriction codes are unique; every affected and permitted actor is allowed the permissions its restriction names; a discount-cap restriction is consistent with the policies' caps; none is enforced. A 27th permission therefore fails the import until every role classifies it. Imports only from `app.utils.permissions`; nothing imports it |
+| `tests/test_role_matrix.py` | See Verification |
+
+Named `*_POLICY`, not `*_GRANTS`, to stay distinct from the runtime maps
+that `permissions_for()` reads.
+
+## Not in O3.5
+
+Runtime authorization enforcement; any change to `COMPATIBILITY_GRANTS`,
+`ORGANIZATION_ROLE_GRANTS` / `BRANCH_ROLE_GRANTS` (still empty),
+`permissions_for()`, `has_permission()`, `require_permission()`,
+`permission_required()`, `auth_context_for_user()`,
+`current_auth_context()` or `app/services/auth_context.py`; route, service
+or decorator changes; global user roles; Owner designation, transfer or
+recovery; Manager assignment or recognition; target-aware checks (R1--R3)
+and per-role discount-cap enforcement (R5); HTTP handling of
+`WorkforceContextError`; workforce authorization shadow evaluation;
+migrations; UI or CLI.
+
+## Verification
+
+**CI: not yet run.** O3.5 is uncommitted, pending the product owner's
+review. The runs below are local, on SQLite only (Windows, Python 3.10.11,
+SQLite 3.40.1, `.venv_new`, 2026-11-17). Nothing in O3.5 is
+backend-specific; the MySQL evidence will be the CI run of record.
+
+| Run | Result |
+| --- | --- |
+| `tests/test_role_matrix.py` | **268 passed, 0 skipped, 0 failed** (about 2 s; no database; 121 before the R3 correction, 186 before the final correction pass): the catalog is still the reviewed 26; exact allowed and denied sets and counts for all four roles, against literal strings; every permission classified exactly once per role; strict hierarchy Staff ⊂ Manager ⊂ Admin ⊂ Owner; only `Permission` members anywhere; malformed policies (raw string, unknown identifier, mutable set, unclassified, overlap, loose cap) refused; the 8/18 scope split; branch roles never hold an organization-scoped permission, and organization roles hold all 18 branch permissions; each of the 12 Manager denials and the 4+1 Manager allowances; `organization.owner.manage` held by the Owner only; Owner holds all 26; **restrictions**: R1--R5 exactly, each checked field by field (effect, affected actors, permitted actors, protected targets, condition, permissions, `NOT_ENFORCED`); the effect and condition vocabularies; every actor holds the permissions its restriction names; R1, R2 and R3 each cover all four target-sensitive permissions and are the only target-aware restrictions; **R3**: each of the four permissions, the Admin as affected actor, the Owner as permitted actor, the Admin as protected target, the owner-exists condition, not attached to the Owner alone, and R2/R3 as the two sides of one rule; malformed restrictions (empty or loose fields, global or customer roles, mutable sets, raw permissions, enforced) and ambiguous shapes (no target, exclusive with nobody permitted, an actor both permitted and affected, permitted actors on a denial, "only while" with no condition, a target or condition on a CLI-only or cap rule) refused; a target-aware restriction missing any one of the four -- for each of the three target-aware effects -- or naming only one cannot be built; an ADMIN context (with or without the `admin` organization role) still holds all four target-sensitive permissions, and a context carrying the `owner` role gains nothing from R3; discount caps per role and R5 consistency; maps, policies, every restriction field and every set immutable, and R3 cannot be narrowed in place or by a copy; no customer role; compatibility-grant baseline and the intentional differences; no policy drops a permission its global role holds; **inertness** (below), including each of the 108 runtime context shapes checked individually against its exact expected permission set; import-time validation rejects an organization-scoped branch grant, a missing role, a restriction on an unheld permission, a target-aware actor that lacks the four, an inconsistent discount-cap restriction and duplicate codes; the O3.4 resolver still rejects stored `owner` (`unexpected_owner`; ADMIN, STAFF, owner + manager) and `manager` (`role_mismatch`; STAFF, ADMIN) and still accepts the O3.3 roles with only their compatibility grants |
+| Existing authorization and membership tests, unchanged: O3.1 baseline (both files), `tests/test_permissions.py`, `tests/test_auth_context.py`, `tests/test_membership_roles.py`, `tests/test_membership_roles_migration.py`, `tests/test_organization.py` | **1586 passed, 5 skipped** (the MySQL-only O2/O3.3 tests), re-run after the final correction pass. The first four files on their own: **1467 passed** (856 + 548 + 63), run before the R3 correction |
+| Full suite, SQLite, after the final correction pass | **3287 passed, 57 skipped, 0 failed** (O3.4: 3019 / 57 -- +268 passed, exactly the O3.5 test count; no new skips). Earlier rounds: 3140 / 57 (+121) before the R3 correction, 3205 / 57 (+186) after it |
+| `git diff --check` | clean |
+
+**Inertness evidence.**
+
+- **Nothing imports the policy.** A test scans every `.py` file under
+  `app/`, `scripts/`, `migrations/`, `run.py` and `config.py`. Only
+  `role_matrix.py` names `role_matrix`, either as text or in an import.
+- **Importing it changes nothing.** In a fresh interpreter (a subprocess,
+  so earlier test imports cannot mask an effect), `create_app("testing")`
+  runs and then *every* module under `app/` is imported, including ones
+  nothing imports yet such as `app.services.auth_context`. The policy is
+  still not loaded. A snapshot is then taken of `COMPATIBILITY_GRANTS`,
+  both role grant maps, `PERMISSION_SCOPES` and `permissions_for()` over all
+  108 role / organization-role / branch-role / active / approved
+  combinations. That snapshot is identical before and after importing the
+  policy.
+- **Runtime answers are unchanged.** In-process, each of the same 108
+  combinations is its own test case (`test_permissions_for_ignores_the_policy`,
+  108 parametrized cases) and is checked against its exact expected
+  permission set, written out from the approved eligibility rules rather
+  than taken from `AuthContext.is_eligible`: an inactive account holds
+  nothing; a customer holds nothing; an active STAFF account awaiting
+  approval holds nothing (pending approval applies to STAFF only); an active
+  ADMIN holds the ADMIN compatibility grants whatever `staff_approved` says;
+  otherwise the global role's compatibility grants. No membership role
+  changes the answer, and no context holds `organization.view` or
+  `organization.owner.manage`. A STAFF context carrying `manager` holds none
+  of the four Manager additions. Both runtime role grant maps are still
+  empty. (Before the final correction pass this test had 27 cases, active
+  and approved only; 18 of the 108 combinations -- active ADMIN and
+  CUSTOMER accounts with `staff_approved` false -- were covered only by the
+  fresh-interpreter before/after comparison, which shows that importing the
+  policy changes nothing but not that the value itself is right.)
+- **No protected file changed.** The SHA-256 of `app/utils/permissions.py`,
+  `app/services/auth_context.py`, `app/utils/__init__.py`,
+  `app/services/pricing.py`, `app/services/accounts.py`,
+  `tests/test_permissions.py`, `tests/test_auth_context.py` and both O3.1
+  baseline files is identical to `9631be6`. `git diff 9631be6` on tracked
+  files outside `docs/` is empty.
+
+**Mutation checks.** Each was a temporary edit applied by a scratch script
+outside the repository, with the tests run and the file restored; the
+restoration was verified by SHA-256. All 30 -- the 27 from the earlier
+rounds and 3 added for the 108-case check -- were run after the final
+correction pass, and every one was caught:
+
+| Mutation | Caught by |
+| --- | --- |
+| Policy values written into runtime `ORGANIZATION_ROLE_GRANTS` (`permissions.py`) | 58 failed: new inertness tests and the existing O3.2/O3.4 empty-map, never-widen and resolved-grants tests |
+| `app/services/auth_context.py` imports the policy | 2 failed (static scan and fresh-interpreter probe) |
+| Manager gets `refunds.create` while still listed as denied | import refused: overlap |
+| Manager's `refunds.create` moved from denied to allowed | 5 failed |
+| Manager's `menu.manage` moved from denied to allowed | import refused: organization-scoped permission for a branch role |
+| The same, with the import-time scope check disabled | 5 failed |
+| `audit.view` removed from the Owner | import refused: unclassified |
+| `organization.view` moved to the Admin's denied set | 2 failed |
+| Manager discount cap raised to `ADMIN_MAXIMUM` | import refused: R5's actor does not carry the staff cap |
+| An import-time check written as `assert` | 1 failed |
+| R2 marked enforced (new enum member) | import refused |
+| R1 drops `branch.members.manage` | import refused: must cover every target-sensitive permission |
+| The same, with the all-four check disabled | 16 failed |
+| **R3 narrowed to `organization.admins.manage` only (the original defect)** | import refused: must cover every target-sensitive permission |
+| The same, with the all-four check disabled | 21 failed |
+| R3 drops `accounts.manage` only, with the all-four check disabled | 19 failed |
+| R3 attached to the Owner only (Owner as affected actor, nobody permitted) | 5 failed |
+| R3's affected and permitted actors swapped (Owner limited, Admin permitted) | 5 failed |
+| R3 protects the Owner target instead of Admin targets | 3 failed |
+| R3's condition changed to `always` / to `no_owner_exists` | 3 failed each |
+| R3 names no permitted actor | import refused |
+| R3 permits the Admin as well as the Owner | import refused: an actor cannot be both permitted and affected |
+| R3 marked enforced (new enum member) | import refused |
+| R3's effect weakened to "allowed only while" | 3 failed |
+| R3 removed | 13 failed |
+| `PolicyRestriction` made mutable | 6 failed |
+| Active ADMIN with `staff_approved` false made ineligible (`AuthContext.is_eligible`) | 9 failed: the 9 such cases of the 108-case test |
+| Active STAFF with `staff_approved` false made eligible (`AuthContext.is_eligible`) | 9 failed: the 9 such cases |
+| Active ADMIN with `staff_approved` false loses one permission (`refunds.create`) in `permissions_for()` | 9 failed |
+
+The last three change only combinations that the earlier 27-case test did
+not check by value; the fresh-interpreter probe would not notice them
+either, because its before and after snapshots change together.
+
+During the first round of checks, the "a production module imports the
+policy" mutation was at first caught only by the static scan:
+`create_app()` never loads `app.services.auth_context`, which nothing
+imports yet. The fresh-interpreter probe was then extended to import every
+module under `app/`. It now catches that mutation as well.
+
+## Known limitations
+
+- **Nothing reads the policy.** It is a reviewed specification with tests,
+  not authorization.
+- **Owner and Manager cannot be recognized.** The O3.4 resolver refuses a
+  stored `owner` (`unexpected_owner`) and `manager` (`role_mismatch`), and
+  nothing can assign either role.
+- **Restrictions are prose plus structure.** R1--R3 depend on who the
+  target is and whether an Owner exists; R5 is a numeric limit inside
+  `pricing.apply_discount`, which today reads `users.role`. None can be
+  expressed by a permission identifier.
+- One installation holds one organization and one branch (O1), so
+  organization roles' branch permissions are not yet scoped to particular
+  branches.
+- **Immutability is Python's ordinary kind, not a security boundary.**
+  `RolePolicy` and `PolicyRestriction` are frozen, slotted dataclasses:
+  ordinary attribute assignment raises `FrozenInstanceError`, and no new
+  attribute can be added. `object.__setattr__` can still deliberately
+  overwrite an existing field of a frozen dataclass -- the same is true of
+  O3.2's `AuthContext` -- and module-level names (`ORGANIZATION_ROLE_POLICY`,
+  `POLICY_RESTRICTIONS` and the rest) can be rebound, as the tests' own
+  `monkeypatch` does. The nested collections and mappings (`frozenset`,
+  `tuple`, `MappingProxyType`) are immutable through their normal
+  interfaces. The policy is inert, so none of this affects access today; it
+  guards against mistakes, not against code running in the same process.
+  No custom immutability machinery was added, and `AuthContext` is
+  unchanged.
+
+## O3.6 dependencies and open architectural decisions
+
+Not decided in O3.5; each needs product-owner approval in a later milestone:
+
+1. Which `users.role` an Owner and a Branch Manager hold, and how the
+   resolver's fixed expected roles (`_EXPECTED_ORGANIZATION_ROLE` /
+   `_EXPECTED_BRANCH_ROLE`) change to admit them.
+2. Whether membership-role grants **add to** the global-role compatibility
+   grants (today's `permissions_for()` union) or **replace** them. Under the
+   union, a Manager whose global role is ADMIN would regain
+   `refunds.create`, contradicting the policy.
+3. How R1--R3 are enforced (a target-aware check in the account and
+   membership services) and how R5 is enforced (the cap chosen from the
+   membership role, not `users.role`).
+4. How a `WorkforceContextError` is answered over HTTP.
+5. Whether a shadow evaluation (policy vs. compatibility, reported, not
+   enforced) precedes enforcement.
+6. Owner designation and transfer (CLI-only), and Manager assignment.
+7. When the policy (or anything derived from it) starts deciding access,
+   whether frozen dataclasses and module-level constants remain enough:
+   `object.__setattr__` and rebinding a module-level name can both alter
+   them in-process (see Known limitations). The trust model -- in-process
+   code is trusted -- should be stated explicitly at that point, or a
+   stronger representation chosen.
+
+## Files changed
+
+New: `app/utils/role_matrix.py`, `tests/test_role_matrix.py`. Changed:
+`docs/PROJECT_PROGRESS.md`, `docs/STATUS.md`. No existing code or test
+changed; no migration; no CI workflow change (no backend-specific test, so
+no new guard).
+
+## Next
+
+O3.5 waits for the product owner's review of the implementation, then
+commit and CI verification. **O3.6 has not started** and needs its own
+approval. O3 as a whole is not complete.
+
+---

@@ -198,6 +198,11 @@ a client. CI reports these advisories without failing.
 | SQLite after O3.4 (local, Windows, Python 3.10; verified locally, not CI) | **3019 passed, 57 skipped, 0 failed** (O3.3: 2956 / 57 -- +63 passed, no new skips); `tests/test_auth_context.py` alone **63 passed** |
 | O3.4 CI verification | CI run `43855550400` on commit `13c0589262603b2ae66e03ca2bfae69a8531b6a5` -- **SUCCESS**, all four jobs green, 0 failed anywhere (https://github.com/ayushrijal83-ops/QuickJunction/actions/runs/43855550400). (The earlier run `43847697588` on `616af27` failed on MySQL -- 2 failed, 3044 passed, 30 skipped: the wrong-organization membership test read `user.id` inside the foreign-key helper, opening a session transaction whose REPEATABLE READ snapshot predated the helper's UPDATE; corrected in the test in `13c0589`, resolver unchanged.) |
 | MySQL 8.0 after O3.4 (CI `test-mysql`) | **3046 passed, 30 skipped, 0 failed** (O3.3: 2983 / 30 -- +63 passed, no new skips, so all 63 O3.4 tests ran on MySQL). O3.3 guard **84 passed**; O2 guard **45 passed**; O1 guard **6 passed**; concurrency guard **15 passed**; username-collation guard **3 passed**. The job took about 38.5 minutes against its 45-minute timeout (O3.3: about 27) |
+| O3.5 — workforce permission policy (defined and pinned, inert) | **Implemented locally; not yet committed or CI-verified** (2026-11-17, on `9631be6`; waits for the product owner's review). New `app/utils/role_matrix.py` defines the approved policy for the four membership roles as immutable data. `ORGANIZATION_ROLE_POLICY` (Owner, Admin) and `BRANCH_ROLE_POLICY` (Manager, Staff) each list all 26 permissions as allowed or denied, in full: **Owner 26 / 0, Organization Admin 25 / 1** (today's ADMIN set plus `organization.view`; denied `organization.owner.manage`), **Branch Manager 14 / 12** (the STAFF set plus `tables.manage`, `payments.view`, `reports.view`, `inventory.adjust`; denied refunds, invites, the branch profile, pricing settings and every organization-scoped permission), **Branch Staff 10 / 16** (exactly today's STAFF set). Branch roles hold only branch-scoped permissions. Discount caps: 100 % for Owner and Admin, the staff cap for Manager and Staff. Restrictions a permission cannot express are recorded as metadata marked **not enforced**: R1 an Admin cannot act on the Owner; R2 an Admin may act on another Admin only while no Owner exists; R3 once an Owner exists, only the Owner may manage Admin targets and an Admin may not (R1--R3 each cover all four target-sensitive permissions -- `accounts.manage`, `organization.admins.manage`, `organization.members.manage`, `branch.members.manage` -- so none can be bypassed through another); R4 Owner designation and transfer are CLI-only; R5 the Manager discount cap equals the staff cap. Each restriction names its affected actors, protected targets, permitted actors, condition and effect as data (R3: affected actor Organization Admin, permitted actor Organization Owner, protected target Organization Admin, condition "an Owner exists"). Validated at import with explicit exceptions. **Inert**: nothing imports it; `COMPATIBILITY_GRANTS`, the (still empty) runtime role grant maps, `permissions_for()`, `has_permission()`, the helpers and decorators, `auth_context_for_user()` / `current_auth_context()`, the O3.4 resolver (still refusing stored `owner` and `manager`), routes and services are unchanged, so no access changes. No migration. Details: `docs/PROJECT_PROGRESS.md` "O3.5" |
+| Migration head after O3.5 | **`9a3e6c1d7b54`** -- unchanged (no migration) |
+| Tests after O3.5 | +268: `tests/test_role_matrix.py` (no database, none backend-specific; includes all 108 runtime context shapes, each checked against its exact expected permission set). No new CI guard; no existing test changed |
+| SQLite after O3.5 (local, Windows, Python 3.10; verified locally, not CI) | **3287 passed, 57 skipped, 0 failed** (O3.4: 3019 / 57 -- +268 passed, no new skips); `tests/test_role_matrix.py` alone **268 passed**; all 30 mutation checks caught (run after the final correction pass) |
+| O3.5 CI verification | **Not yet run**: the change is uncommitted, pending review |
 | SQLite after O3.4 (CI `test-sqlite`) | **3014 passed, 62 skipped, 0 failed** (O3.3: 2951 / 62 -- +63 passed, no new skips) |
 | Redis and dependency audit after O3.4 | Redis job passed (23 Redis tests passed, guard requires exactly 23; in-memory limiter 60 and route 41 passed); `pip-audit` passed |
 | MySQL 8.0 locally after O3.4 | not run -- no `TEST_DATABASE_URL` on the development machine; the CI job above is the MySQL evidence |
@@ -256,7 +261,9 @@ organization/branch/installation identity; `hq_id` columns exist but nothing
 sets them) · any permission that depends on membership or on an
 organization or branch role (O2 records organization membership and branch
 assignment and O3.3 stores the roles on them, but they grant and revoke no
-access; there is no UI or write command for them, and no owner exists) ·
+access; there is no UI or write command for them, and no owner exists; O3.5
+defines the intended per-role policy in `app/utils/role_matrix.py`, but
+nothing reads it and none of its restrictions is enforced) ·
 permission-based authorization enforcement (O3.1 pins today's role-based
 checks in tests; O3.2 adds the permission layer, `app/utils/permissions.py`,
 but no route or service uses it yet; every gate still reads `users.role`,
@@ -296,8 +303,13 @@ Numbering follows `docs/PROJECT_PROGRESS.md` "Known issues".
 
 ## Next planned milestone
 
-**O3.5 — the next step of the approved O3 implementation sequence.** Not
-started; it waits for review and explicit approval. O3 replaces the
+**O3.5 — workforce permission policy.** Implemented locally (2026-11-17)
+and waiting for the product owner's review, then commit and CI
+verification; see the O3.5 row above. **O3.6 has not started** and needs
+its own approval; its open decisions (the global role of an Owner or
+Manager, whether role grants add to or replace the compatibility grants,
+enforcing R1--R3 and R5, HTTP handling of `WorkforceContextError`, shadow
+evaluation) are listed in `docs/PROJECT_PROGRESS.md` "O3.5". O3 replaces the
 global-role checks with organization and branch permissions in steps. O3.1
 (the regression baseline), O3.2 (the permission foundation), O3.3 (the
 membership roles, stored and backfilled without enforcement) and O3.4 (the
